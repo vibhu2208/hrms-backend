@@ -32,15 +32,18 @@ const employeeSchema = new mongoose.Schema({
   },
   gender: {
     type: String,
-    enum: ['male', 'female', 'other']
+    enum: ['', 'male', 'female', 'other'],
+    required: false
   },
   bloodGroup: {
     type: String,
-    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+    enum: ['', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
+    required: false
   },
   maritalStatus: {
     type: String,
-    enum: ['single', 'married', 'divorced', 'widowed']
+    enum: ['', 'single', 'married', 'divorced', 'widowed'],
+    required: false
   },
   alternatePhone: String,
   address: {
@@ -52,7 +55,8 @@ const employeeSchema = new mongoose.Schema({
   },
   department: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Department'
+    ref: 'Department',
+    required: [true, 'Department is required']
   },
   designation: {
     type: String,
