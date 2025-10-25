@@ -17,7 +17,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: CORS_ORIGIN
-        value: https://your-frontend-domain.com
+        value: https://hrms-frontend-blush.vercel.app
 
 databases:
   - name: hrms-mongodb
