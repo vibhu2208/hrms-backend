@@ -99,6 +99,47 @@ const candidateSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  // AI Analysis Fields
+  aiAnalysis: {
+    matchScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null
+    },
+    analysisDate: Date,
+    skillsMatch: {
+      matched: [String],
+      missing: [String],
+      additional: [String],
+      matchPercentage: Number
+    },
+    experienceMatch: {
+      isMatch: Boolean,
+      candidateYears: Number,
+      requiredYears: String,
+      score: Number
+    },
+    keyHighlights: [String],
+    weaknesses: [String],
+    overallFit: {
+      type: String,
+      enum: ['excellent', 'good', 'average', 'poor', null],
+      default: null
+    },
+    resumeInsights: {
+      totalExperience: String,
+      keySkills: [String],
+      education: [String],
+      certifications: [String],
+      projects: [String]
+    },
+    semanticScore: Number, // Embedding similarity score
+    isAnalyzed: {
+      type: Boolean,
+      default: false
+    }
   }
 }, {
   timestamps: true

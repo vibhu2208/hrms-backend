@@ -11,6 +11,9 @@
     "seed:departments": "node seed-departments.js",
     "seed:employees": "node seed-employees.js",
     "seed:all": "node seed-departments.js && node seed-employees.js"
+    "seed:applicants": "node src/utils/seedApplicants.js",
+    "seed:job": "node src/utils/seedApplicantsToJob.js",
+    "migrate:onboarding": "node src/utils/migrateShortlistedToOnboarding.js"
   },
   "keywords": ["hrms", "hr", "management"],
   "author": "",
@@ -27,7 +30,10 @@
     "morgan": "^1.10.0",
     "exceljs": "^4.4.0",
     "aws-sdk": "^2.1498.0",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "axios": "^1.6.0",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.6.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
