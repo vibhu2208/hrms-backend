@@ -8,6 +8,7 @@ const {
   updateStage,
   scheduleInterview,
   convertToEmployee,
+  moveToOnboarding,
   deleteCandidate
 } = require('../controllers/candidateController');
 const { protect, authorize } = require('../middlewares/auth');
@@ -22,6 +23,7 @@ router.route('/')
 router.put('/:id/stage', updateStage);
 router.post('/:id/interview', scheduleInterview);
 router.post('/:id/convert', convertToEmployee);
+router.post('/:id/onboarding', moveToOnboarding);
 
 router.route('/:id')
   .get(getCandidate)
