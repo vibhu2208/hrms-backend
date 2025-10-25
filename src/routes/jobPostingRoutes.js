@@ -7,7 +7,8 @@ const {
   updateJobPosting,
   publishJobPosting,
   closeJobPosting,
-  deleteJobPosting
+  deleteJobPosting,
+  getJobApplicants
 } = require('../controllers/jobPostingController');
 const { protect, authorize } = require('../middlewares/auth');
 
@@ -19,6 +20,7 @@ router.route('/')
 
 router.put('/:id/publish', authorize('admin', 'hr'), publishJobPosting);
 router.put('/:id/close', authorize('admin', 'hr'), closeJobPosting);
+router.get('/:id/applicants', getJobApplicants);
 
 router.route('/:id')
   .get(getJobPosting)
