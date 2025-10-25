@@ -1,4 +1,5 @@
 const JobPosting = require('../models/JobPosting');
+const Candidate = require('../models/Candidate');
 
 exports.getJobPostings = async (req, res) => {
   try {
@@ -97,6 +98,52 @@ exports.deleteJobPosting = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Job posting not found' });
     }
     res.status(200).json({ success: true, message: 'Job posting deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getJobApplicants = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stage, status, search } = req.query;
+
+    // Verify job posting exists
+    const job = await JobPosting.findById(id);
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Job posting not found' });
+    }
+
+    // Build query for candidates
+    let query = { appliedFor: id };
+    
+    if (stage) query.stage = stage;
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { candidateCode: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const applicants = await Candidate.find(query)
+      .populate('referredBy', 'firstName lastName')
+      .populate('interviews.interviewer', 'firstName lastName')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ 
+      success: true, 
+      count: applicants.length, 
+      job: {
+        id: job._id,
+        title: job.title,
+        department: job.department,
+        status: job.status
+      },
+      data: applicants 
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -1,5 +1,6 @@
 const Candidate = require('../models/Candidate');
 const Employee = require('../models/Employee');
+const Onboarding = require('../models/Onboarding');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -70,14 +71,44 @@ exports.updateCandidate = async (req, res) => {
 exports.updateStage = async (req, res) => {
   try {
     const { stage } = req.body;
-    const candidate = await Candidate.findById(req.params.id);
+    const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
 
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
+    const previousStage = candidate.stage;
     candidate.stage = stage;
     await candidate.save();
+
+    // Automatically create onboarding when candidate is shortlisted
+    if (stage === 'shortlisted' && previousStage !== 'shortlisted') {
+      // Check if already in onboarding
+      const existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+      
+      if (!existingOnboarding) {
+        try {
+          // Create onboarding record
+          await Onboarding.create({
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            candidatePhone: candidate.phone,
+            position: candidate.appliedFor?.title || candidate.currentDesignation || 'Position',
+            department: candidate.appliedFor?.department,
+            joiningDate: candidate.offerDetails?.joiningDate,
+            stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
+            currentStage: 'interview1',
+            status: 'in-progress',
+            notes: `Auto-created from recruitment. Applied for: ${candidate.appliedFor?.title || 'N/A'}`
+          });
+
+          console.log(`✅ Onboarding created automatically for ${candidate.firstName} ${candidate.lastName}`);
+        } catch (onboardingError) {
+          console.error('Error creating onboarding:', onboardingError.message);
+          // Don't fail the stage update if onboarding creation fails
+        }
+      }
+    }
 
     res.status(200).json({ success: true, message: 'Stage updated successfully', data: candidate });
   } catch (error) {
@@ -146,6 +177,60 @@ exports.convertToEmployee = async (req, res) => {
       success: true, 
       message: 'Candidate converted to employee successfully', 
       data: employee 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.moveToOnboarding = async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
+
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    // Check if candidate is shortlisted or offer-accepted
+    if (!['shortlisted', 'offer-accepted', 'offer-extended'].includes(candidate.stage)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Only shortlisted or offer-accepted candidates can be moved to onboarding' 
+      });
+    }
+
+    // Check if already in onboarding
+    const existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+    if (existingOnboarding) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Candidate is already in onboarding process' 
+      });
+    }
+
+    // Create onboarding record
+    const onboarding = await Onboarding.create({
+      candidateName: `${candidate.firstName} ${candidate.lastName}`,
+      candidateEmail: candidate.email,
+      candidatePhone: candidate.phone,
+      position: candidate.appliedFor?.title || candidate.currentDesignation || 'Position',
+      department: candidate.appliedFor?.department,
+      joiningDate: candidate.offerDetails?.joiningDate || req.body.joiningDate,
+      stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
+      currentStage: 'interview1',
+      status: 'in-progress',
+      notes: `Moved from recruitment. Applied for: ${candidate.appliedFor?.title || 'N/A'}`
+    });
+
+    // Update candidate stage
+    candidate.stage = 'joined';
+    candidate.status = 'active';
+    await candidate.save();
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Candidate moved to onboarding successfully', 
+      data: onboarding 
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
