@@ -116,15 +116,19 @@ const config = {
   }
 };
 
-// Log configuration in development
+// Log configuration (always log in production for debugging)
+console.log('🔧 Backend Configuration:', {
+  environment: config.env,
+  port: config.port,
+  backendUrl: config.backendUrl,
+  allowedOrigins: config.allowedOrigins,
+  nodeEnv: process.env.NODE_ENV,
+  corsOriginEnv: process.env.CORS_ORIGIN,
+  frontendUrlEnv: process.env.FRONTEND_URL
+});
+
 if (config.isDevelopment) {
-  console.log('🔧 Backend Configuration:', {
-    environment: config.env,
-    port: config.port,
-    backendUrl: config.backendUrl,
-    allowedOrigins: config.allowedOrigins,
-    mongoUri: config.mongoUri.replace(/\/\/.*@/, '//***:***@') // Hide credentials
-  });
+  console.log('📊 Database:', config.mongoUri.replace(/\/\/.*@/, '//***:***@'));
 }
 
 module.exports = config;
