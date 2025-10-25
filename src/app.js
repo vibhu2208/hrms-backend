@@ -4,6 +4,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const connectDB = require('./config/database');
 const errorHandler = require('./middlewares/errorHandler');
+const apiConfig = require('./config/api.config');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -38,25 +39,8 @@ startCronJobs();
 
 const app = express();
 
-// Middleware
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://hrms-frontend-blush.vercel.app'
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
+// Middleware - Use centralized CORS configuration
+app.use(cors(apiConfig.corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -109,10 +93,10 @@ app.use((req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+app.listen(apiConfig.port, () => {
+  console.log(`🚀 Server running in ${apiConfig.env} mode on port ${apiConfig.port}`);
+  console.log(`📡 API Base URL: ${apiConfig.backendUrl}`);
+  console.log(`🌐 Allowed Origins: ${apiConfig.allowedOrigins.join(', ')}`);
 });
 
 module.exports = app;
