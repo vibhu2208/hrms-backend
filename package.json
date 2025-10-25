@@ -8,6 +8,9 @@
     "dev": "nodemon src/app.js",
     "build": "echo 'No build step required'",
     "test": "echo \"Error: no test specified\" && exit 1",
+    "seed:departments": "node seed-departments.js",
+    "seed:employees": "node seed-employees.js",
+    "seed:all": "node seed-departments.js && node seed-employees.js"
     "seed:applicants": "node src/utils/seedApplicants.js",
     "seed:job": "node src/utils/seedApplicantsToJob.js",
     "migrate:onboarding": "node src/utils/migrateShortlistedToOnboarding.js"
