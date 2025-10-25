@@ -35,7 +35,7 @@ PORT=10000
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/hrms
 JWT_SECRET=your-super-secret-jwt-key-here
 JWT_EXPIRE=30d
-CORS_ORIGIN=https://your-frontend-domain.com
+CORS_ORIGIN=https://hrms-frontend-blush.vercel.app
 ```
 
 ### Step 5: Database Setup
@@ -69,8 +69,23 @@ CORS_ORIGIN=https://your-frontend-domain.com
 
 ### Update CORS settings in app.js:
 ```javascript
+// CORS is now configured to support multiple origins by default
+const allowedOrigins = [
+  'http://localhost:5173',        // Development
+  'https://hrms-frontend-blush.vercel.app'  // Production
+];
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://your-frontend-domain.com',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 ```
