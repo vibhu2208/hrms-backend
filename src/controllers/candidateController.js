@@ -1,6 +1,14 @@
 const Candidate = require('../models/Candidate');
 const Employee = require('../models/Employee');
 const Onboarding = require('../models/Onboarding');
+const { 
+  sendInterviewNotification,
+  sendApplicationReceivedEmail,
+  sendShortlistedEmail,
+  sendInterviewCompletedEmail,
+  sendOfferExtendedEmail,
+  sendRejectionEmail
+} = require('../services/emailService');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -50,6 +58,19 @@ exports.getCandidate = async (req, res) => {
 exports.createCandidate = async (req, res) => {
   try {
     const candidate = await Candidate.create(req.body);
+    
+    // Send application received email
+    if (candidate.email) {
+      await candidate.populate('appliedFor', 'title');
+      
+      sendApplicationReceivedEmail({
+        candidateName: `${candidate.firstName} ${candidate.lastName}`,
+        candidateEmail: candidate.email,
+        position: candidate.appliedFor?.title || 'Position',
+        companyName: req.body.companyName || 'Our Company'
+      }).catch(err => console.error('Failed to send application email:', err.message));
+    }
+    
     res.status(201).json({ success: true, message: 'Candidate created successfully', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -81,6 +102,42 @@ exports.updateStage = async (req, res) => {
     candidate.stage = stage;
     await candidate.save();
 
+    // Send emails based on stage change
+    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+    const position = candidate.appliedFor?.title || 'Position';
+    const companyName = req.body.companyName || 'Our Company';
+
+    // Send shortlisted email
+    if (stage === 'shortlisted' && previousStage !== 'shortlisted') {
+      sendShortlistedEmail({
+        candidateName,
+        candidateEmail: candidate.email,
+        position,
+        companyName
+      }).catch(err => console.error('Failed to send shortlisted email:', err.message));
+    }
+
+    // Send offer extended email
+    if (stage === 'offer-extended' && previousStage !== 'offer-extended') {
+      sendOfferExtendedEmail({
+        candidateName,
+        candidateEmail: candidate.email,
+        position,
+        joiningDate: candidate.offerDetails?.joiningDate,
+        companyName
+      }).catch(err => console.error('Failed to send offer email:', err.message));
+    }
+
+    // Send rejection email
+    if (stage === 'rejected' && previousStage !== 'rejected') {
+      sendRejectionEmail({
+        candidateName,
+        candidateEmail: candidate.email,
+        position,
+        companyName
+      }).catch(err => console.error('Failed to send rejection email:', err.message));
+    }
+
     // Automatically create onboarding when candidate is shortlisted
     if (stage === 'shortlisted' && previousStage !== 'shortlisted') {
       // Check if already in onboarding
@@ -101,12 +158,7 @@ exports.updateStage = async (req, res) => {
             status: 'in-progress',
             notes: `Auto-created from recruitment. Applied for: ${candidate.appliedFor?.title || 'N/A'}`
           });
-
-          console.log(`✅ Onboarding created automatically for ${candidate.firstName} ${candidate.lastName}`);
-        } catch (onboardingError) {
-          console.error('Error creating onboarding:', onboardingError.message);
-          // Don't fail the stage update if onboarding creation fails
-        }
+        } catch (onboardingError) { }
       }
     }
 
@@ -119,7 +171,9 @@ exports.updateStage = async (req, res) => {
 exports.scheduleInterview = async (req, res) => {
   try {
     const { interviewType, round, scheduledDate, scheduledTime, meetingLink, meetingPlatform, interviewer } = req.body;
-    const candidate = await Candidate.findById(req.params.id);
+    const candidate = await Candidate.findById(req.params.id)
+      .populate('appliedFor', 'title')
+      .populate('interviews.interviewer', 'firstName lastName');
 
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
@@ -157,7 +211,42 @@ exports.scheduleInterview = async (req, res) => {
 
     await candidate.save();
 
-    res.status(200).json({ success: true, message: 'Interview scheduled successfully', data: candidate });
+    // Send interview notification email automatically
+    const newInterview = candidate.interviews[candidate.interviews.length - 1];
+    const companyName = req.body.companyName || 'TechCorp Solutions';
+    
+    try {
+      await sendInterviewNotification({
+        candidateName: `${candidate.firstName} ${candidate.lastName}`,
+        candidateEmail: candidate.email,
+        interviewType: interviewType || 'Technical',
+        interviewDate: scheduledDate,
+        interviewTime: scheduledTime,
+        meetingLink: meetingLink,
+        meetingPlatform: meetingPlatform || 'Google Meet',
+        interviewerName: null, // Will be populated if interviewer data available
+        position: candidate.appliedFor?.title || 'Position',
+        companyName: companyName
+      });
+      
+      // Update notification tracking
+      candidate.timeline.push({
+        action: 'Interview Email Sent',
+        description: `Interview notification email sent for ${interviewType || 'Technical'} interview`,
+        performedBy: req.user?._id,
+        metadata: { 
+          interviewId: newInterview._id,
+          emailSent: true
+        }
+      });
+      
+      await candidate.save();
+    } catch (emailError) {
+      console.error('Failed to send interview notification email:', emailError);
+      // Don't fail the interview scheduling if email fails
+    }
+
+    res.status(200).json({ success: true, message: 'Interview scheduled successfully and notification sent', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -297,6 +386,16 @@ exports.updateInterviewFeedback = async (req, res) => {
       if (status === 'completed') {
         interview.completedAt = new Date();
         candidate.stage = 'interview-completed';
+        
+        // Send interview completed email
+        await candidate.populate('appliedFor', 'title');
+        sendInterviewCompletedEmail({
+          candidateName: `${candidate.firstName} ${candidate.lastName}`,
+          candidateEmail: candidate.email,
+          interviewType: interview.interviewType || 'Interview',
+          position: candidate.appliedFor?.title || 'Position',
+          companyName: req.body.companyName || 'Our Company'
+        }).catch(err => console.error('Failed to send interview completed email:', err.message));
       }
     }
 
@@ -321,7 +420,7 @@ exports.sendNotification = async (req, res) => {
     const { id } = req.params;
     const { type, notes } = req.body; // type: 'interviewEmail', 'interviewCall', 'offerEmail', 'rejectionEmail'
 
-    const candidate = await Candidate.findById(id);
+    const candidate = await Candidate.findById(id).populate('appliedFor', 'title');
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
@@ -330,18 +429,39 @@ exports.sendNotification = async (req, res) => {
       candidate.notifications = {};
     }
 
+    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+    const position = candidate.appliedFor?.title || 'Position';
+    const companyName = req.body.companyName || 'TechCorp Solutions';
+
     // Update notification status
     if (type === 'interviewEmail') {
-      candidate.notifications.interviewEmail = {
-        sent: true,
-        sentAt: new Date(),
-        sentBy: req.user?._id
-      };
-      candidate.timeline.push({
-        action: 'Interview Email Sent',
-        description: 'Interview notification email sent to candidate',
-        performedBy: req.user?._id
-      });
+      // Send shortlisted email
+      try {
+        await sendShortlistedEmail({
+          candidateName,
+          candidateEmail: candidate.email,
+          position,
+          companyName
+        });
+        
+        candidate.notifications.interviewEmail = {
+          sent: true,
+          sentAt: new Date(),
+          sentBy: req.user?._id
+        };
+        candidate.timeline.push({
+          action: 'Shortlisted Email Sent',
+          description: 'Shortlisted notification email sent to candidate',
+          performedBy: req.user?._id
+        });
+      } catch (emailError) {
+        console.error('Failed to send shortlisted email:', emailError);
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Failed to send email notification',
+          error: emailError.message 
+        });
+      }
     } else if (type === 'interviewCall') {
       candidate.notifications.interviewCall = {
         completed: true,
@@ -392,7 +512,7 @@ exports.updateHRCall = async (req, res) => {
     const { id } = req.params;
     const { status, scheduledDate, completedDate, summary, decision } = req.body;
 
-    const candidate = await Candidate.findById(id);
+    const candidate = await Candidate.findById(id).populate('appliedFor', 'title');
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
@@ -436,12 +556,91 @@ exports.updateHRCall = async (req, res) => {
       metadata: { status, decision }
     });
 
-    // Handle decision outcomes
+    // Handle decision outcomes and send emails
+    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+    const position = candidate.appliedFor?.title || 'Position';
+    const companyName = req.body.companyName || 'TechCorp Solutions';
+
     if (decision === 'move-to-onboarding') {
       candidate.stage = 'offer-accepted';
+      
+      // Send offer extended email
+      try {
+        await sendOfferExtendedEmail({
+          candidateName,
+          candidateEmail: candidate.email,
+          position,
+          joiningDate: candidate.offerDetails?.joiningDate,
+          companyName
+        });
+        
+        candidate.timeline.push({
+          action: 'Offer Email Sent',
+          description: 'Offer letter email sent to candidate',
+          performedBy: req.user?._id
+        });
+      } catch (emailError) {
+        console.error('Failed to send offer email:', emailError);
+      }
+      
+      // Create onboarding record if it doesn't exist
+      const existingOnboarding = await Onboarding.findOne({ 
+        $or: [
+          { candidateEmail: candidate.email },
+          { candidate: candidate._id }
+        ]
+      });
+      
+      if (!existingOnboarding) {
+        try {
+          const onboardingData = {
+            candidate: candidate._id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            candidatePhone: candidate.phone,
+            position: candidate.appliedFor?.title || candidate.currentDesignation || 'Position',
+            department: candidate.appliedFor?.department,
+            joiningDate: candidate.offerDetails?.joiningDate,
+            stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
+            currentStage: 'interview1',
+            status: 'in-progress'
+          };
+          
+          const onboarding = await Onboarding.create(onboardingData);
+          
+          // Add to timeline
+          candidate.timeline.push({
+            action: 'Moved to Onboarding',
+            description: `Candidate moved to onboarding process`,
+            performedBy: req.user?._id,
+            metadata: { onboardingId: onboarding._id }
+          });
+        } catch (onboardingError) {
+          console.error('Failed to create onboarding:', onboardingError);
+          // Don't fail the HR call update if onboarding creation fails
+        }
+      }
     } else if (decision === 'reject') {
       candidate.stage = 'rejected';
       candidate.status = 'rejected';
+      
+      // Send rejection email
+      try {
+        await sendRejectionEmail({
+          candidateName,
+          candidateEmail: candidate.email,
+          position,
+          companyName
+        });
+        
+        candidate.timeline.push({
+          action: 'Rejection Email Sent',
+          description: 'Rejection notification sent to candidate',
+          performedBy: req.user?._id
+        });
+      } catch (emailError) {
+        console.error('Failed to send rejection email:', emailError);
+      }
     }
 
     await candidate.save();
@@ -475,5 +674,126 @@ exports.getCandidateTimeline = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Send interview notification email to candidate
+ * @route POST /api/candidates/:id/send-interview-email
+ * @access Private (HR/Admin)
+ */
+exports.sendInterviewEmail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { interviewId, companyName } = req.body;
+
+    // Find candidate and populate job details
+    const candidate = await Candidate.findById(id)
+      .populate('appliedFor', 'title')
+      .populate('interviews.interviewer', 'firstName lastName');
+
+    if (!candidate) {
+      return res.status(404).json({
+        success: false,
+        message: 'Candidate not found'
+      });
+    }
+
+    // Find the specific interview
+    const interview = candidate.interviews.id(interviewId);
+    
+    if (!interview) {
+      return res.status(404).json({
+        success: false,
+        message: 'Interview not found'
+      });
+    }
+
+    // Check if interview is scheduled
+    if (interview.status !== 'scheduled') {
+      return res.status(400).json({
+        success: false,
+        message: 'Interview must be in scheduled status to send notification'
+      });
+    }
+
+    // Prepare interviewer name
+    const interviewerName = interview.interviewer && interview.interviewer.length > 0
+      ? interview.interviewer.map(i => `${i.firstName} ${i.lastName}`).join(', ')
+      : null;
+
+    // Send email
+    try {
+      const emailResult = await sendInterviewNotification({
+        candidateName: `${candidate.firstName} ${candidate.lastName}`,
+        candidateEmail: candidate.email,
+        interviewType: interview.interviewType || 'Interview',
+        interviewDate: interview.scheduledDate,
+        interviewTime: interview.scheduledTime,
+        meetingLink: interview.meetingLink,
+        meetingPlatform: interview.meetingPlatform,
+        interviewerName: interviewerName,
+        position: candidate.appliedFor?.title || 'Position',
+        companyName: companyName || 'Our Company'
+      });
+
+      // Update notification status
+      if (!candidate.notifications) {
+        candidate.notifications = {};
+      }
+      if (!candidate.notifications.interviewEmail) {
+        candidate.notifications.interviewEmail = {};
+      }
+      
+      candidate.notifications.interviewEmail.sent = true;
+      candidate.notifications.interviewEmail.sentAt = new Date();
+      candidate.notifications.interviewEmail.sentBy = req.user?._id;
+
+      // Add to timeline
+      candidate.timeline.push({
+        action: 'Interview Email Sent',
+        description: `Interview notification email sent for ${interview.interviewType} interview`,
+        performedBy: req.user?._id,
+        metadata: { 
+          interviewId: interview._id,
+          emailSent: true,
+          messageId: emailResult.messageId
+        }
+      });
+
+      await candidate.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Interview notification email sent successfully',
+        data: {
+          emailSent: true,
+          recipient: candidate.email,
+          messageId: emailResult.messageId,
+          interview: {
+            type: interview.interviewType,
+            date: interview.scheduledDate,
+            time: interview.scheduledTime
+          }
+        }
+      });
+
+    } catch (emailError) {
+      console.error('Failed to send interview email:', emailError);
+      
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send interview notification email',
+        error: emailError.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Error in sendInterviewEmail:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process interview email request',
+      error: error.message
+    });
   }
 };

@@ -32,6 +32,7 @@ const reportRoutes = require('./routes/reportRoutes');
 const aiAnalysisRoutes = require('./routes/aiAnalysisRoutes');
 const publicJobRoutes = require('./routes/publicJobRoutes');
 const talentPoolRoutes = require('./routes/talentPoolRoutes');
+const employeeDashboardRoutes = require('./routes/employeeDashboard');
 
 // Connect to database
 connectDB();
@@ -91,6 +92,7 @@ app.use('/api/exit-process', exitProcessRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai-analysis', aiAnalysisRoutes);
 app.use('/api/talent-pool', talentPoolRoutes);
+app.use('/api/employee', employeeDashboardRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
