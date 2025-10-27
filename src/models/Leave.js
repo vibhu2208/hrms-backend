@@ -8,7 +8,7 @@ const leaveSchema = new mongoose.Schema({
   },
   leaveType: {
     type: String,
-    enum: ['sick', 'casual', 'earned', 'maternity', 'paternity', 'unpaid'],
+    enum: ['sick', 'casual', 'earned', 'maternity', 'paternity', 'unpaid', 'compensatory'],
     required: true
   },
   startDate: {
@@ -23,6 +23,15 @@ const leaveSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  halfDay: {
+    type: Boolean,
+    default: false
+  },
+  halfDayPeriod: {
+    type: String,
+    enum: ['first-half', 'second-half'],
+    required: function() { return this.halfDay; }
+  },
   reason: {
     type: String,
     required: true
@@ -34,7 +43,7 @@ const leaveSchema = new mongoose.Schema({
   },
   approvedBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Employee'
+    ref: 'User'
   },
   approvedAt: {
     type: Date
@@ -44,8 +53,23 @@ const leaveSchema = new mongoose.Schema({
   },
   documents: [{
     name: String,
-    url: String
-  }]
+    url: String,
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  handoverNotes: {
+    type: String
+  },
+  emergencyContact: {
+    name: String,
+    phone: String
+  },
+  isUrgent: {
+    type: Boolean,
+    default: false
+  }
 }, {
   timestamps: true
 });
