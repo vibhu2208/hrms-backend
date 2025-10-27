@@ -13,7 +13,12 @@
     "seed:all": "node seed-departments.js && node seed-employees.js",
     "seed:applicants": "node src/utils/seedApplicants.js",
     "seed:job": "node src/utils/seedApplicantsToJob.js",
-    "migrate:onboarding": "node src/utils/migrateShortlistedToOnboarding.js"
+    "migrate:onboarding": "node src/utils/migrateShortlistedToOnboarding.js",
+    "fix:onboarding": "node src/utils/fixMissingOnboarding.js",
+    "test:email": "node src/utils/testEmail.js",
+    "test:interview-email": "node src/utils/testInterviewEmail.js",
+    "seed:candidate": "node src/utils/seedSingleCandidate.js",
+    "send:application-email": "node src/utils/sendMissingApplicationEmail.js"
   },
   "keywords": [
     "hrms",
@@ -38,6 +43,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
+    "nodemailer": "^7.0.10",
     "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
