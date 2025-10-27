@@ -103,8 +103,15 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Update last login
+    // Update last login and first login flag
     user.lastLogin = Date.now();
+    
+    // Check if this is first login
+    const isFirstLogin = user.isFirstLogin;
+    if (isFirstLogin) {
+      user.isFirstLogin = false;
+    }
+    
     await user.save();
 
     // Generate token
@@ -118,7 +125,9 @@ exports.login = async (req, res) => {
           id: user._id,
           email: user.email,
           role: user.role,
-          employee: user.employeeId
+          employee: user.employeeId,
+          isFirstLogin: isFirstLogin,
+          mustChangePassword: user.mustChangePassword
         },
         token
       }
@@ -157,6 +166,14 @@ exports.updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
+    // Validate new password
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 8 characters long'
+      });
+    }
+
     const user = await User.findById(req.user.id).select('+password');
 
     // Check current password
@@ -169,7 +186,10 @@ exports.updatePassword = async (req, res) => {
       });
     }
 
+    // Update password and clear mustChangePassword flag
     user.password = newPassword;
+    user.mustChangePassword = false;
+    user.passwordChangedAt = Date.now();
     await user.save();
 
     const token = generateToken(user._id);
