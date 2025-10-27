@@ -71,14 +71,97 @@ const candidateSchema = new mongoose.Schema({
     default: 'applied'
   },
   interviews: [{
+    interviewType: {
+      type: String,
+      enum: ['Technical', 'HR', 'Managerial', 'Cultural Fit', 'Final Round', 'Other'],
+      default: 'Technical'
+    },
     round: String,
     scheduledDate: Date,
-    interviewer: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+    scheduledTime: String,
+    meetingLink: String,
+    meetingPlatform: {
+      type: String,
+      enum: ['Google Meet', 'Microsoft Teams', 'Zoom', 'Phone', 'In-Person', 'Other'],
+      default: 'Google Meet'
+    },
+    interviewer: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }],
     feedback: String,
-    rating: Number,
+    rating: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    decision: {
+      type: String,
+      enum: ['selected', 'rejected', 'on-hold', 'pending'],
+      default: 'pending'
+    },
+    notes: String,
     status: {
       type: String,
-      enum: ['scheduled', 'completed', 'cancelled', 'no-show']
+      enum: ['scheduled', 'completed', 'cancelled', 'no-show', 'rescheduled'],
+      default: 'scheduled'
+    },
+    completedAt: Date,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  // Notification tracking
+  notifications: {
+    interviewEmail: {
+      sent: { type: Boolean, default: false },
+      sentAt: Date,
+      sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }
+    },
+    interviewCall: {
+      completed: { type: Boolean, default: false },
+      completedAt: Date,
+      completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+      notes: String
+    },
+    offerEmail: {
+      sent: { type: Boolean, default: false },
+      sentAt: Date,
+      sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }
+    },
+    rejectionEmail: {
+      sent: { type: Boolean, default: false },
+      sentAt: Date,
+      sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }
+    }
+  },
+  // HR Call tracking
+  hrCall: {
+    status: {
+      type: String,
+      enum: ['pending', 'completed', 'scheduled'],
+      default: 'pending'
+    },
+    scheduledDate: Date,
+    completedDate: Date,
+    summary: String,
+    decision: {
+      type: String,
+      enum: ['move-to-onboarding', 'reject', 'on-hold', 'pending'],
+      default: 'pending'
+    },
+    conductedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' }
+  },
+  // Timeline/Activity Log
+  timeline: [{
+    action: {
+      type: String,
+      required: true
+    },
+    description: String,
+    performedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+    metadata: mongoose.Schema.Types.Mixed,
+    timestamp: {
+      type: Date,
+      default: Date.now
     }
   }],
   offerDetails: {

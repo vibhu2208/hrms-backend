@@ -118,21 +118,43 @@ exports.updateStage = async (req, res) => {
 
 exports.scheduleInterview = async (req, res) => {
   try {
-    const { round, scheduledDate, interviewer } = req.body;
+    const { interviewType, round, scheduledDate, scheduledTime, meetingLink, meetingPlatform, interviewer } = req.body;
     const candidate = await Candidate.findById(req.params.id);
 
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
-    candidate.interviews.push({
+    // Validation: Email must be sent before scheduling interview
+    if (!candidate.notifications?.interviewEmail?.sent) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Interview notification email must be sent before scheduling an interview' 
+      });
+    }
+
+    const interviewData = {
+      interviewType: interviewType || 'Technical',
       round,
       scheduledDate,
-      interviewer,
+      scheduledTime,
+      meetingLink,
+      meetingPlatform: meetingPlatform || 'Google Meet',
+      interviewer: Array.isArray(interviewer) ? interviewer : [interviewer],
       status: 'scheduled'
+    };
+
+    candidate.interviews.push(interviewData);
+    candidate.stage = 'interview-scheduled';
+    
+    // Add to timeline
+    candidate.timeline.push({
+      action: 'Interview Scheduled',
+      description: `${interviewType || 'Technical'} interview scheduled for ${new Date(scheduledDate).toLocaleDateString()}`,
+      performedBy: req.user?._id,
+      metadata: { interviewType, round, scheduledDate }
     });
 
-    candidate.stage = 'interview-scheduled';
     await candidate.save();
 
     res.status(200).json({ success: true, message: 'Interview scheduled successfully', data: candidate });
@@ -244,6 +266,213 @@ exports.deleteCandidate = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
     res.status(200).json({ success: true, message: 'Candidate deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Update interview feedback
+exports.updateInterviewFeedback = async (req, res) => {
+  try {
+    const { candidateId, interviewId } = req.params;
+    const { feedback, rating, decision, notes, status } = req.body;
+
+    const candidate = await Candidate.findById(candidateId);
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    const interview = candidate.interviews.id(interviewId);
+    if (!interview) {
+      return res.status(404).json({ success: false, message: 'Interview not found' });
+    }
+
+    // Update interview details
+    if (feedback !== undefined) interview.feedback = feedback;
+    if (rating !== undefined) interview.rating = rating;
+    if (decision !== undefined) interview.decision = decision;
+    if (notes !== undefined) interview.notes = notes;
+    if (status !== undefined) {
+      interview.status = status;
+      if (status === 'completed') {
+        interview.completedAt = new Date();
+        candidate.stage = 'interview-completed';
+      }
+    }
+
+    // Add to timeline
+    candidate.timeline.push({
+      action: 'Interview Feedback Added',
+      description: `Feedback submitted for ${interview.interviewType} interview - Decision: ${decision || 'Pending'}`,
+      performedBy: req.user?._id,
+      metadata: { interviewId, rating, decision }
+    });
+
+    await candidate.save();
+    res.status(200).json({ success: true, message: 'Interview feedback updated successfully', data: candidate });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Send notification (Email/Call)
+exports.sendNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, notes } = req.body; // type: 'interviewEmail', 'interviewCall', 'offerEmail', 'rejectionEmail'
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    if (!candidate.notifications) {
+      candidate.notifications = {};
+    }
+
+    // Update notification status
+    if (type === 'interviewEmail') {
+      candidate.notifications.interviewEmail = {
+        sent: true,
+        sentAt: new Date(),
+        sentBy: req.user?._id
+      };
+      candidate.timeline.push({
+        action: 'Interview Email Sent',
+        description: 'Interview notification email sent to candidate',
+        performedBy: req.user?._id
+      });
+    } else if (type === 'interviewCall') {
+      candidate.notifications.interviewCall = {
+        completed: true,
+        completedAt: new Date(),
+        completedBy: req.user?._id,
+        notes: notes || ''
+      };
+      candidate.timeline.push({
+        action: 'Interview Call Completed',
+        description: 'Interview notification call completed',
+        performedBy: req.user?._id,
+        metadata: { notes }
+      });
+    } else if (type === 'offerEmail') {
+      candidate.notifications.offerEmail = {
+        sent: true,
+        sentAt: new Date(),
+        sentBy: req.user?._id
+      };
+      candidate.timeline.push({
+        action: 'Offer Email Sent',
+        description: 'Offer letter sent to candidate',
+        performedBy: req.user?._id
+      });
+    } else if (type === 'rejectionEmail') {
+      candidate.notifications.rejectionEmail = {
+        sent: true,
+        sentAt: new Date(),
+        sentBy: req.user?._id
+      };
+      candidate.timeline.push({
+        action: 'Rejection Email Sent',
+        description: 'Rejection notification sent to candidate',
+        performedBy: req.user?._id
+      });
+    }
+
+    await candidate.save();
+    res.status(200).json({ success: true, message: 'Notification sent successfully', data: candidate });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Update HR Call
+exports.updateHRCall = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, scheduledDate, completedDate, summary, decision } = req.body;
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    // Validation: At least one interview must be completed with feedback before HR call
+    const hasCompletedInterview = candidate.interviews?.some(
+      interview => interview.status === 'completed' && interview.feedback && interview.rating
+    );
+    
+    if (!hasCompletedInterview && status !== 'pending') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'At least one interview must be completed with feedback before conducting HR call' 
+      });
+    }
+
+    if (!candidate.hrCall) {
+      candidate.hrCall = {};
+    }
+
+    // Update HR call details
+    if (status !== undefined) candidate.hrCall.status = status;
+    if (scheduledDate !== undefined) candidate.hrCall.scheduledDate = scheduledDate;
+    if (completedDate !== undefined) candidate.hrCall.completedDate = completedDate;
+    if (summary !== undefined) candidate.hrCall.summary = summary;
+    if (decision !== undefined) candidate.hrCall.decision = decision;
+    candidate.hrCall.conductedBy = req.user?._id;
+
+    // Add to timeline
+    let timelineDesc = 'HR call updated';
+    if (status === 'completed') {
+      timelineDesc = `HR call completed - Decision: ${decision || 'Pending'}`;
+    } else if (status === 'scheduled') {
+      timelineDesc = `HR call scheduled for ${new Date(scheduledDate).toLocaleDateString()}`;
+    }
+
+    candidate.timeline.push({
+      action: 'HR Call Updated',
+      description: timelineDesc,
+      performedBy: req.user?._id,
+      metadata: { status, decision }
+    });
+
+    // Handle decision outcomes
+    if (decision === 'move-to-onboarding') {
+      candidate.stage = 'offer-accepted';
+    } else if (decision === 'reject') {
+      candidate.stage = 'rejected';
+      candidate.status = 'rejected';
+    }
+
+    await candidate.save();
+    res.status(200).json({ success: true, message: 'HR call updated successfully', data: candidate });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get candidate timeline
+exports.getCandidateTimeline = async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id)
+      .populate('timeline.performedBy', 'firstName lastName')
+      .populate('interviews.interviewer', 'firstName lastName');
+
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      data: {
+        timeline: candidate.timeline,
+        interviews: candidate.interviews,
+        notifications: candidate.notifications,
+        hrCall: candidate.hrCall,
+        stage: candidate.stage,
+        status: candidate.status
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
