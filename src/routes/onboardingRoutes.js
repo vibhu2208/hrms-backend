@@ -9,7 +9,8 @@ const {
   setJoiningDate,
   addTask,
   completeTask,
-  deleteOnboarding
+  deleteOnboarding,
+  completeOnboardingProcess
 } = require('../controllers/onboardingController');
 const { protect, authorize } = require('../middlewares/auth');
 
@@ -24,6 +25,9 @@ router.post('/:id/advance', advanceStage);
 router.post('/:id/joining', setJoiningDate);
 router.post('/:id/tasks', addTask);
 router.put('/:id/tasks/:taskId/complete', completeTask);
+
+// Complete onboarding and create employee account
+router.post('/:id/complete', completeOnboardingProcess);
 
 router.route('/:id')
   .get(getOnboarding)

@@ -1,4 +1,10 @@
 const Onboarding = require('../models/Onboarding');
+const Employee = require('../models/Employee');
+const User = require('../models/User');
+const Candidate = require('../models/Candidate');
+const Department = require('../models/Department');
+const { generatePassword, generateEmployeeId } = require('../utils/passwordGenerator');
+const { sendOnboardingEmail, sendHRNotification } = require('../services/emailService');
 
 exports.getOnboardingList = async (req, res) => {
   try {
@@ -172,5 +178,236 @@ exports.deleteOnboarding = async (req, res) => {
     res.status(200).json({ success: true, message: 'Onboarding deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Complete onboarding process and create employee account
+ * @route POST /api/onboarding/:id/complete
+ * @access Private (HR/Admin only)
+ * 
+ * This function:
+ * 1. Validates onboarding completion
+ * 2. Creates employee record in database
+ * 3. Generates secure credentials
+ * 4. Creates user account with temporary password
+ * 5. Sends welcome email with credentials
+ * 6. Notifies HR team
+ */
+exports.completeOnboardingProcess = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { companyName } = req.body;
+
+    // Find onboarding record with all related data
+    const onboarding = await Onboarding.findById(id)
+      .populate('department')
+      .populate('candidate');
+
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Validate onboarding is at success stage
+    if (onboarding.currentStage !== 'success') {
+      return res.status(400).json({
+        success: false,
+        message: 'Onboarding must be at success stage before completing. Current stage: ' + onboarding.currentStage
+      });
+    }
+
+    // Check if already completed
+    if (onboarding.onboardingComplete && onboarding.employeeAccountCreated) {
+      return res.status(400).json({
+        success: false,
+        message: 'Employee account has already been created for this onboarding',
+        data: {
+          employeeId: onboarding.employee,
+          credentialsSent: onboarding.credentialsSent
+        }
+      });
+    }
+
+    // Validate required fields
+    if (!onboarding.candidateEmail || !onboarding.candidateName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Candidate email and name are required'
+      });
+    }
+
+    if (!onboarding.department) {
+      return res.status(400).json({
+        success: false,
+        message: 'Department is required to create employee account'
+      });
+    }
+
+    // Check if user already exists with this email
+    const existingUser = await User.findOne({ email: onboarding.candidateEmail });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'A user account already exists with this email address'
+      });
+    }
+
+    // Check if employee already exists with this email
+    const existingEmployee = await Employee.findOne({ email: onboarding.candidateEmail });
+    if (existingEmployee) {
+      return res.status(400).json({
+        success: false,
+        message: 'An employee record already exists with this email address'
+      });
+    }
+
+    // Split candidate name into first and last name
+    const nameParts = onboarding.candidateName.trim().split(' ');
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || firstName;
+
+    // Get employee count for ID generation
+    const employeeCount = await Employee.countDocuments();
+    const employeeCode = generateEmployeeId(employeeCount);
+
+    // Generate secure random password
+    const tempPassword = generatePassword(12, {
+      includeUppercase: true,
+      includeLowercase: true,
+      includeNumbers: true,
+      includeSymbols: true
+    });
+
+    // Create employee record
+    const employee = await Employee.create({
+      employeeCode,
+      firstName,
+      lastName,
+      email: onboarding.candidateEmail,
+      phone: onboarding.candidatePhone || 'N/A',
+      department: onboarding.department._id,
+      designation: onboarding.position,
+      joiningDate: onboarding.joiningDate || new Date(),
+      employmentType: 'full-time',
+      status: 'active'
+    });
+
+    console.log(`✅ Employee created: ${employee.employeeCode} - ${employee.firstName} ${employee.lastName}`);
+
+    // Create user account with temporary password
+    const user = await User.create({
+      email: onboarding.candidateEmail,
+      password: tempPassword, // Will be hashed by pre-save hook
+      role: 'employee',
+      employeeId: employee._id,
+      isActive: true,
+      isFirstLogin: true,
+      mustChangePassword: true
+    });
+
+    console.log(`✅ User account created for: ${user.email}`);
+
+    // Send onboarding email with credentials
+    let emailSent = false;
+    let emailError = null;
+
+    try {
+      const emailResult = await sendOnboardingEmail({
+        employeeName: `${firstName} ${lastName}`,
+        employeeEmail: onboarding.candidateEmail,
+        employeeId: employeeCode,
+        tempPassword: tempPassword,
+        companyName: companyName || 'Our Company'
+      });
+
+      emailSent = emailResult.success;
+      console.log(`✅ Onboarding email sent to: ${onboarding.candidateEmail}`);
+
+      // Send HR notification (non-blocking)
+      sendHRNotification({
+        employeeName: `${firstName} ${lastName}`,
+        employeeId: employeeCode,
+        department: onboarding.department.name,
+        designation: onboarding.position
+      }).catch(err => {
+        console.error('HR notification failed:', err.message);
+      });
+
+    } catch (error) {
+      console.error('❌ Failed to send onboarding email:', error.message);
+      emailError = error.message;
+      // Don't fail the entire process if email fails
+    }
+
+    // Update onboarding record
+    onboarding.employee = employee._id;
+    onboarding.onboardingComplete = true;
+    onboarding.employeeAccountCreated = true;
+    onboarding.credentialsSent = emailSent;
+    onboarding.credentialsSentAt = emailSent ? new Date() : null;
+    onboarding.status = 'completed';
+    onboarding.completedAt = new Date();
+
+    await onboarding.save();
+
+    // Update candidate status if linked
+    if (onboarding.candidate) {
+      try {
+        await Candidate.findByIdAndUpdate(onboarding.candidate, {
+          status: 'hired',
+          stage: 'joined'
+        });
+        console.log(`✅ Candidate status updated to 'hired'`);
+      } catch (error) {
+        console.error('Failed to update candidate status:', error.message);
+      }
+    }
+
+    // Prepare response
+    const response = {
+      success: true,
+      message: 'Onboarding completed successfully and employee account created',
+      data: {
+        employee: {
+          id: employee._id,
+          employeeCode: employee.employeeCode,
+          name: `${employee.firstName} ${employee.lastName}`,
+          email: employee.email,
+          department: onboarding.department.name,
+          designation: employee.designation,
+          joiningDate: employee.joiningDate
+        },
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword
+        },
+        credentials: {
+          sent: emailSent,
+          sentAt: onboarding.credentialsSentAt
+        }
+      }
+    };
+
+    // Add warning if email failed
+    if (!emailSent && emailError) {
+      response.warning = `Employee account created successfully, but failed to send credentials email: ${emailError}`;
+      response.data.tempPassword = tempPassword; // Include in response if email failed
+    }
+
+    res.status(201).json(response);
+
+  } catch (error) {
+    console.error('❌ Error completing onboarding:', error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to complete onboarding process',
+      error: error.message
+    });
   }
 };
