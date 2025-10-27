@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const path = require('path');
 const connectDB = require('./config/database');
 const errorHandler = require('./middlewares/errorHandler');
 const apiConfig = require('./config/api.config');
@@ -29,6 +30,8 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const exitProcessRoutes = require('./routes/exitProcessRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const aiAnalysisRoutes = require('./routes/aiAnalysisRoutes');
+const publicJobRoutes = require('./routes/publicJobRoutes');
+const talentPoolRoutes = require('./routes/talentPoolRoutes');
 
 // Connect to database
 connectDB();
@@ -58,7 +61,13 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes
+// Static file serving for uploads
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Public API Routes (no authentication required)
+app.use('/api/public/jobs', publicJobRoutes);
+
+// Protected API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/departments', departmentRoutes);
@@ -81,6 +90,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/exit-process', exitProcessRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai-analysis', aiAnalysisRoutes);
+app.use('/api/talent-pool', talentPoolRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
