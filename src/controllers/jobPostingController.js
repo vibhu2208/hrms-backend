@@ -91,6 +91,41 @@ exports.closeJobPosting = async (req, res) => {
   }
 };
 
+exports.updateJobStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    if (!['draft', 'active', 'closed', 'on-hold', 'archived'].includes(status)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid status. Must be one of: draft, active, closed, on-hold, archived' 
+      });
+    }
+
+    const job = await JobPosting.findById(req.params.id);
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Job posting not found' });
+    }
+
+    job.status = status;
+    
+    // Set postedDate when status changes to active
+    if (status === 'active' && !job.postedDate) {
+      job.postedDate = Date.now();
+    }
+    
+    await job.save();
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Job status updated to ${status} successfully`, 
+      data: job 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.deleteJobPosting = async (req, res) => {
   try {
     const job = await JobPosting.findByIdAndDelete(req.params.id);
