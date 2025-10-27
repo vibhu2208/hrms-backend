@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const onboardingSchema = new mongoose.Schema({
+  candidate: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Candidate',
+    required: false
+  },
   employee: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee',
@@ -26,6 +31,21 @@ const onboardingSchema = new mongoose.Schema({
     ref: 'Department'
   },
   joiningDate: {
+    type: Date
+  },
+  onboardingComplete: {
+    type: Boolean,
+    default: false
+  },
+  employeeAccountCreated: {
+    type: Boolean,
+    default: false
+  },
+  credentialsSent: {
+    type: Boolean,
+    default: false
+  },
+  credentialsSentAt: {
     type: Date
   },
   stages: [{

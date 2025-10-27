@@ -13,7 +13,8 @@ const {
   updateInterviewFeedback,
   sendNotification,
   updateHRCall,
-  getCandidateTimeline
+  getCandidateTimeline,
+  sendInterviewEmail
 } = require('../controllers/candidateController');
 const { protect, authorize } = require('../middlewares/auth');
 
@@ -34,6 +35,9 @@ router.get('/:id/timeline', getCandidateTimeline);
 router.put('/:candidateId/interview/:interviewId/feedback', updateInterviewFeedback);
 router.post('/:id/notification', sendNotification);
 router.put('/:id/hr-call', updateHRCall);
+
+// Send interview notification email
+router.post('/:id/send-interview-email', sendInterviewEmail);
 
 router.route('/:id')
   .get(getCandidate)
