@@ -9,7 +9,11 @@ const {
   scheduleInterview,
   convertToEmployee,
   moveToOnboarding,
-  deleteCandidate
+  deleteCandidate,
+  updateInterviewFeedback,
+  sendNotification,
+  updateHRCall,
+  getCandidateTimeline
 } = require('../controllers/candidateController');
 const { protect, authorize } = require('../middlewares/auth');
 
@@ -24,6 +28,12 @@ router.put('/:id/stage', updateStage);
 router.post('/:id/interview', scheduleInterview);
 router.post('/:id/convert', convertToEmployee);
 router.post('/:id/onboarding', moveToOnboarding);
+
+// New timeline and notification routes
+router.get('/:id/timeline', getCandidateTimeline);
+router.put('/:candidateId/interview/:interviewId/feedback', updateInterviewFeedback);
+router.post('/:id/notification', sendNotification);
+router.put('/:id/hr-call', updateHRCall);
 
 router.route('/:id')
   .get(getCandidate)
