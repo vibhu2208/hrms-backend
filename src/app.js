@@ -29,6 +29,7 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const exitProcessRoutes = require('./routes/exitProcessRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const aiAnalysisRoutes = require('./routes/aiAnalysisRoutes');
+const employeeDashboardRoutes = require('./routes/employeeDashboard');
 
 // Connect to database
 connectDB();
@@ -81,6 +82,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/exit-process', exitProcessRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai-analysis', aiAnalysisRoutes);
+app.use('/api/employee', employeeDashboardRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

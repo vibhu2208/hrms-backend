@@ -18,6 +18,7 @@
     "test:email": "node src/utils/testEmail.js",
     "test:interview-email": "node src/utils/testInterviewEmail.js",
     "seed:candidate": "node src/utils/seedSingleCandidate.js",
+    "seed:employee": "node src/utils/seedEmployee.js",
     "send:application-email": "node src/utils/sendMissingApplicationEmail.js"
   },
   "keywords": [
