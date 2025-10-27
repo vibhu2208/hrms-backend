@@ -46,6 +46,22 @@ const candidateSchema = new mongoose.Schema({
     years: Number,
     months: Number
   },
+  // Professional Experience Details
+  professionalExperience: [{
+    company: String,
+    designation: String,
+    startDate: Date,
+    endDate: Date,
+    currentlyWorking: {
+      type: Boolean,
+      default: false
+    },
+    responsibilities: String,
+    achievements: String,
+    technologies: [String],
+    ctc: Number,
+    reasonForLeaving: String
+  }],
   currentCompany: String,
   currentDesignation: String,
   currentCTC: Number,
@@ -61,6 +77,10 @@ const candidateSchema = new mongoose.Schema({
   }],
   resume: {
     url: String,
+    filename: String,
+    originalName: String,
+    size: Number,
+    mimetype: String,
     uploadedAt: Date
   },
   stage: {

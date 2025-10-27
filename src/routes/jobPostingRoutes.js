@@ -7,6 +7,7 @@ const {
   updateJobPosting,
   publishJobPosting,
   closeJobPosting,
+  updateJobStatus,
   deleteJobPosting,
   getJobApplicants
 } = require('../controllers/jobPostingController');
@@ -20,6 +21,7 @@ router.route('/')
 
 router.put('/:id/publish', authorize('admin', 'hr'), publishJobPosting);
 router.put('/:id/close', authorize('admin', 'hr'), closeJobPosting);
+router.put('/:id/status', authorize('admin', 'hr'), updateJobStatus);
 router.get('/:id/applicants', getJobApplicants);
 
 router.route('/:id')
