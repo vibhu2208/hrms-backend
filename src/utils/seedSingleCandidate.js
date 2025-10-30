@@ -147,7 +147,7 @@ const seedCandidate = async () => {
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
         position: job.title,
-        companyName: 'TechCorp Solutions'
+        companyName: 'TechThrive System'
       });
       console.log('✅ Application received email sent successfully!\n');
     } catch (emailError) {

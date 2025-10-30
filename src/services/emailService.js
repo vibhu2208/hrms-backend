@@ -881,7 +881,7 @@ const sendOfferExtendedEmail = async ({
 <body>
   <div class="container">
     <div class="header">
-      <h1>🎊 Offer Letter Extended</h1>
+      <h1>Offer letter</h1>
     </div>
     <div class="content">
       <p>Dear <strong>${candidateName}</strong>,</p>

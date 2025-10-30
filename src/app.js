@@ -32,7 +32,9 @@ const reportRoutes = require('./routes/reportRoutes');
 const aiAnalysisRoutes = require('./routes/aiAnalysisRoutes');
 const publicJobRoutes = require('./routes/publicJobRoutes');
 const talentPoolRoutes = require('./routes/talentPoolRoutes');
+const offerTemplateRoutes = require('./routes/offerTemplateRoutes');
 const employeeDashboardRoutes = require('./routes/employeeDashboard');
+const candidateDocumentRoutes = require('./routes/candidateDocumentRoutes');
 
 // Connect to database
 connectDB();
@@ -67,6 +69,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Public API Routes (no authentication required)
 app.use('/api/public/jobs', publicJobRoutes);
+app.use('/api/candidate-documents', candidateDocumentRoutes);
 
 // Protected API Routes
 app.use('/api/auth', authRoutes);
@@ -92,6 +95,7 @@ app.use('/api/exit-process', exitProcessRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/ai-analysis', aiAnalysisRoutes);
 app.use('/api/talent-pool', talentPoolRoutes);
+app.use('/api/offer-templates', offerTemplateRoutes);
 app.use('/api/employee', employeeDashboardRoutes);
 
 // Error handler (must be last)
