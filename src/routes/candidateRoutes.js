@@ -16,6 +16,7 @@ const {
   getCandidateTimeline,
   sendInterviewEmail
 } = require('../controllers/candidateController');
+const { sendToOnboarding } = require('../controllers/onboardingController');
 const { protect, authorize } = require('../middlewares/auth');
 
 router.use(protect);
@@ -29,6 +30,9 @@ router.put('/:id/stage', updateStage);
 router.post('/:id/interview', scheduleInterview);
 router.post('/:id/convert', convertToEmployee);
 router.post('/:id/onboarding', moveToOnboarding);
+
+// New comprehensive onboarding flow
+router.post('/:id/send-to-onboarding', sendToOnboarding);
 
 // New timeline and notification routes
 router.get('/:id/timeline', getCandidateTimeline);

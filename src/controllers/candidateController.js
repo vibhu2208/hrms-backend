@@ -213,7 +213,7 @@ exports.scheduleInterview = async (req, res) => {
 
     // Send interview notification email automatically
     const newInterview = candidate.interviews[candidate.interviews.length - 1];
-    const companyName = req.body.companyName || 'TechCorp Solutions';
+    const companyName = req.body.companyName || 'TechThrive System';
     
     try {
       await sendInterviewNotification({
@@ -431,7 +431,7 @@ exports.sendNotification = async (req, res) => {
 
     const candidateName = `${candidate.firstName} ${candidate.lastName}`;
     const position = candidate.appliedFor?.title || 'Position';
-    const companyName = req.body.companyName || 'TechCorp Solutions';
+    const companyName = req.body.companyName || 'TechThrive System';
 
     // Update notification status
     if (type === 'interviewEmail') {
@@ -559,7 +559,7 @@ exports.updateHRCall = async (req, res) => {
     // Handle decision outcomes and send emails
     const candidateName = `${candidate.firstName} ${candidate.lastName}`;
     const position = candidate.appliedFor?.title || 'Position';
-    const companyName = req.body.companyName || 'TechCorp Solutions';
+    const companyName = req.body.companyName || 'TechThrive System';
 
     if (decision === 'move-to-onboarding') {
       candidate.stage = 'offer-accepted';
