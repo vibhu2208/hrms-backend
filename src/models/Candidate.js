@@ -87,7 +87,7 @@ const candidateSchema = new mongoose.Schema({
     type: String,
     enum: ['applied', 'screening', 'shortlisted', 'interview-scheduled', 
            'interview-completed', 'offer-extended', 'offer-accepted', 
-           'offer-rejected', 'joined', 'rejected'],
+           'offer-rejected', 'sent-to-onboarding', 'joined', 'rejected'],
     default: 'applied'
   },
   interviews: [{
@@ -191,6 +191,19 @@ const candidateSchema = new mongoose.Schema({
     offerLetterUrl: String,
     offerExtendedDate: Date,
     offerAcceptedDate: Date
+  },
+  
+  // Onboarding Connection
+  onboardingRecord: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Onboarding'
+  },
+  
+  sentToOnboardingAt: Date,
+  
+  sentToOnboardingBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
   },
   rejectionReason: String,
   notes: String,
