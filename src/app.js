@@ -35,6 +35,7 @@ const talentPoolRoutes = require('./routes/talentPoolRoutes');
 const offerTemplateRoutes = require('./routes/offerTemplateRoutes');
 const employeeDashboardRoutes = require('./routes/employeeDashboard');
 const candidateDocumentRoutes = require('./routes/candidateDocumentRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 // Connect to database
 connectDB();
@@ -97,6 +98,7 @@ app.use('/api/ai-analysis', aiAnalysisRoutes);
 app.use('/api/talent-pool', talentPoolRoutes);
 app.use('/api/offer-templates', offerTemplateRoutes);
 app.use('/api/employee', employeeDashboardRoutes);
+app.use('/api/user', userRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
