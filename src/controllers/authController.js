@@ -127,7 +127,8 @@ exports.login = async (req, res) => {
           role: user.role,
           employee: user.employeeId,
           isFirstLogin: isFirstLogin,
-          mustChangePassword: user.mustChangePassword
+          mustChangePassword: user.mustChangePassword,
+          themePreference: user.themePreference || 'dark'
         },
         token
       }
