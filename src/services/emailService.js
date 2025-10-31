@@ -6,26 +6,98 @@ const nodemailer = require('nodemailer');
  * Uses Gmail SMTP with app password for secure authentication
  */
 
-// Create reusable transporter
+// Create reusable transporter with timeout and retry configuration
 const createTransporter = () => {
-  // Validate required environment variables
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
-    console.error('Email configuration missing. Please set EMAIL_USER and EMAIL_APP_PASSWORD in .env file');
-    return null;
+  // Check for Gmail configuration first
+  if (process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
+    console.log('📧 Using Gmail SMTP configuration');
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_APP_PASSWORD
+      },
+      // Connection pooling for better performance
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      // Timeout configuration (critical for production)
+      connectionTimeout: 60000, // 60 seconds
+      greetingTimeout: 30000,   // 30 seconds
+      socketTimeout: 60000,     // 60 seconds
+      // Security options
+      secure: true,
+      tls: {
+        rejectUnauthorized: true,
+        minVersion: 'TLSv1.2'
+      },
+      // Retry configuration
+      retry: {
+        maxRetries: 3,
+        delay: 1000
+      }
+    });
   }
+  
+  // Fallback to custom SMTP configuration (for production environments like Render)
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    console.log('📧 Using custom SMTP configuration');
+    return nodemailer.createTransporter({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      },
+      // Connection pooling
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      // Timeout configuration
+      connectionTimeout: 60000,
+      greetingTimeout: 30000,
+      socketTimeout: 60000,
+      tls: {
+        rejectUnauthorized: process.env.NODE_ENV === 'production',
+        minVersion: 'TLSv1.2'
+      }
+    });
+  }
+  
+  console.error('❌ Email configuration missing. Please set EMAIL_USER and EMAIL_APP_PASSWORD or SMTP credentials in .env file');
+  return null;
+};
 
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_APP_PASSWORD
-    },
-    // Security options
-    secure: true,
-    tls: {
-      rejectUnauthorized: true
+// Helper function to send email with retry logic
+const sendEmailWithRetry = async (transporter, mailOptions, maxRetries = 3) => {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`📤 Sending email (attempt ${attempt}/${maxRetries}) to ${mailOptions.to}`);
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`✅ Email sent successfully: ${info.messageId}`);
+      return info;
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ Email send attempt ${attempt} failed:`, error.message);
+      
+      // Don't retry on authentication errors
+      if (error.code === 'EAUTH' || error.responseCode === 535) {
+        throw error;
+      }
+      
+      // Wait before retrying (exponential backoff)
+      if (attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        console.log(`⏳ Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-  });
+  }
+  
+  throw lastError;
 };
 
 /**
@@ -262,8 +334,8 @@ This is an automated email from the HRMS system. Please do not reply to this ema
       priority: 'high'
     };
 
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
+    // Send email with retry logic
+    const info = await sendEmailWithRetry(transporter, mailOptions);
 
     return {
       success: true,
@@ -346,7 +418,7 @@ const sendHRNotification = async ({
       html: htmlContent
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendEmailWithRetry(transporter, mailOptions);
     
     return {
       success: true,
@@ -610,7 +682,7 @@ ${companyName}
       priority: 'high'
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendEmailWithRetry(transporter, mailOptions);
 
     return {
       success: true,
@@ -700,7 +772,7 @@ const sendApplicationReceivedEmail = async ({
 </body>
 </html>`;
 
-    await transporter.sendMail({
+    await sendEmailWithRetry(transporter, {
       from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
       to: candidateEmail,
       subject: `✅ Application Received - ${position}`,
@@ -769,7 +841,7 @@ const sendShortlistedEmail = async ({
 </body>
 </html>`;
 
-    await transporter.sendMail({
+    await sendEmailWithRetry(transporter, {
       from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
       to: candidateEmail,
       subject: `🎉 You're Shortlisted - ${position} at ${companyName}`,
@@ -835,7 +907,7 @@ const sendInterviewCompletedEmail = async ({
 </body>
 </html>`;
 
-    await transporter.sendMail({
+    await sendEmailWithRetry(transporter, {
       from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
       to: candidateEmail,
       subject: `Thank You - ${interviewType} Completed`,
@@ -906,7 +978,7 @@ const sendOfferExtendedEmail = async ({
 </body>
 </html>`;
 
-    await transporter.sendMail({
+    await sendEmailWithRetry(transporter, {
       from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
       to: candidateEmail,
       subject: `🎊 Offer Letter - ${position} at ${companyName}`,
@@ -971,7 +1043,7 @@ const sendRejectionEmail = async ({
 </body>
 </html>`;
 
-    await transporter.sendMail({
+    await sendEmailWithRetry(transporter, {
       from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
       to: candidateEmail,
       subject: `Application Update - ${position}`,
