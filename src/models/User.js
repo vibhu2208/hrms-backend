@@ -42,11 +42,6 @@ const userSchema = new mongoose.Schema({
   mustChangePassword: {
     type: Boolean,
     default: false
-  },
-  themePreference: {
-    type: String,
-    enum: ['light', 'dark', 'blue', 'green', 'purple', 'orange', 'red', 'teal', 'grey', 'custom'],
-    default: 'dark'
   }
 }, {
   timestamps: true
