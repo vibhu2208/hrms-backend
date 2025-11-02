@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Employee = require('../models/Employee');
 const { generateToken } = require('../utils/jwt');
+const { OAuth2Client } = require('google-auth-library');
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -204,6 +205,102 @@ exports.updatePassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
+
+// @desc    Google OAuth Login
+// @route   POST /api/auth/google
+// @access  Public
+exports.googleLogin = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google credential is required'
+      });
+    }
+
+    // Verify Google token
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    
+    let ticket;
+    try {
+      ticket = await client.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID
+      });
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Google token'
+      });
+    }
+
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    // Check if user exists with this email
+    let user = await User.findOne({ email }).populate('employeeId');
+
+    if (!user) {
+      // User doesn't exist - reject login
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with this email. Please contact your administrator to create an account.'
+      });
+    }
+
+    // User exists - update Google info if needed
+    if (!user.googleId) {
+      user.googleId = googleId;
+      user.authProvider = 'google';
+      user.profilePicture = picture;
+    }
+    
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated'
+      });
+    }
+
+    // Update last login
+    user.lastLogin = Date.now();
+    const isFirstLogin = user.isFirstLogin;
+    if (isFirstLogin) {
+      user.isFirstLogin = false;
+    }
+    await user.save();
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          employee: user.employeeId,
+          isFirstLogin: isFirstLogin,
+          mustChangePassword: user.mustChangePassword,
+          themePreference: user.themePreference || 'dark',
+          profilePicture: user.profilePicture
+        },
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Google login error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Google login failed'
     });
   }
 };
