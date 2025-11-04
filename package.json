@@ -13,13 +13,8 @@
     "seed:all": "node seed-departments.js && node seed-employees.js",
     "seed:applicants": "node src/utils/seedApplicants.js",
     "seed:job": "node src/utils/seedApplicantsToJob.js",
-    "migrate:onboarding": "node src/utils/migrateShortlistedToOnboarding.js",
-    "fix:onboarding": "node src/utils/fixMissingOnboarding.js",
-    "test:email": "node src/utils/testEmail.js",
-    "test:interview-email": "node src/utils/testInterviewEmail.js",
     "seed:candidate": "node src/utils/seedSingleCandidate.js",
     "seed:employee": "node src/utils/seedEmployee.js",
-    "send:application-email": "node src/utils/sendMissingApplicationEmail.js",
     "seed:offer-template": "node src/scripts/seedOfferTemplate.js"
   },
   "keywords": [
@@ -38,6 +33,7 @@
     "exceljs": "^4.4.0",
     "express": "^4.18.2",
     "express-validator": "^7.0.1",
+    "google-auth-library": "^10.5.0",
     "googleapis": "^164.1.0",
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.6.0",
