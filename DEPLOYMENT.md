@@ -36,7 +36,22 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/hrms
 JWT_SECRET=your-super-secret-jwt-key-here
 JWT_EXPIRE=30d
 CORS_ORIGIN=https://hrms-frontend-blush.vercel.app
+
+# Email Configuration (REQUIRED for production)
+# ⚠️ Gmail SMTP is blocked by Render - use Brevo instead
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your_brevo_email@example.com
+SMTP_PASS=your_brevo_smtp_key
+EMAIL_USER=your_brevo_email@example.com
 ```
+
+**📧 Email Setup (Critical):**
+- Render blocks Gmail SMTP connections
+- Use Brevo (free tier: 300 emails/day)
+- See `EMAIL_TIMEOUT_FIX.md` for 5-minute setup guide
+- See `EMAIL_CONFIGURATION_GUIDE.md` for detailed instructions
 
 ### Step 5: Database Setup
 **Option A: MongoDB Atlas (Recommended)**
@@ -97,6 +112,8 @@ app.use(cors({
 - [ ] Database connection is working
 - [ ] Environment variables are set
 - [ ] CORS is configured for your frontend domain
+- [ ] Email service configured (Brevo SMTP)
+- [ ] Test email sending (schedule an interview)
 
 ## 🚨 Important Notes
 
@@ -104,6 +121,7 @@ app.use(cors({
 2. **Database**: Use MongoDB Atlas for production (free tier available)
 3. **Environment Variables**: Never commit sensitive data to repository
 4. **CORS**: Update CORS_ORIGIN to your actual frontend domain
+5. **Email Service**: Gmail SMTP is blocked by Render - use Brevo, SendGrid, or AWS SES instead
 
 ## 🔗 Useful Links
 
