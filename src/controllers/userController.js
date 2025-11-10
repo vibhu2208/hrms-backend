@@ -114,3 +114,32 @@ exports.getUserProfile = async (req, res) => {
     });
   }
 };
+
+/**
+ * Get all users (Admin only)
+ * @route GET /api/user/all
+ * @access Private/Admin
+ */
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('-password')
+      .populate({
+        path: 'employeeId',
+        select: 'firstName lastName employeeCode email phone department position'
+      })
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users
+    });
+  } catch (error) {
+    console.error('Error fetching all users:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch users'
+    });
+  }
+};
