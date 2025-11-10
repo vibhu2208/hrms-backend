@@ -65,6 +65,70 @@ const clientSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  // Super Admin specific fields
+  subscription: {
+    packageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Package'
+    },
+    startDate: Date,
+    endDate: Date,
+    status: {
+      type: String,
+      enum: ['active', 'expired', 'suspended', 'trial'],
+      default: 'trial'
+    },
+    autoRenew: {
+      type: Boolean,
+      default: false
+    },
+    billingCycle: {
+      type: String,
+      enum: ['monthly', 'quarterly', 'yearly'],
+      default: 'monthly'
+    }
+  },
+  enabledModules: [{
+    type: String,
+    enum: ['hr', 'payroll', 'timesheet', 'attendance', 'recruitment', 'performance', 'assets', 'compliance']
+  }],
+  settings: {
+    maxEmployees: {
+      type: Number,
+      default: 50
+    },
+    maxAdmins: {
+      type: Number,
+      default: 2
+    },
+    customBranding: {
+      type: Boolean,
+      default: false
+    },
+    apiAccess: {
+      type: Boolean,
+      default: false
+    },
+    dataRetentionDays: {
+      type: Number,
+      default: 365
+    }
+  },
+  usage: {
+    totalEmployees: {
+      type: Number,
+      default: 0
+    },
+    totalAdmins: {
+      type: Number,
+      default: 0
+    },
+    storageUsed: {
+      type: Number,
+      default: 0
+    },
+    lastActivity: Date
   }
 }, {
   timestamps: true

@@ -36,6 +36,7 @@ const offerTemplateRoutes = require('./routes/offerTemplateRoutes');
 const employeeDashboardRoutes = require('./routes/employeeDashboard');
 const candidateDocumentRoutes = require('./routes/candidateDocumentRoutes');
 const userRoutes = require('./routes/userRoutes');
+const superAdminRoutes = require('./routes/superAdminRoutes');
 
 // Connect to database
 connectDB();
@@ -99,6 +100,7 @@ app.use('/api/talent-pool', talentPoolRoutes);
 app.use('/api/offer-templates', offerTemplateRoutes);
 app.use('/api/employee', employeeDashboardRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/super-admin', superAdminRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
