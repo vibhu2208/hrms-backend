@@ -66,6 +66,7 @@ exports.register = async (req, res) => {
 // @access  Public
 exports.login = async (req, res) => {
   try {
+    console.log('🔍 Login attempt:', req.body);
     const { email, password } = req.body;
 
     // Validate email & password
@@ -77,9 +78,12 @@ exports.login = async (req, res) => {
     }
 
     // Check for user
+    console.log('🔍 Looking for user with email:', email);
     const user = await User.findOne({ email }).select('+password').populate('employeeId');
+    console.log('🔍 User found:', !!user);
 
     if (!user) {
+      console.log('❌ User not found for email:', email);
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -87,9 +91,12 @@ exports.login = async (req, res) => {
     }
 
     // Check if password matches
+    console.log('🔍 Comparing password for user:', user.email);
     const isMatch = await user.comparePassword(password);
+    console.log('🔍 Password match result:', isMatch);
 
     if (!isMatch) {
+      console.log('❌ Password mismatch for user:', user.email);
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
