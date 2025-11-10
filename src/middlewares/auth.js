@@ -63,4 +63,42 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { protect, authorize };
+// Super Admin specific middleware
+const requireSuperAdmin = (req, res, next) => {
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Super Admin access required'
+    });
+  }
+  next();
+};
+
+// Tenant isolation middleware - ensures users can only access their client's data
+const tenantIsolation = async (req, res, next) => {
+  try {
+    // Super admins can access all data
+    if (req.user.role === 'superadmin') {
+      return next();
+    }
+
+    // Other users are restricted to their client's data
+    if (!req.user.clientId) {
+      return res.status(403).json({
+        success: false,
+        message: 'User not associated with any client'
+      });
+    }
+
+    // Add clientId to request for filtering
+    req.clientId = req.user.clientId;
+    next();
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error in tenant isolation'
+    });
+  }
+};
+
+module.exports = { protect, authorize, requireSuperAdmin, tenantIsolation };
