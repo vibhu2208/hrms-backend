@@ -33,8 +33,15 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'hr', 'employee'],
+    enum: ['superadmin', 'admin', 'hr', 'employee'],
     default: 'employee'
+  },
+  clientId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client',
+    required: function() {
+      return this.role !== 'superadmin';
+    }
   },
   employeeId: {
     type: mongoose.Schema.Types.ObjectId,
