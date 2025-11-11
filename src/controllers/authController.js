@@ -61,6 +61,7 @@ exports.register = async (req, res) => {
   }
 };
 
+
 // @desc    Login user
 // @route   POST /api/auth/login
 // @access  Public
@@ -207,6 +208,55 @@ exports.updatePassword = async (req, res) => {
       success: true,
       message: 'Password updated successfully',
       data: { token }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Admin reset user password
+// @route   PUT /api/auth/admin/reset-password/:userId
+// @access  Private/Admin
+exports.adminResetPassword = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { newPassword, mustChangePassword } = req.body;
+
+    // Validate new password
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 8 characters long'
+      });
+    }
+
+    // Find the user to reset password
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    user.mustChangePassword = mustChangePassword !== undefined ? mustChangePassword : true;
+    user.passwordChangedAt = Date.now();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Password reset successfully for ${user.email}`,
+      data: {
+        userId: user._id,
+        email: user.email,
+        mustChangePassword: user.mustChangePassword
+      }
     });
   } catch (error) {
     res.status(500).json({
