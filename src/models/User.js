@@ -36,6 +36,17 @@ const userSchema = new mongoose.Schema({
     enum: ['superadmin', 'admin', 'hr', 'employee'],
     default: 'employee'
   },
+  // Internal Super Admin role for RBAC within Super Admin module
+  internalRole: {
+    type: String,
+    enum: ['super_admin', 'system_manager', 'finance_admin', 'compliance_officer', 'tech_admin', 'viewer'],
+    required: function() {
+      return this.role === 'superadmin';
+    },
+    default: function() {
+      return this.role === 'superadmin' ? 'super_admin' : undefined;
+    }
+  },
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client',
