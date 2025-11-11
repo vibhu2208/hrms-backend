@@ -1,7 +1,11 @@
 const { verifyToken } = require('../utils/jwt');
 const User = require('../models/User');
+const Company = require('../models/Company');
+const { getTenantConnection } = require('../utils/databaseProvisioning');
 
 const protect = async (req, res, next) => {
+  let tenantConnection = null;
+  
   try {
     let token;
 
@@ -25,7 +29,31 @@ const protect = async (req, res, next) => {
       });
     }
 
-    const user = await User.findById(decoded.id).select('-password');
+    let user = null;
+
+    // Check if token contains company info (tenant user)
+    if (decoded.databaseName) {
+      // User is from a tenant database
+      try {
+        tenantConnection = await getTenantConnection(decoded.databaseName);
+        const TenantUser = tenantConnection.model('User', User.schema);
+        user = await TenantUser.findById(decoded.id).select('-password');
+        
+        if (tenantConnection) {
+          await tenantConnection.close();
+        }
+      } catch (tenantError) {
+        console.error('Error accessing tenant database:', tenantError);
+        if (tenantConnection) await tenantConnection.close();
+        return res.status(500).json({
+          success: false,
+          message: 'Error accessing company database'
+        });
+      }
+    } else {
+      // User is from main database (super admin, etc.)
+      user = await User.findById(decoded.id).select('-password');
+    }
 
     if (!user) {
       return res.status(404).json({
@@ -41,9 +69,20 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Attach user and company info to request
     req.user = user;
+    if (decoded.companyId) {
+      req.companyId = decoded.companyId;
+      req.companyCode = decoded.companyCode;
+      req.databaseName = decoded.databaseName;
+    }
+    
     next();
   } catch (error) {
+    console.error('Auth middleware error:', error);
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
     res.status(401).json({
       success: false,
       message: 'Not authorized to access this route'

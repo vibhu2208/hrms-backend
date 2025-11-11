@@ -1057,6 +1057,352 @@ const sendRejectionEmail = async ({
   }
 };
 
+/**
+ * Send company admin credentials email
+ * @param {Object} options - Email options
+ * @param {string} options.companyName - Name of the company
+ * @param {string} options.adminEmail - Admin email address
+ * @param {string} options.adminPassword - Auto-generated password
+ * @param {string} options.loginUrl - Login URL for the company
+ * @returns {Promise<Object>} Email send result
+ */
+const sendCompanyAdminCredentials = async ({
+  companyName,
+  adminEmail,
+  adminPassword,
+  loginUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
+}) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      throw new Error('Email transporter not configured');
+    }
+
+    // Validate required fields
+    if (!companyName || !adminEmail || !adminPassword) {
+      throw new Error('Missing required fields for company admin credentials email');
+    }
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 40px 30px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+    .header p {
+      margin: 10px 0 0 0;
+      font-size: 16px;
+      opacity: 0.9;
+    }
+    .content {
+      padding: 40px 30px;
+    }
+    .welcome-message {
+      background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%);
+      border-radius: 8px;
+      padding: 25px;
+      margin: 25px 0;
+      text-align: center;
+    }
+    .welcome-message h2 {
+      margin: 0 0 10px 0;
+      color: #667eea;
+      font-size: 24px;
+    }
+    .credentials-box {
+      background: #f8f9fa;
+      border-left: 4px solid #667eea;
+      padding: 25px;
+      margin: 25px 0;
+      border-radius: 4px;
+    }
+    .credentials-box h3 {
+      margin-top: 0;
+      color: #667eea;
+    }
+    .credential-item {
+      margin: 15px 0;
+      padding: 12px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .credential-item:last-child {
+      border-bottom: none;
+    }
+    .credential-label {
+      font-weight: 600;
+      color: #555;
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .credential-value {
+      color: #1f2937;
+      font-family: 'Courier New', monospace;
+      background: #fff;
+      padding: 10px 15px;
+      border-radius: 4px;
+      display: block;
+      font-size: 16px;
+      border: 1px solid #e5e7eb;
+      word-break: break-all;
+    }
+    .warning-box {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 20px;
+      margin: 25px 0;
+      border-radius: 4px;
+    }
+    .warning-box strong {
+      color: #856404;
+    }
+    .warning-box ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .warning-box li {
+      margin: 8px 0;
+      color: #856404;
+    }
+    .cta-button {
+      display: inline-block;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px 40px;
+      text-decoration: none;
+      border-radius: 6px;
+      margin: 25px 0;
+      font-weight: 600;
+      font-size: 16px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
+    }
+    .cta-button:hover {
+      transform: translateY(-2px);
+    }
+    .features-box {
+      background: #f8f9fa;
+      padding: 20px;
+      margin: 25px 0;
+      border-radius: 4px;
+    }
+    .features-box h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    .features-box ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .features-box li {
+      margin: 8px 0;
+    }
+    .footer {
+      background: #f8f9fa;
+      padding: 25px;
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+    }
+    .footer p {
+      margin: 5px 0;
+    }
+    .emoji {
+      font-size: 32px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="emoji">🎉</div>
+      <h1>Welcome to HRMS Platform!</h1>
+      <p>Your company account has been created</p>
+    </div>
+    
+    <div class="content">
+      <div class="welcome-message">
+        <h2>🏢 ${companyName}</h2>
+        <p>Your HRMS account is now active and ready to use!</p>
+      </div>
+      
+      <p>Dear Administrator,</p>
+      
+      <p>Congratulations! Your company has been successfully onboarded to our HRMS platform. We're excited to have <strong>${companyName}</strong> join our growing community of organizations streamlining their HR operations.</p>
+      
+      <div class="credentials-box">
+        <h3>🔐 Your Administrator Login Credentials</h3>
+        
+        <div class="credential-item">
+          <span class="credential-label">Company Name</span>
+          <span class="credential-value">${companyName}</span>
+        </div>
+        
+        <div class="credential-item">
+          <span class="credential-label">Admin Email</span>
+          <span class="credential-value">${adminEmail}</span>
+        </div>
+        
+        <div class="credential-item">
+          <span class="credential-label">Temporary Password</span>
+          <span class="credential-value">${adminPassword}</span>
+        </div>
+        
+        <div class="credential-item">
+          <span class="credential-label">Login URL</span>
+          <span class="credential-value">${loginUrl}/login</span>
+        </div>
+      </div>
+      
+      <div class="warning-box">
+        <strong>⚠️ Important Security Notice:</strong>
+        <ul>
+          <li>This is a <strong>temporary password</strong> sent only once via this email</li>
+          <li>You will be <strong>required to change your password</strong> upon first login</li>
+          <li><strong>Never share</strong> your password with anyone</li>
+          <li>Store this email securely and <strong>delete it after</strong> changing your password</li>
+          <li>If you didn't request this account, please contact our support team immediately</li>
+        </ul>
+      </div>
+      
+      <p style="text-align: center;">
+        <a href="${loginUrl}/login" class="cta-button">
+          🚀 Login to Your HRMS Dashboard
+        </a>
+      </p>
+      
+      <div class="features-box">
+        <h3>✨ What You Can Do Next:</h3>
+        <ul>
+          <li>📊 Set up your company profile and preferences</li>
+          <li>👥 Add departments and designations</li>
+          <li>🆕 Create employee accounts and manage your team</li>
+          <li>📋 Configure HR policies and workflows</li>
+          <li>📈 Access analytics and reports</li>
+          <li>⚙️ Customize system settings to match your needs</li>
+        </ul>
+      </div>
+      
+      <p><strong>Need Help?</strong></p>
+      <p>If you have any questions or need assistance getting started, our support team is here to help. Feel free to reach out to us anytime.</p>
+      
+      <p>We're committed to making your HR management experience smooth and efficient!</p>
+      
+      <p style="margin-top: 30px;">
+        Best regards,<br>
+        <strong>HRMS Support Team</strong><br>
+        <a href="mailto:${process.env.EMAIL_USER}" style="color: #667eea; text-decoration: none;">${process.env.EMAIL_USER}</a>
+      </p>
+    </div>
+    
+    <div class="footer">
+      <p>This is an automated email from the HRMS system. Please do not reply to this email.</p>
+      <p>For support, contact us at <a href="mailto:${process.env.EMAIL_USER}" style="color: #667eea;">${process.env.EMAIL_USER}</a></p>
+      <p>&copy; ${new Date().getFullYear()} HRMS Platform. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const textContent = `
+Welcome to HRMS Platform!
+
+Company: ${companyName}
+
+Dear Administrator,
+
+Congratulations! Your company has been successfully onboarded to our HRMS platform.
+
+YOUR ADMINISTRATOR LOGIN CREDENTIALS:
+- Company Name: ${companyName}
+- Admin Email: ${adminEmail}
+- Temporary Password: ${adminPassword}
+- Login URL: ${loginUrl}/login
+
+IMPORTANT SECURITY NOTICE:
+- This is a temporary password sent only once via this email
+- You will be required to change your password upon first login
+- Never share your password with anyone
+- Store this email securely and delete it after changing your password
+- If you didn't request this account, please contact our support team immediately
+
+WHAT YOU CAN DO NEXT:
+- Set up your company profile and preferences
+- Add departments and designations
+- Create employee accounts and manage your team
+- Configure HR policies and workflows
+- Access analytics and reports
+- Customize system settings to match your needs
+
+Need Help?
+If you have any questions or need assistance getting started, our support team is here to help.
+
+Best regards,
+HRMS Support Team
+${process.env.EMAIL_USER}
+
+---
+This is an automated email from the HRMS system. Please do not reply to this email.
+    `;
+
+    const mailOptions = {
+      from: {
+        name: 'HRMS Platform',
+        address: process.env.EMAIL_USER
+      },
+      to: adminEmail,
+      subject: `🎉 Welcome to HRMS - ${companyName} Account Created`,
+      text: textContent,
+      html: htmlContent,
+      priority: 'high'
+    };
+
+    const info = await sendEmailWithRetry(transporter, mailOptions);
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      recipient: adminEmail
+    };
+
+  } catch (error) {
+    console.error('❌ Error sending company admin credentials email:', error);
+    throw new Error(`Failed to send company admin credentials email: ${error.message}`);
+  }
+};
+
 module.exports = {
   sendOnboardingEmail,
   sendHRNotification,
@@ -1066,5 +1412,6 @@ module.exports = {
   sendInterviewCompletedEmail,
   sendOfferExtendedEmail,
   sendRejectionEmail,
+  sendCompanyAdminCredentials,
   verifyEmailConfig
 };

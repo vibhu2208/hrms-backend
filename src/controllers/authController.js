@@ -1,7 +1,9 @@
 const User = require('../models/User');
 const Employee = require('../models/Employee');
+const Company = require('../models/Company');
 const { generateToken } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
+const { getTenantConnection } = require('../utils/databaseProvisioning');
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -66,6 +68,8 @@ exports.register = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 exports.login = async (req, res) => {
+  let tenantConnection = null;
+  
   try {
     console.log('🔍 Login attempt:', req.body);
     const { email, password } = req.body;
@@ -78,13 +82,45 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Check for user
-    console.log('🔍 Looking for user with email:', email);
-    const user = await User.findOne({ email }).select('+password').populate('employeeId');
-    console.log('🔍 User found:', !!user);
+    // Step 1: Check if this email belongs to a company admin (in tenant database)
+    console.log('🔍 Checking if user is a company admin...');
+    const company = await Company.findOne({ 
+      'adminUser.email': email,
+      status: 'active',
+      databaseStatus: 'active'
+    });
+
+    let user = null;
+    let isTenantUser = false;
+
+    if (company) {
+      // User is a company admin - authenticate against tenant database
+      console.log(`🏢 User belongs to company: ${company.companyName} (${company.databaseName})`);
+      isTenantUser = true;
+      
+      try {
+        tenantConnection = await getTenantConnection(company.databaseName);
+        const TenantUser = tenantConnection.model('User', User.schema);
+        
+        user = await TenantUser.findOne({ email }).select('+password').populate('employeeId');
+        console.log('🔍 Tenant user found:', !!user);
+      } catch (tenantError) {
+        console.error('❌ Error connecting to tenant database:', tenantError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error connecting to company database'
+        });
+      }
+    } else {
+      // Check in main database (for super admins, etc.)
+      console.log('🔍 Looking for user in main database...');
+      user = await User.findOne({ email }).select('+password').populate('employeeId');
+      console.log('🔍 Main database user found:', !!user);
+    }
 
     if (!user) {
       console.log('❌ User not found for email:', email);
+      if (tenantConnection) await tenantConnection.close();
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -98,6 +134,7 @@ exports.login = async (req, res) => {
 
     if (!isMatch) {
       console.log('❌ Password mismatch for user:', user.email);
+      if (tenantConnection) await tenantConnection.close();
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -106,6 +143,7 @@ exports.login = async (req, res) => {
 
     // Check if user is active
     if (!user.isActive) {
+      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Your account has been deactivated'
@@ -123,8 +161,25 @@ exports.login = async (req, res) => {
     
     await user.save();
 
-    // Generate token
-    const token = generateToken(user._id);
+    // Close tenant connection if used
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
+
+    // Generate token with additional company info for tenant users
+    const tokenPayload = {
+      userId: user._id,
+      email: user.email,
+      role: user.role
+    };
+    
+    if (isTenantUser && company) {
+      tokenPayload.companyId = company._id;
+      tokenPayload.companyCode = company.companyCode;
+      tokenPayload.databaseName = company.databaseName;
+    }
+
+    const token = generateToken(user._id, tokenPayload);
 
     res.status(200).json({
       success: true,
@@ -137,12 +192,22 @@ exports.login = async (req, res) => {
           employee: user.employeeId,
           isFirstLogin: isFirstLogin,
           mustChangePassword: user.mustChangePassword,
-          themePreference: user.themePreference || 'dark'
+          themePreference: user.themePreference || 'dark',
+          // Add company info for tenant users
+          ...(isTenantUser && company ? {
+            companyId: company._id,
+            companyName: company.companyName,
+            companyCode: company.companyCode
+          } : {})
         },
         token
       }
     });
   } catch (error) {
+    console.error('❌ Login error:', error);
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
     res.status(500).json({
       success: false,
       message: error.message
