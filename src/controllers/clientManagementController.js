@@ -1,6 +1,9 @@
 const Client = require('../models/Client');
 const User = require('../models/User');
 const Package = require('../models/Package');
+const ClientPackage = require('../models/ClientPackage');
+const Subscription = require('../models/Subscription');
+const SuperAdminAuditLog = require('../models/SuperAdminAuditLog');
 const { logAction } = require('../middlewares/auditLog');
 const bcrypt = require('bcryptjs');
 
@@ -33,25 +36,102 @@ const getClients = async (req, res) => {
       query.status = status;
     }
 
+    // Handle subscription status filtering with new system
+    let subscriptionClientIds = [];
     if (subscriptionStatus) {
-      query['subscription.status'] = subscriptionStatus;
+      // Get client IDs that match the subscription status from new system
+      const matchingSubscriptions = await Subscription.find({ 
+        status: subscriptionStatus,
+        isActive: true 
+      }).distinct('clientId');
+      
+      // Also check old embedded subscription system for backward compatibility
+      const matchingClients = await Client.find({ 
+        'subscription.status': subscriptionStatus 
+      }).distinct('_id');
+      
+      // Combine both sets of client IDs
+      subscriptionClientIds = [...new Set([...matchingSubscriptions, ...matchingClients])];
+      
+      if (subscriptionClientIds.length > 0) {
+        query._id = { $in: subscriptionClientIds };
+      } else {
+        // No matching clients found, return empty result
+        query._id = { $in: [] };
+      }
     }
 
     const sort = {};
     sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
 
     const clients = await Client.find(query)
-      .populate('subscription.packageId', 'name type')
       .sort(sort)
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
     const total = await Client.countDocuments(query);
 
+    // Enhance clients with ClientPackage and Subscription data
+    const enhancedClients = await Promise.all(clients.map(async (client) => {
+      // Get the client's current package assignment
+      const clientPackage = await ClientPackage.findOne({ 
+        clientId: client._id,
+        isActive: true 
+      }).populate('packageId', 'name type pricing');
+
+      // Get the client's current subscription
+      const subscription = await Subscription.findOne({ 
+        clientId: client._id,
+        isActive: true 
+      }).populate('packageId', 'name type pricing');
+
+      // Create enhanced client object
+      const clientObj = client.toObject();
+      
+      if (clientPackage && subscription) {
+        // Use new system data
+        const daysRemaining = ['active', 'trial'].includes(subscription.status) ? 
+          Math.ceil((new Date(subscription.endDate) - new Date()) / (1000 * 60 * 60 * 24)) : 0;
+        
+        clientObj.subscription = {
+          packageId: clientPackage.packageId,
+          status: subscription.status,
+          billingCycle: subscription.billingCycle,
+          startDate: subscription.startDate,
+          endDate: subscription.endDate,
+          effectivePrice: subscription.effectivePrice,
+          autoRenew: subscription.autoRenew,
+          daysRemaining: Math.max(0, daysRemaining)
+        };
+      } else if (client.subscription && client.subscription.packageId) {
+        // Use old embedded subscription data with enhanced calculations
+        const daysRemaining = ['active', 'trial'].includes(client.subscription.status) && client.subscription.endDate ? 
+          Math.ceil((new Date(client.subscription.endDate) - new Date()) / (1000 * 60 * 60 * 24)) : 0;
+        
+        clientObj.subscription = {
+          ...client.subscription,
+          daysRemaining: Math.max(0, daysRemaining)
+        };
+      } else {
+        // No subscription data - set as trial without package
+        clientObj.subscription = {
+          status: 'trial',
+          packageId: null,
+          daysRemaining: 0,
+          startDate: client.createdAt,
+          endDate: null,
+          billingCycle: 'monthly',
+          autoRenew: false
+        };
+      }
+
+      return clientObj;
+    }));
+
     res.json({
       success: true,
       data: {
-        clients,
+        clients: enhancedClients,
         pagination: {
           current: parseInt(page),
           pages: Math.ceil(total / limit),
@@ -71,8 +151,7 @@ const getClients = async (req, res) => {
 // Get single client details
 const getClient = async (req, res) => {
   try {
-    const client = await Client.findById(req.params.id)
-      .populate('subscription.packageId');
+    const client = await Client.findById(req.params.id);
 
     if (!client) {
       return res.status(404).json({
@@ -81,6 +160,17 @@ const getClient = async (req, res) => {
       });
     }
 
+    // Get the client's current package assignment and subscription
+    const clientPackage = await ClientPackage.findOne({ 
+      clientId: client._id,
+      isActive: true 
+    }).populate('packageId', 'name type pricing features');
+
+    const subscription = await Subscription.findOne({ 
+      clientId: client._id,
+      isActive: true 
+    }).populate('packageId', 'name type pricing features');
+
     // Get client's users count
     const userCount = await User.countDocuments({ clientId: client._id });
     const adminCount = await User.countDocuments({ 
@@ -88,10 +178,49 @@ const getClient = async (req, res) => {
       role: { $in: ['admin', 'hr'] } 
     });
 
+    // Enhance client with subscription data
+    const clientObj = client.toObject();
+    if (clientPackage && subscription) {
+      // Use new system data
+      const daysRemaining = ['active', 'trial'].includes(subscription.status) ? 
+        Math.ceil((new Date(subscription.endDate) - new Date()) / (1000 * 60 * 60 * 24)) : 0;
+      
+      clientObj.subscription = {
+        packageId: clientPackage.packageId,
+        status: subscription.status,
+        billingCycle: subscription.billingCycle,
+        startDate: subscription.startDate,
+        endDate: subscription.endDate,
+        effectivePrice: subscription.effectivePrice,
+        autoRenew: subscription.autoRenew,
+        daysRemaining: Math.max(0, daysRemaining)
+      };
+    } else if (client.subscription && client.subscription.packageId) {
+      // Use old embedded subscription data
+      const daysRemaining = ['active', 'trial'].includes(client.subscription.status) && client.subscription.endDate ? 
+        Math.ceil((new Date(client.subscription.endDate) - new Date()) / (1000 * 60 * 60 * 24)) : 0;
+      
+      clientObj.subscription = {
+        ...client.subscription,
+        daysRemaining: Math.max(0, daysRemaining)
+      };
+    } else {
+      // No subscription data - set as trial without package
+      clientObj.subscription = {
+        status: 'trial',
+        packageId: null,
+        daysRemaining: 0,
+        startDate: client.createdAt,
+        endDate: null,
+        billingCycle: 'monthly',
+        autoRenew: false
+      };
+    }
+
     res.json({
       success: true,
       data: {
-        client,
+        client: clientObj,
         stats: {
           totalUsers: userCount,
           totalAdmins: adminCount
@@ -123,8 +252,13 @@ const createClient = async (req, res) => {
       adminUser
     } = req.body;
 
+    // Generate unique client code
+    const clientCount = await Client.countDocuments();
+    const clientCode = `CL${String(clientCount + 1).padStart(3, '0')}`;
+
     // Create client
     const client = new Client({
+      clientCode,
       name,
       companyName,
       email,
@@ -142,6 +276,44 @@ const createClient = async (req, res) => {
     });
 
     await client.save();
+
+    // If a package is selected, create ClientPackage and Subscription records
+    if (packageId) {
+      const package = await Package.findById(packageId);
+      if (package) {
+        // Create ClientPackage assignment
+        const clientPackage = new ClientPackage({
+          clientId: client._id,
+          packageId: packageId,
+          startDate: new Date(),
+          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days trial
+          status: 'trial',
+          billingCycle: 'monthly',
+          assignedBy: req.user._id,
+          isActive: true
+        });
+        await clientPackage.save();
+
+        // Create Subscription record
+        const subscriptionCode = `SUB${String(await Subscription.countDocuments() + 1).padStart(4, '0')}`;
+        const subscription = new Subscription({
+          subscriptionCode,
+          clientId: client._id,
+          packageId: packageId,
+          clientPackageId: clientPackage._id,
+          startDate: new Date(),
+          endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          status: 'trial',
+          billingCycle: 'monthly',
+          basePrice: package.pricing?.monthly || 0,
+          effectivePrice: package.pricing?.monthly || 0,
+          autoRenew: false,
+          assignedBy: req.user._id,
+          isActive: true
+        });
+        await subscription.save();
+      }
+    }
 
     // Create admin user for the client
     if (adminUser) {
