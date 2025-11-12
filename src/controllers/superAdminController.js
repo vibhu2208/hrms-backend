@@ -137,17 +137,37 @@ const getClients = async (req, res) => {
 
     const skip = (page - 1) * limit;
     const clients = await Client.find(query)
+      .populate('subscription.packageId', 'name type pricing')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
     const total = await Client.countDocuments(query);
     const pages = Math.ceil(total / limit);
+    
+    // Get ClientPackage data for each client to show current active packages
+    const ClientPackage = require('../models/ClientPackage');
+    const clientsWithPackages = await Promise.all(
+      clients.map(async (client) => {
+        const clientObj = client.toObject();
+        
+        // Get active ClientPackages for this client
+        const activePackages = await ClientPackage.find({
+          clientId: client._id,
+          status: { $in: ['active', 'trial'] }
+        }).populate('packageId', 'name type pricing');
+        
+        clientObj.activePackages = activePackages;
+        clientObj.hasActivePackage = activePackages.length > 0;
+        
+        return clientObj;
+      })
+    );
 
     res.json({
       success: true,
       data: {
-        clients,
+        clients: clientsWithPackages,
         pagination: {
           current: parseInt(page),
           pages,
@@ -191,21 +211,60 @@ const getClient = async (req, res) => {
 
 const createClient = async (req, res) => {
   try {
-    const client = new Client(req.body);
+    const { adminEmail, ...clientData } = req.body;
+    
+    console.log('🎯 Creating client with data:', clientData);
+    console.log('👤 Admin email provided:', adminEmail);
+    
+    // Create the client
+    const client = new Client(clientData);
     await client.save();
+    console.log('✅ Client created:', client.companyName);
+
+    // Create admin user if adminEmail is provided
+    if (adminEmail) {
+      try {
+        const User = require('../models/User');
+        
+        // Check if user already exists
+        const existingUser = await User.findOne({ email: adminEmail });
+        if (existingUser) {
+          console.log('⚠️ Admin user already exists:', adminEmail);
+        } else {
+          // Create admin user
+          const adminUser = new User({
+            email: adminEmail,
+            password: 'password123', // Default password
+            authProvider: 'local',
+            role: 'admin',
+            clientId: client._id,
+            isActive: true
+          });
+          
+          await adminUser.save();
+          console.log('✅ Admin user created:', adminEmail);
+        }
+      } catch (userError) {
+        console.error('❌ Error creating admin user:', userError);
+        // Don't fail the client creation if user creation fails
+      }
+    }
 
     // Log the action
     await logAction(req.user._id, null, 'CREATE_CLIENT', 'Client', client._id, {
       companyName: client.companyName,
-      clientCode: client.clientCode
+      clientCode: client.clientCode,
+      adminEmail: adminEmail
     }, req);
 
     res.status(201).json({
       success: true,
-      message: 'Client created successfully',
-      data: client
+      message: adminEmail ? 'Client and admin user created successfully' : 'Client created successfully',
+      data: client,
+      adminCreated: !!adminEmail
     });
   } catch (error) {
+    console.error('❌ Error creating client:', error);
     res.status(400).json({
       success: false,
       message: 'Error creating client',

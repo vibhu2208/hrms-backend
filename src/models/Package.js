@@ -107,6 +107,17 @@ packageSchema.pre('save', async function(next) {
   next();
 });
 
+// Generate package code for insertMany operations
+packageSchema.pre('insertMany', async function(next, docs) {
+  const count = await mongoose.model('Package').countDocuments();
+  docs.forEach((doc, index) => {
+    if (!doc.packageCode) {
+      doc.packageCode = `PKG${String(count + index + 1).padStart(3, '0')}`;
+    }
+  });
+  next();
+});
+
 // Index for better query performance
 packageSchema.index({ type: 1, isActive: 1 });
 
