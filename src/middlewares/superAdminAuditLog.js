@@ -7,7 +7,7 @@ const { getModuleFromRoute } = require('../config/superAdminRoles');
 // Enhanced audit logging function for Super Admin operations
 const logSuperAdminAction = async (
   userId,
-  clientId,
+  userInternalRole,
   action,
   resourceType,
   resourceId,
@@ -17,11 +17,13 @@ const logSuperAdminAction = async (
   errorMessage = null
 ) => {
   try {
-    // Get user's internal role from request or fetch from database
-    let userInternalRole = 'super_admin';
-    if (req && req.user && req.user.internalRole) {
-      userInternalRole = req.user.internalRole;
+    // Use the passed userInternalRole or default to super_admin
+    if (!userInternalRole) {
+      userInternalRole = req?.user?.internalRole || 'super_admin';
     }
+    
+    // Extract clientId from details
+    const clientId = details.clientId;
 
     // Determine module from route or action
     let module = 'dashboard';
@@ -125,6 +127,11 @@ const generateTags = (action, module, resourceType) => {
 // Middleware factory for automatic audit logging
 const auditSuperAdminAction = (action, resourceType) => {
   return async (req, res, next) => {
+    // Skip audit logging if Super Admin bypass is active
+    if (req.superAdminBypass || req.forcedBypass) {
+      return next();
+    }
+    
     // Store original res.json to intercept response
     const originalJson = res.json;
     
@@ -137,14 +144,15 @@ const auditSuperAdminAction = (action, resourceType) => {
           
           await logSuperAdminAction(
             req.user?._id,
-            req.body?.clientId || req.params?.clientId,
+            req.user?.internalRole || 'super_admin',
             action,
             resourceType,
             req.params?.id || data.data?._id,
             {
               requestBody: req.body,
               queryParams: req.query,
-              responseData: data.success ? { id: data.data?._id } : null
+              responseData: data.success ? { id: data.data?._id } : null,
+              clientId: req.body?.clientId || req.params?.clientId
             },
             req,
             result,

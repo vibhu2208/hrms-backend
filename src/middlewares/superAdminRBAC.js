@@ -27,8 +27,13 @@ const checkSuperAdminPermission = (requiredModule, requiredAction) => {
       // Get user's internal role (default to super_admin if not set)
       const userInternalRole = req.user.internalRole || SUPER_ADMIN_ROLES.SUPER_ADMIN;
       
-      // If user is the main super admin role, grant full access
-      if (req.user.role === 'superadmin' && userInternalRole === SUPER_ADMIN_ROLES.SUPER_ADMIN) {
+      // SUPER ADMIN BYPASS - Grant full access to Super Admin
+      if (req.user.role === 'superadmin' && (userInternalRole === SUPER_ADMIN_ROLES.SUPER_ADMIN || userInternalRole === 'super_admin')) {
+        return next();
+      }
+      
+      // Also bypass if user role is directly 'super_admin' (for consistency)
+      if (userInternalRole === 'super_admin' || userInternalRole === SUPER_ADMIN_ROLES.SUPER_ADMIN) {
         return next();
       }
 
@@ -153,8 +158,13 @@ const requireModuleAccess = (module) => {
 
       const userInternalRole = req.user.internalRole || SUPER_ADMIN_ROLES.SUPER_ADMIN;
       
-      // If user is the main super admin role, grant full access
-      if (req.user.role === 'superadmin' && userInternalRole === SUPER_ADMIN_ROLES.SUPER_ADMIN) {
+      // SUPER ADMIN BYPASS - Grant full access to Super Admin
+      if (req.user.role === 'superadmin' && (userInternalRole === SUPER_ADMIN_ROLES.SUPER_ADMIN || userInternalRole === 'super_admin')) {
+        return next();
+      }
+      
+      // Also bypass if user role is directly 'super_admin' (for consistency)
+      if (userInternalRole === 'super_admin' || userInternalRole === SUPER_ADMIN_ROLES.SUPER_ADMIN) {
         return next();
       }
 
