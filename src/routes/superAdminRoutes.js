@@ -17,6 +17,7 @@ const { MODULES, ACTIONS } = require('../config/superAdminRoles');
 const superAdminController = require('../controllers/superAdminController');
 const roleManagementController = require('../controllers/roleManagementController');
 const auditLogController = require('../controllers/auditLogController');
+const packageManagementController = require('../controllers/packageManagementController');
 
 // Apply authentication and super admin check to all routes
 router.use(protect);
@@ -99,6 +100,78 @@ router.patch('/roles/users/:userId/deactivate',
   checkSuperAdminPermission(MODULES.ROLE_MANAGEMENT, ACTIONS.DELETE),
   auditSuperAdminAction('DEACTIVATE_SUPER_ADMIN_USER', 'User'),
   roleManagementController.deactivateUser
+);
+
+// Package Management routes - Package Management module
+router.get('/packages', 
+  requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
+  packageManagementController.getPackages
+);
+router.get('/packages/analytics', 
+  requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
+  packageManagementController.getPackageAnalytics
+);
+router.get('/packages/:id', 
+  requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
+  packageManagementController.getPackage
+);
+router.post('/packages', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.CREATE),
+  auditSuperAdminAction('CREATE_PACKAGE', 'Package'),
+  packageManagementController.createPackage
+);
+router.put('/packages/:id', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.UPDATE),
+  auditSuperAdminAction('UPDATE_PACKAGE', 'Package'),
+  packageManagementController.updatePackage
+);
+router.patch('/packages/:id/toggle-status', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.UPDATE),
+  auditSuperAdminAction('TOGGLE_PACKAGE_STATUS', 'Package'),
+  packageManagementController.togglePackageStatus
+);
+router.delete('/packages/:id', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.DELETE),
+  auditSuperAdminAction('DELETE_PACKAGE', 'Package'),
+  packageManagementController.deletePackage
+);
+
+// Module Management routes - Package Management module
+router.get('/modules', 
+  requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
+  packageManagementController.getModules
+);
+
+// Client Package Assignment routes - Package Management module
+router.post('/packages/assign', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.CREATE),
+  auditSuperAdminAction('ASSIGN_PACKAGE', 'ClientPackage'),
+  packageManagementController.assignPackageToClient
+);
+router.get('/clients/:clientId/packages', 
+  requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
+  packageManagementController.getClientPackages
+);
+router.put('/client-packages/:clientPackageId', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.UPDATE),
+  auditSuperAdminAction('UPDATE_CLIENT_PACKAGE', 'ClientPackage'),
+  packageManagementController.updateClientPackage
+);
+router.patch('/client-packages/:clientPackageId/cancel', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.UPDATE),
+  auditSuperAdminAction('CANCEL_CLIENT_PACKAGE', 'ClientPackage'),
+  packageManagementController.cancelClientPackage
+);
+
+// Module Customization routes - Package Management module
+router.post('/clients/:clientId/modules/customize', 
+  checkSuperAdminPermission(MODULES.PACKAGE_MANAGEMENT, ACTIONS.CONFIGURE),
+  auditSuperAdminAction('CUSTOMIZE_CLIENT_MODULES', 'ClientModuleOverride'),
+  packageManagementController.customizeClientModules
+);
+router.get('/clients/:clientId/modules/overrides', 
+  requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
+  packageManagementController.getClientModuleOverrides
 );
 
 // Audit Log routes - Audit Logs module

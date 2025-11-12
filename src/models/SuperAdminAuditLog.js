@@ -25,22 +25,29 @@ const superAdminAuditLogSchema = new mongoose.Schema({
     enum: [
       // CRUD operations
       'CREATE_CLIENT', 'UPDATE_CLIENT', 'DELETE_CLIENT', 'UPDATE_CLIENT_STATUS', 'UPDATE_CLIENT_SUBSCRIPTION',
-      'CREATE_PACKAGE', 'UPDATE_PACKAGE', 'DELETE_PACKAGE', 'UPDATE_PACKAGE_STATUS',
+      'CREATE_PACKAGE', 'UPDATE_PACKAGE', 'DELETE_PACKAGE', 'UPDATE_PACKAGE_STATUS', 'TOGGLE_PACKAGE_STATUS',
       'CREATE_BILLING', 'UPDATE_BILLING', 'DELETE_BILLING', 'APPROVE_BILLING',
       'CREATE_COMPLIANCE_RECORD', 'UPDATE_COMPLIANCE_RECORD', 'DELETE_COMPLIANCE_RECORD', 'APPROVE_COMPLIANCE',
       'UPDATE_SYSTEM_CONFIG', 'CONFIGURE_SYSTEM',
       'CREATE_DATA_BACKUP', 'RESTORE_DATA', 'DELETE_DATA',
       'CREATE_REPORT', 'EXPORT_REPORT', 'EXPORT_DATA',
       
+      // Package Management operations
+      'ASSIGN_PACKAGE', 'UPDATE_CLIENT_PACKAGE', 'CANCEL_CLIENT_PACKAGE', 'CANCEL_PACKAGE',
+      'CUSTOMIZE_MODULES', 'CUSTOMIZE_CLIENT_MODULES', 'UPDATE_MODULE_OVERRIDE',
+      
       // Role management
       'CREATE_SUPER_ADMIN_USER', 'UPDATE_SUPER_ADMIN_USER', 'DELETE_SUPER_ADMIN_USER', 'UPDATE_USER_ROLE',
+      'DEACTIVATE_SUPER_ADMIN_USER',
       
       // Security and access
       'LOGIN', 'LOGOUT', 'FAILED_LOGIN', 'PASSWORD_CHANGE', 'PASSWORD_RESET',
       'UNAUTHORIZED_ACCESS_ATTEMPT', 'UNAUTHORIZED_ROUTE_ACCESS', 'UNAUTHORIZED_MODULE_ACCESS', 'INSUFFICIENT_ROLE_LEVEL',
+      'ROUTE_ACCESS', 'MODULE_ACCESS',
       
       // System operations
       'SYSTEM_HEALTH_CHECK', 'DASHBOARD_ACCESS', 'ANALYTICS_ACCESS', 'MONITORING_ACCESS',
+      'EXPORT_AUDIT_LOGS',
       
       // Data operations
       'DATA_EXPORT', 'DATA_IMPORT', 'BULK_OPERATION'
@@ -61,7 +68,7 @@ const superAdminAuditLogSchema = new mongoose.Schema({
   // Resource type affected
   resourceType: {
     type: String,
-    enum: ['Client', 'Package', 'User', 'Subscription', 'Billing', 'Compliance', 'Config', 'Report', 'Data', 'System'],
+    enum: ['Client', 'Package', 'User', 'Subscription', 'Billing', 'Compliance', 'Config', 'Report', 'Data', 'System', 'ClientPackage', 'ClientModuleOverride', 'Module'],
     required: true
   },
   
