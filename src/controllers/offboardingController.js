@@ -1,7 +1,10 @@
-const Offboarding = require('../models/Offboarding');
+const { getTenantModel } = require('../utils/tenantModels');
 
 exports.getOffboardingList = async (req, res) => {
   try {
+    // Get tenant-specific models
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
+    
     const { status } = req.query;
     let query = {};
 
@@ -21,6 +24,7 @@ exports.getOffboardingList = async (req, res) => {
 
 exports.getOffboarding = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const offboarding = await Offboarding.findById(req.params.id)
       .populate('employee')
       .populate('initiatedBy')
@@ -39,6 +43,7 @@ exports.getOffboarding = async (req, res) => {
 
 exports.createOffboarding = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const { employee, lastWorkingDate, resignationType, reason } = req.body;
 
     const offboarding = await Offboarding.create({
@@ -60,6 +65,7 @@ exports.createOffboarding = async (req, res) => {
 
 exports.updateOffboarding = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const offboarding = await Offboarding.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!offboarding) {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
@@ -72,6 +78,7 @@ exports.updateOffboarding = async (req, res) => {
 
 exports.advanceStage = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const offboarding = await Offboarding.findById(req.params.id);
     if (!offboarding) {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
@@ -99,6 +106,7 @@ exports.advanceStage = async (req, res) => {
 
 exports.scheduleExitInterview = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const { scheduledDate, conductedBy } = req.body;
     const offboarding = await Offboarding.findById(req.params.id);
 
@@ -118,6 +126,7 @@ exports.scheduleExitInterview = async (req, res) => {
 
 exports.completeExitInterview = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const { feedback } = req.body;
     const offboarding = await Offboarding.findById(req.params.id);
 
@@ -137,6 +146,7 @@ exports.completeExitInterview = async (req, res) => {
 
 exports.recordAssetReturn = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const { asset, condition } = req.body;
     const offboarding = await Offboarding.findById(req.params.id);
 
@@ -160,6 +170,7 @@ exports.recordAssetReturn = async (req, res) => {
 
 exports.updateClearance = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const { department, cleared, notes } = req.body;
     const offboarding = await Offboarding.findById(req.params.id);
 
@@ -186,6 +197,7 @@ exports.updateClearance = async (req, res) => {
 
 exports.processFinalSettlement = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const { amount, paymentStatus } = req.body;
     const offboarding = await Offboarding.findById(req.params.id);
 
@@ -207,6 +219,7 @@ exports.processFinalSettlement = async (req, res) => {
 
 exports.deleteOffboarding = async (req, res) => {
   try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const offboarding = await Offboarding.findByIdAndDelete(req.params.id);
     if (!offboarding) {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });

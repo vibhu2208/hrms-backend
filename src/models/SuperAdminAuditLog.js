@@ -23,6 +23,9 @@ const superAdminAuditLogSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: [
+      // Generic CRUD operations
+      'CREATE', 'READ', 'UPDATE', 'DELETE',
+      
       // CRUD operations
       'CREATE_CLIENT', 'UPDATE_CLIENT', 'DELETE_CLIENT', 'UPDATE_CLIENT_STATUS', 'UPDATE_CLIENT_SUBSCRIPTION',
       'CREATE_PACKAGE', 'UPDATE_PACKAGE', 'DELETE_PACKAGE', 'UPDATE_PACKAGE_STATUS', 'TOGGLE_PACKAGE_STATUS',
@@ -50,7 +53,16 @@ const superAdminAuditLogSchema = new mongoose.Schema({
       'EXPORT_AUDIT_LOGS',
       
       // Data operations
-      'DATA_EXPORT', 'DATA_IMPORT', 'BULK_OPERATION'
+      'DATA_EXPORT', 'DATA_IMPORT', 'BULK_OPERATION', 'SEED_BILLING_DATA',
+      
+      // Subscription operations
+      'CREATE_SUBSCRIPTION', 'UPDATE_SUBSCRIPTION', 'RENEW_SUBSCRIPTION', 'CANCEL_SUBSCRIPTION', 'SUSPEND_SUBSCRIPTION', 'REACTIVATE_SUBSCRIPTION',
+      
+      // Invoice operations
+      'GENERATE_INVOICE', 'UPDATE_INVOICE', 'MARK_INVOICE_PAID', 'SEND_INVOICE_REMINDER', 'CANCEL_INVOICE',
+      
+      // Payment operations
+      'PROCESS_PAYMENT', 'REFUND_PAYMENT', 'VERIFY_PAYMENT', 'RECONCILE_PAYMENT'
     ]
   },
   
@@ -68,7 +80,7 @@ const superAdminAuditLogSchema = new mongoose.Schema({
   // Resource type affected
   resourceType: {
     type: String,
-    enum: ['Client', 'Package', 'User', 'Subscription', 'Billing', 'Compliance', 'Config', 'Report', 'Data', 'System', 'ClientPackage', 'ClientModuleOverride', 'Module'],
+    enum: ['Client', 'Package', 'User', 'Subscription', 'Invoice', 'Payment', 'Billing', 'Compliance', 'Config', 'Report', 'Data', 'System', 'ClientPackage', 'ClientModuleOverride', 'Module'],
     required: true
   },
   

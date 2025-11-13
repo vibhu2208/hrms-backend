@@ -18,10 +18,42 @@ const superAdminController = require('../controllers/superAdminController');
 const roleManagementController = require('../controllers/roleManagementController');
 const auditLogController = require('../controllers/auditLogController');
 const packageManagementController = require('../controllers/packageManagementController');
+const subscriptionController = require('../controllers/subscriptionController');
+const billingController = require('../controllers/billingController');
+const paymentController = require('../controllers/paymentController');
+const revenueController = require('../controllers/revenueController');
+const billingAutomationController = require('../controllers/billingAutomationController');
+const { seedBillingData } = require('../seeders/billingSeeder');
+
+// Import Super Admin bypass middleware
+const { superAdminBypass, forceSuperAdminBypass } = require('../middlewares/superAdminBypass');
+
+// Import billing RBAC middleware
+const {
+  canCreateSubscription,
+  canUpdateSubscription,
+  canCancelSubscription,
+  canSuspendSubscription,
+  canGenerateInvoice,
+  canUpdateInvoice,
+  canMarkInvoiceAsPaid,
+  canSendInvoiceReminder,
+  canProcessPayment,
+  canProcessRefund,
+  canVerifyPayment,
+  canReconcilePayment,
+  canViewRevenueDashboard,
+  canExportRevenueData,
+  requireHighValueApproval,
+  requireClientBillingAccess,
+  auditBillingOperation
+} = require('../middlewares/billingRBAC');
 
 // Apply authentication and super admin check to all routes
 router.use(protect);
 router.use(requireSuperAdmin);
+router.use(superAdminBypass); // SUPER ADMIN BYPASS - Give Super Admin full access to everything
+// Fixed Super Admin bypass implementation
 router.use(addUserPermissions); // Add user permissions to all requests
 router.use(logRouteAccess); // Log significant route access
 
@@ -172,6 +204,243 @@ router.post('/clients/:clientId/modules/customize',
 router.get('/clients/:clientId/modules/overrides', 
   requireModuleAccess(MODULES.PACKAGE_MANAGEMENT),
   packageManagementController.getClientModuleOverrides
+);
+
+// Subscription Management routes - Subscription & Billing module
+router.get('/subscriptions', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  subscriptionController.getAllSubscriptions
+);
+router.get('/subscriptions/expiring', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  subscriptionController.getExpiringSubscriptions
+);
+router.get('/subscriptions/expired', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  subscriptionController.getExpiredSubscriptions
+);
+router.get('/subscriptions/:id', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  subscriptionController.getSubscriptionById
+);
+router.post('/subscriptions', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.CREATE),
+  auditSuperAdminAction('CREATE_SUBSCRIPTION', 'Subscription'),
+  subscriptionController.createSubscription
+);
+router.put('/subscriptions/:id', 
+  auditBillingOperation('UPDATE_SUBSCRIPTION'),
+  auditSuperAdminAction('UPDATE_SUBSCRIPTION', 'Subscription'),
+  subscriptionController.updateSubscription
+);
+router.patch('/subscriptions/:id/renew', 
+  auditBillingOperation('RENEW_SUBSCRIPTION'),
+  auditSuperAdminAction('RENEW_SUBSCRIPTION', 'Subscription'),
+  subscriptionController.renewSubscription
+);
+router.patch('/subscriptions/:id/cancel', 
+  auditBillingOperation('CANCEL_SUBSCRIPTION'),
+  auditSuperAdminAction('CANCEL_SUBSCRIPTION', 'Subscription'),
+  subscriptionController.cancelSubscription
+);
+router.patch('/subscriptions/:id/suspend', 
+  auditBillingOperation('SUSPEND_SUBSCRIPTION'),
+  auditSuperAdminAction('SUSPEND_SUBSCRIPTION', 'Subscription'),
+  subscriptionController.suspendSubscription
+);
+router.patch('/subscriptions/:id/reactivate', 
+  auditBillingOperation('REACTIVATE_SUBSCRIPTION'),
+  auditSuperAdminAction('REACTIVATE_SUBSCRIPTION', 'Subscription'),
+  subscriptionController.reactivateSubscription
+);
+
+// Invoice Management routes - Subscription & Billing module
+router.get('/invoices/stats', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingController.getInvoiceStats
+);
+router.get('/invoices', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingController.getAllInvoices
+);
+router.get('/invoices/overdue', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingController.getOverdueInvoices
+);
+router.get('/invoices/due-soon', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingController.getInvoicesDueSoon
+);
+router.get('/invoices/:id', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingController.getInvoiceById
+);
+router.post('/invoices/generate', 
+  auditBillingOperation('GENERATE_INVOICE'),
+  auditSuperAdminAction('GENERATE_INVOICE', 'Invoice'),
+  billingController.generateInvoice
+);
+router.put('/invoices/:id', 
+  auditBillingOperation('UPDATE_INVOICE'),
+  auditSuperAdminAction('UPDATE_INVOICE', 'Invoice'),
+  billingController.updateInvoice
+);
+router.patch('/invoices/:id/mark-paid', 
+  forceSuperAdminBypass, // Force Super Admin bypass for this route
+  auditBillingOperation('MARK_INVOICE_PAID'), // Now respects bypass
+  auditSuperAdminAction('MARK_INVOICE_PAID', 'Invoice'), // Now respects bypass
+  billingController.markInvoiceAsPaid
+);
+router.patch('/invoices/:id/send-reminder', 
+  auditBillingOperation('SEND_INVOICE_REMINDER'),
+  auditSuperAdminAction('SEND_INVOICE_REMINDER', 'Invoice'),
+  billingController.sendInvoiceReminder
+);
+router.get('/invoices/:id/pdf', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingController.generateInvoicePDF
+);
+
+// Payment Management routes - Subscription & Billing module
+router.get('/payments', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  paymentController.getAllPayments
+);
+router.get('/payments/pending', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  paymentController.getPendingPayments
+);
+router.get('/payments/failed', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  paymentController.getFailedPayments
+);
+router.get('/payments/stats', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  paymentController.getPaymentStats
+);
+router.get('/payments/:id', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  paymentController.getPaymentById
+);
+router.post('/payments', 
+  canProcessPayment,
+  auditBillingOperation('CREATE_PAYMENT'),
+  auditSuperAdminAction('CREATE_PAYMENT', 'Payment'),
+  paymentController.createPayment
+);
+router.patch('/payments/:id/status', 
+  canProcessPayment,
+  auditBillingOperation('UPDATE_PAYMENT_STATUS'),
+  auditSuperAdminAction('UPDATE_PAYMENT_STATUS', 'Payment'),
+  paymentController.updatePaymentStatus
+);
+router.patch('/payments/:id/refund', 
+  canProcessRefund,
+  requireHighValueApproval(1000),
+  auditBillingOperation('PROCESS_REFUND'),
+  auditSuperAdminAction('PROCESS_REFUND', 'Payment'),
+  paymentController.processRefund
+);
+router.patch('/payments/:id/verify', 
+  canVerifyPayment,
+  auditBillingOperation('VERIFY_PAYMENT'),
+  auditSuperAdminAction('VERIFY_PAYMENT', 'Payment'),
+  paymentController.verifyPayment
+);
+router.patch('/payments/:id/reconcile', 
+  canReconcilePayment,
+  auditBillingOperation('RECONCILE_PAYMENT'),
+  auditSuperAdminAction('RECONCILE_PAYMENT', 'Payment'),
+  paymentController.reconcilePayment
+);
+
+// Revenue Analytics routes - Subscription & Billing module
+router.get('/revenue/dashboard', 
+  canViewRevenueDashboard,
+  revenueController.getRevenueDashboard
+);
+router.get('/revenue/report', 
+  canExportRevenueData,
+  revenueController.getRevenueReport
+);
+router.get('/revenue/subscription-analytics', 
+  canViewRevenueDashboard,
+  revenueController.getSubscriptionAnalytics
+);
+router.get('/billing/revenue-stats', 
+  canViewRevenueDashboard,
+  billingController.getRevenueStats
+);
+
+// Billing Automation routes - Subscription & Billing module
+router.post('/billing/automation/run-daily', 
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.CONFIGURE),
+  auditSuperAdminAction('RUN_BILLING_AUTOMATION', 'System'),
+  billingAutomationController.runDailyAutomation
+);
+router.get('/billing/automation/status', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingAutomationController.getAutomationStatus
+);
+router.get('/billing/automation/settings', 
+  requireModuleAccess(MODULES.SUBSCRIPTION_BILLING),
+  billingAutomationController.getAutomationSettings
+);
+router.put('/billing/automation/settings', 
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.CONFIGURE),
+  auditSuperAdminAction('UPDATE_AUTOMATION_SETTINGS', 'System'),
+  billingAutomationController.updateAutomationSettings
+);
+router.post('/billing/automation/trigger-renewal/:subscriptionId', 
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.UPDATE),
+  auditSuperAdminAction('TRIGGER_RENEWAL_ALERT', 'Subscription'),
+  billingAutomationController.triggerRenewalAlert
+);
+router.post('/billing/automation/trigger-auto-renewal/:subscriptionId', 
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.UPDATE),
+  auditSuperAdminAction('TRIGGER_AUTO_RENEWAL', 'Subscription'),
+  billingAutomationController.triggerAutoRenewal
+);
+router.post('/billing/automation/test-notifications', 
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.CONFIGURE),
+  auditSuperAdminAction('TEST_BILLING_NOTIFICATIONS', 'System'),
+  billingAutomationController.testNotifications
+);
+
+// Database Seeding route - Development/Testing only
+router.post('/system/seed-billing-data', 
+  checkSuperAdminPermission(MODULES.SUBSCRIPTION_BILLING, ACTIONS.CONFIGURE),
+  auditSuperAdminAction('SEED_BILLING_DATA', 'System'),
+  async (req, res) => {
+    try {
+      const { clearExisting = false } = req.body;
+      
+      console.log('🌱 Seeding billing data via API...');
+      const result = await seedBillingData(clearExisting);
+      
+      res.json({
+        success: true,
+        message: 'Billing data seeded successfully',
+        data: {
+          users: result.users.length,
+          clients: result.clients.length,
+          packages: result.packages.length,
+          clientPackages: result.clientPackages.length,
+          subscriptions: result.subscriptions.length,
+          invoices: result.invoices.length,
+          payments: result.payments.length
+        }
+      });
+    } catch (error) {
+      console.error('❌ Error seeding billing data:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error seeding billing data',
+        error: error.message
+      });
+    }
+  }
 );
 
 // Audit Log routes - Audit Logs module

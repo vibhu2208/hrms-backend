@@ -19,8 +19,10 @@ const {
   handleOAuthCallback
 } = require('../controllers/googleSheetsController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 // Bulk upload routes
 router.post('/bulk/validate', authorize('admin', 'hr'), validateBulkEmployees);
