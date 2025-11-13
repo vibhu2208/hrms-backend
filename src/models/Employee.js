@@ -58,6 +58,11 @@ const employeeSchema = new mongoose.Schema({
     ref: 'Department',
     required: [true, 'Department is required']
   },
+  reportingManager: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee',
+    required: false
+  },
   designation: {
     type: String,
     required: true
@@ -160,4 +165,6 @@ employeeSchema.pre('save', async function(next) {
   next();
 });
 
-module.exports = mongoose.model('Employee', employeeSchema);
+const Employee = mongoose.model('Employee', employeeSchema);
+Employee.schema = employeeSchema;
+module.exports = Employee;

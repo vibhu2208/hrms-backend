@@ -1,10 +1,5 @@
-const Onboarding = require('../models/Onboarding');
-const OfferTemplate = require('../models/OfferTemplate');
-const Employee = require('../models/Employee');
-const User = require('../models/User');
-const Candidate = require('../models/Candidate');
-const Department = require('../models/Department');
-const JobPosting = require('../models/JobPosting');
+const { getTenantModel } = require('../utils/tenantModels');
+const User = require('../models/User'); // User model stays global
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 
@@ -187,6 +182,9 @@ exports.sendToOnboarding = async (req, res) => {
 
 exports.getOnboardingList = async (req, res) => {
   try {
+    // Get tenant-specific models
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    
     const { status, department, assignedHR, search } = req.query;
     let query = {};
 
@@ -252,6 +250,7 @@ exports.getOnboardingList = async (req, res) => {
 
 exports.getOnboarding = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const onboarding = await Onboarding.findById(req.params.id)
       .populate('employee')
       .populate('department')
@@ -269,6 +268,7 @@ exports.getOnboarding = async (req, res) => {
 
 exports.createOnboarding = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { candidateName, candidateEmail, position, department } = req.body;
 
     const onboarding = await Onboarding.create({
@@ -290,6 +290,7 @@ exports.createOnboarding = async (req, res) => {
 
 exports.updateOnboarding = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const onboarding = await Onboarding.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!onboarding) {
       return res.status(404).json({ success: false, message: 'Onboarding record not found' });
@@ -302,6 +303,7 @@ exports.updateOnboarding = async (req, res) => {
 
 exports.advanceStage = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const onboarding = await Onboarding.findById(req.params.id);
     if (!onboarding) {
       return res.status(404).json({ success: false, message: 'Onboarding record not found' });
@@ -396,6 +398,7 @@ exports.completeTask = async (req, res) => {
 
 exports.deleteOnboarding = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const onboarding = await Onboarding.findByIdAndDelete(req.params.id);
     if (!onboarding) {
       return res.status(404).json({ success: false, message: 'Onboarding record not found' });
