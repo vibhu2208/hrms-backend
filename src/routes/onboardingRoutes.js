@@ -21,12 +21,14 @@ const {
   requestDocumentResubmission
 } = require('../controllers/onboardingController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // Public routes (no authentication required)
 router.post('/:id/accept-offer', acceptOffer);
 
 // Protected routes
 router.use(protect);
+router.use(tenantMiddleware);
 router.use(authorize('admin', 'hr'));
 
 router.route('/')

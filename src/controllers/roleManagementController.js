@@ -379,7 +379,29 @@ const getMyPermissions = async (req, res) => {
       });
     }
     
-    const internalRole = user.internalRole || SUPER_ADMIN_ROLES.SUPER_ADMIN;
+    // Determine internal role with proper fallback logic
+    let internalRole = user.internalRole;
+    
+    // If no internal role is set, assign based on user role
+    if (!internalRole) {
+      if (user.role === 'superadmin') {
+        internalRole = SUPER_ADMIN_ROLES.SUPER_ADMIN;
+      } else {
+        internalRole = SUPER_ADMIN_ROLES.VIEWER;
+      }
+    }
+    
+    // Ensure the role exists in our definitions
+    if (!ROLE_DEFINITIONS[internalRole]) {
+      console.warn(`Unknown internal role: ${internalRole}, falling back to SUPER_ADMIN`);
+      internalRole = SUPER_ADMIN_ROLES.SUPER_ADMIN;
+    }
+
+    const roleDefinition = ROLE_DEFINITIONS[internalRole];
+    const permissions = PERMISSION_MATRIX[internalRole] || {};
+    const modules = Object.keys(permissions);
+
+    console.log(`✅ User permissions resolved: ${user.email} -> ${internalRole}`);
 
     res.json({
       success: true,
@@ -391,12 +413,14 @@ const getMyPermissions = async (req, res) => {
           internalRole,
           isActive: user.isActive
         },
-        roleDefinition: ROLE_DEFINITIONS[internalRole],
-        permissions: PERMISSION_MATRIX[internalRole] || {},
-        modules: Object.keys(PERMISSION_MATRIX[internalRole] || {})
+        internalRole,
+        roleDefinition,
+        permissions,
+        modules
       }
     });
   } catch (error) {
+    console.error('❌ Error in getMyPermissions:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching user permissions',
