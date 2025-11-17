@@ -1,12 +1,9 @@
-const Employee = require('../models/Employee');
-const Leave = require('../models/Leave');
-const Attendance = require('../models/Attendance');
-const Payroll = require('../models/Payroll');
-const Asset = require('../models/Asset');
-const JobPosting = require('../models/JobPosting');
+const { getTenantModels } = require('../utils/tenantModels');
 
 exports.getDashboardStats = async (req, res) => {
   try {
+    // Get tenant-specific models
+    const { Employee, Leave, Attendance, Payroll, Asset, JobPosting } = getTenantModels(req.tenant.connection);
     // Employee stats
     const totalEmployees = await Employee.countDocuments();
     const activeEmployees = await Employee.countDocuments({ status: 'active' });

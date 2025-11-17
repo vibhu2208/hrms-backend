@@ -1,8 +1,10 @@
-const JobPosting = require('../models/JobPosting');
-const Candidate = require('../models/Candidate');
+const { getTenantModel } = require('../utils/tenantModels');
 
 exports.getJobPostings = async (req, res) => {
   try {
+    // Get tenant-specific models
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+    
     const { status, department } = req.query;
     let query = {};
 
@@ -22,6 +24,7 @@ exports.getJobPostings = async (req, res) => {
 
 exports.getJobPosting = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const job = await JobPosting.findById(req.params.id)
       .populate('department')
       .populate('postedBy');
@@ -38,6 +41,7 @@ exports.getJobPosting = async (req, res) => {
 
 exports.createJobPosting = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     req.body.postedBy = req.user.employeeId;
     const job = await JobPosting.create(req.body);
     res.status(201).json({ success: true, message: 'Job posting created successfully', data: job });
@@ -48,6 +52,7 @@ exports.createJobPosting = async (req, res) => {
 
 exports.updateJobPosting = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const job = await JobPosting.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job posting not found' });
@@ -60,6 +65,7 @@ exports.updateJobPosting = async (req, res) => {
 
 exports.publishJobPosting = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const job = await JobPosting.findById(req.params.id);
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job posting not found' });
@@ -77,6 +83,7 @@ exports.publishJobPosting = async (req, res) => {
 
 exports.closeJobPosting = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const job = await JobPosting.findById(req.params.id);
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job posting not found' });
@@ -93,6 +100,7 @@ exports.closeJobPosting = async (req, res) => {
 
 exports.updateJobStatus = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const { status } = req.body;
     
     if (!['draft', 'active', 'closed', 'on-hold', 'archived'].includes(status)) {
@@ -128,6 +136,7 @@ exports.updateJobStatus = async (req, res) => {
 
 exports.deleteJobPosting = async (req, res) => {
   try {
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const job = await JobPosting.findByIdAndDelete(req.params.id);
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job posting not found' });
@@ -140,10 +149,12 @@ exports.deleteJobPosting = async (req, res) => {
 
 exports.getJobApplicants = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const { id } = req.params;
     const { stage, status, search } = req.query;
 
     // Verify job posting exists
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const job = await JobPosting.findById(id);
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job posting not found' });

@@ -14,8 +14,10 @@ const {
   deleteOffboarding
 } = require('../controllers/offboardingController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 router.use(authorize('admin', 'hr'));
 
 router.route('/')

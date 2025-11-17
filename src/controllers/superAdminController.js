@@ -218,135 +218,51 @@ const getClient = async (req, res) => {
 };
 
 const createClient = async (req, res) => {
-  let companyCreated = null;
-  
   try {
-    // Extract and normalize data from request body
-    const { 
-      companyName, 
-      companyCode,
-      industry,
-      companySize,
-      address,
-      city,
-      state,
-      country,
-      postalCode,
-      phone,
-      website,
-      adminEmail,
-      adminFirstName,
-      adminLastName,
-      adminPhone,
-      subscriptionPlan,
-      subscriptionStartDate,
-      subscriptionEndDate,
-      ...rest
-    } = req.body;
+    const { adminEmail, ...clientData } = req.body;
+    
+    console.log('🎯 Creating client with data:', clientData);
+    console.log('👤 Admin email provided:', adminEmail);
+    
+    // Create the client
+    const client = new Client(clientData);
+    await client.save();
+    console.log('✅ Client created:', client.companyName);
 
-    console.log('🎯 Starting company creation process...');
-    console.log('📝 Company details:', { companyName, companyCode, industry });
-    console.log('👤 Admin details:', { adminEmail, adminFirstName, adminLastName });
-
-    // Validate required fields
-    if (!companyName || !companyCode || !industry) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields. Please provide company name, code, and industry.'
-      });
-    }
-
-    // Check if company with same name or code already exists
-    const existingCompany = await Company.findOne({
-      $or: [{ companyName }, { companyCode }]
-    });
-
-    if (existingCompany) {
-      return res.status(409).json({
-        success: false,
-        message: 'A company with this name or code already exists.',
-        conflict: {
-          field: existingCompany.companyName === companyName ? 'companyName' : 'companyCode',
-          value: existingCompany.companyName === companyName ? companyName : companyCode
-        }
-      });
-    }
-
-    // Generate a unique database name
-    const databaseName = `tenant_${companyCode.toLowerCase()}_${Date.now()}`;
-    console.log(`🔄 Creating database: ${databaseName}`);
-
-    // Step 1: Create the tenant database
-    await createTenantDatabase(databaseName);
-    console.log('✅ Database created successfully');
-
-    // Step 2: Initialize the database with collections and indexes
-    await initializeTenantDatabase(databaseName);
-    console.log('✅ Database initialized with collections');
-
-    // Step 3: Create the company record
-    const companyData = {
-      companyName,
-      companyCode,
-      industry,
-      companySize,
-      address,
-      city,
-      state,
-      country,
-      postalCode,
-      phone,
-      website,
-      databaseName,
-      status: 'active',
-      subscription: {
-        plan: subscriptionPlan || 'basic',
-        startDate: subscriptionStartDate || new Date(),
-        endDate: subscriptionEndDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
-        status: 'active'
-      },
-      settings: {
-        timezone: 'UTC',
-        dateFormat: 'MM/DD/YYYY',
-        timeFormat: '12h',
-        ...(rest.settings || {})
-      }
-    };
-
-    companyCreated = await Company.create(companyData);
-    console.log(`🏢 Company created: ${companyCreated.companyName} (${companyCreated._id})`);
-
-    // Step 4: Create admin user if email is provided
-    let adminUser = null;
+    // Create admin user if adminEmail is provided
     if (adminEmail) {
-      const password = generateAdminPassword();
-      
-      adminUser = await createTenantAdminUser(databaseName, {
-        email: adminEmail,
-        firstName: adminFirstName || 'Admin',
-        lastName: adminLastName || 'User',
-        phone: adminPhone,
-        role: 'admin',
-        password,
-        company: companyCreated._id
-      });
-      
-      console.log(`👤 Admin user created: ${adminUser.email}`);
+      try {
+        const User = require('../models/User');
+        
+        // Check if user already exists
+        const existingUser = await User.findOne({ email: adminEmail });
+        if (existingUser) {
+          console.log('⚠️ Admin user already exists:', adminEmail);
+        } else {
+          // Create admin user
+          const adminUser = new User({
+            email: adminEmail,
+            password: 'password123', // Default password
+            authProvider: 'local',
+            role: 'admin',
+            clientId: client._id,
+            isActive: true
+          });
+          
+          await adminUser.save();
+          console.log('✅ Admin user created:', adminEmail);
+        }
+      } catch (userError) {
+        console.error('❌ Error creating admin user:', userError);
+        // Don't fail the client creation if user creation fails
+      }
     }
 
-    // Step 5: Log the action
-    await logAction({
-      action: 'COMPANY_CREATED',
-      entity: 'Company',
-      entityId: companyCreated._id,
-      userId: req.user ? req.user._id : null,
-      description: `Created company ${companyCreated.companyName}`,
-      metadata: {
-        companyName: companyCreated.companyName,
-        companyCode: companyCreated.companyCode,
-        databaseName: companyCreated.databaseName,
-        adminEmail: adminEmail
-      }
+    // Log the action
+    await logAction(req.user._id, null, 'CREATE_CLIENT', 'Client', client._id, {
+      companyName: client.companyName,
+      clientCode: client.clientCode,
+      adminEmail: adminEmail
     }, req);
 
     console.log(`✅ Company creation completed successfully: ${companyCreated.companyName}`);
@@ -368,39 +284,13 @@ const createClient = async (req, res) => {
     // Return success response (without password for security)
     const response = {
       success: true,
-      message: adminEmail ? 'Company and admin user created successfully' : 'Company created successfully',
-      data: {
-        _id: companyCreated._id,
-        companyName: companyCreated.companyName,
-        companyCode: companyCreated.companyCode,
-        industry: companyCreated.industry,
-        status: companyCreated.status,
-        subscription: companyCreated.subscription,
-        databaseName: companyCreated.databaseName,
-        createdAt: companyCreated.createdAt
-      },
+      message: adminEmail ? 'Client and admin user created successfully' : 'Client created successfully',
+      data: client,
       adminCreated: !!adminEmail
-    };
-
-    res.status(201).json(response);
+    });
   } catch (error) {
-    console.error('❌ Error creating company:', error);
-
-    // Cleanup on error
-    if (companyCreated) {
-      try {
-        // Delete the company record if it was created
-        await Company.findByIdAndDelete(companyCreated._id);
-        console.log(`🧹 Cleaned up company record: ${companyCreated._id}`);
-        
-        // TODO: Add cleanup for the created database if needed
-        // await deleteTenantDatabase(companyCreated.databaseName);
-      } catch (cleanupError) {
-        console.error('❌ Error during cleanup:', cleanupError);
-      }
-    }
-
-    res.status(500).json({
+    console.error('❌ Error creating client:', error);
+    res.status(400).json({
       success: false,
       message: 'Error creating company',
       error: error.message
