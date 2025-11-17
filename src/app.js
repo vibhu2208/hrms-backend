@@ -18,6 +18,7 @@ const assetRoutes = require('./routes/assetRoutes');
 const jobPostingRoutes = require('./routes/jobPostingRoutes');
 const onboardingRoutes = require('./routes/onboardingRoutes');
 const offboardingRoutes = require('./routes/offboardingRoutes');
+const tenantOffboardingRoutes = require('./routes/tenant/offboardingRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const clientRoutes = require('./routes/clientRoutes');
 const projectRoutes = require('./routes/projectRoutes');
@@ -37,6 +38,10 @@ const employeeDashboardRoutes = require('./routes/employeeDashboard');
 const candidateDocumentRoutes = require('./routes/candidateDocumentRoutes');
 const userRoutes = require('./routes/userRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
+const testRoutes = require('./routes/testRoutes');
+
+// Import tenant middleware
+const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
 
 // Connect to database
 connectDB();
@@ -73,7 +78,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/public/jobs', publicJobRoutes);
 app.use('/api/candidate-documents', candidateDocumentRoutes);
 
-// Protected API Routes
+// Protected API Routes (tenant isolation handled within route files)
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/departments', departmentRoutes);
@@ -84,6 +89,7 @@ app.use('/api/assets', assetRoutes);
 app.use('/api/jobs', jobPostingRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/offboarding', offboardingRoutes);
+app.use('/api/tenant/offboarding', tenantOffboardingRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/projects', projectRoutes);
@@ -101,6 +107,7 @@ app.use('/api/offer-templates', offerTemplateRoutes);
 app.use('/api/employee', employeeDashboardRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
+app.use('/api/test', testRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

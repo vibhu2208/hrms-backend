@@ -12,8 +12,10 @@ const {
   getJobApplicants
 } = require('../controllers/jobPostingController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 router.route('/')
   .get(getJobPostings)

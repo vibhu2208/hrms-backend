@@ -1,10 +1,12 @@
-const Employee = require('../models/Employee');
+const { getTenantModel } = require('../utils/tenantModels');
 
 // @desc    Get all employees
 // @route   GET /api/employees
 // @access  Private
 exports.getEmployees = async (req, res) => {
   try {
+    // Get tenant-specific Employee model
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const { status, department, search } = req.query;
     let query = {};
 
@@ -42,6 +44,7 @@ exports.getEmployees = async (req, res) => {
 // @access  Private
 exports.getEmployee = async (req, res) => {
   try {
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const employee = await Employee.findById(req.params.id)
       .populate('department')
       .populate('reportingManager', 'firstName lastName email designation');
@@ -70,6 +73,7 @@ exports.getEmployee = async (req, res) => {
 // @access  Private (Admin, HR)
 exports.createEmployee = async (req, res) => {
   try {
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const employee = await Employee.create(req.body);
 
     res.status(201).json({
@@ -90,6 +94,7 @@ exports.createEmployee = async (req, res) => {
 // @access  Private (Admin, HR)
 exports.updateEmployee = async (req, res) => {
   try {
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const employee = await Employee.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -121,6 +126,7 @@ exports.updateEmployee = async (req, res) => {
 // @access  Private (Admin)
 exports.deleteEmployee = async (req, res) => {
   try {
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const employee = await Employee.findByIdAndDelete(req.params.id);
 
     if (!employee) {
@@ -147,6 +153,7 @@ exports.deleteEmployee = async (req, res) => {
 // @access  Private (Admin, HR)
 exports.getEmployeeStats = async (req, res) => {
   try {
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const total = await Employee.countDocuments();
     const active = await Employee.countDocuments({ status: 'active' });
     const inactive = await Employee.countDocuments({ status: 'inactive' });
