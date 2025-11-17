@@ -365,62 +365,98 @@ Return ONLY valid JSON, no markdown or extra text.`;
   }
 
   /**
-   * Generate rule-based insights (fallback)
+   * Generate rule-based insights (fallback) - Enhanced with specific details
    */
   generateRuleBasedInsights(jobPosting, candidate, skillsMatch, experienceMatch) {
     const highlights = [];
     const weaknesses = [];
+    const recommendations = [];
     
-    // Analyze skills
+    // Detailed skill analysis
     if (skillsMatch.matchPercentage >= 80) {
-      highlights.push(`Strong skill match: ${skillsMatch.matchPercentage}% of required skills`);
+      highlights.push(`🎯 Excellent skill match: ${skillsMatch.matchPercentage}% of required skills aligned`);
     } else if (skillsMatch.matchPercentage >= 60) {
-      highlights.push(`Good skill match: ${skillsMatch.matchPercentage}% of required skills`);
+      highlights.push(`✓ Good skill match: ${skillsMatch.matchPercentage}% of required skills aligned`);
+    } else if (skillsMatch.matchPercentage >= 40) {
+      highlights.push(`△ Moderate skill match: ${skillsMatch.matchPercentage}% of required skills aligned`);
     } else {
-      weaknesses.push(`Limited skill match: Only ${skillsMatch.matchPercentage}% of required skills`);
+      weaknesses.push(`⚠️ Limited skill match: Only ${skillsMatch.matchPercentage}% of required skills present`);
     }
     
-    // Analyze experience
+    // Detailed experience analysis
     if (experienceMatch.isMatch) {
-      highlights.push(`Experience aligns well with requirements (${experienceMatch.candidateYears} years)`);
+      highlights.push(`✓ Experience aligns perfectly: ${experienceMatch.candidateYears} years (Required: ${experienceMatch.requiredYears})`);
+    } else if (experienceMatch.score >= 70) {
+      highlights.push(`△ Experience close to requirement: ${experienceMatch.candidateYears} years (Required: ${experienceMatch.requiredYears})`);
     } else {
-      weaknesses.push(`Experience mismatch: Has ${experienceMatch.candidateYears} years, requires ${experienceMatch.requiredYears}`);
+      weaknesses.push(`⚠️ Experience gap: Has ${experienceMatch.candidateYears} years, requires ${experienceMatch.requiredYears}`);
     }
     
-    // Analyze matched skills
+    // Matched skills with confidence
     if (skillsMatch.matched.length > 0) {
-      highlights.push(`Proficient in: ${skillsMatch.matched.slice(0, 3).join(', ')}`);
+      const topMatched = skillsMatch.matched.slice(0, 5);
+      highlights.push(`💪 Core competencies: ${topMatched.join(', ')}`);
     }
     
-    // Analyze missing skills
+    // Missing skills with learning potential
     if (skillsMatch.missing.length > 0) {
-      weaknesses.push(`Missing skills: ${skillsMatch.missing.slice(0, 3).join(', ')}`);
+      const topMissing = skillsMatch.missing.slice(0, 3);
+      weaknesses.push(`📚 Skills to develop: ${topMissing.join(', ')}`);
+      recommendations.push(`Candidate can acquire missing skills through training: ${topMissing.join(', ')}`);
     }
     
     // Additional highlights
     if (candidate.currentCompany) {
-      highlights.push(`Currently working at ${candidate.currentCompany}`);
+      highlights.push(`🏢 Currently at: ${candidate.currentCompany}`);
     }
     
     if (candidate.education && candidate.education.length > 0) {
       const degrees = candidate.education.map(e => e.degree).join(', ');
-      highlights.push(`Education: ${degrees}`);
+      highlights.push(`🎓 Education: ${degrees}`);
     }
     
-    // Determine overall fit
+    // Additional skills analysis
+    if (skillsMatch.additional && skillsMatch.additional.length > 0) {
+      const bonus = skillsMatch.additional.slice(0, 3);
+      highlights.push(`⭐ Bonus skills: ${bonus.join(', ')}`);
+    }
+    
+    // Career progression potential
+    if (candidate.experience?.years >= 5) {
+      highlights.push(`📈 Senior level candidate with proven track record`);
+    } else if (candidate.experience?.years >= 2) {
+      highlights.push(`📊 Mid-level candidate with solid foundation`);
+    } else if (candidate.experience?.years > 0) {
+      recommendations.push(`Candidate is early-career; may need mentoring and support`);
+    }
+    
+    // Determine overall fit with detailed reasoning
     let overallFit = 'average';
     if (skillsMatch.matchPercentage >= 80 && experienceMatch.score >= 80) {
       overallFit = 'excellent';
+      recommendations.push(`Strong candidate - ready to contribute immediately`);
     } else if (skillsMatch.matchPercentage >= 60 && experienceMatch.score >= 60) {
       overallFit = 'good';
-    } else if (skillsMatch.matchPercentage < 40 || experienceMatch.score < 40) {
+      recommendations.push(`Good fit - may need brief onboarding for specific tools/processes`);
+    } else if (skillsMatch.matchPercentage >= 40 && experienceMatch.score >= 40) {
+      overallFit = 'average';
+      recommendations.push(`Moderate fit - requires training in key areas but has potential`);
+    } else {
       overallFit = 'poor';
+      recommendations.push(`Consider only if willing to invest in significant training`);
     }
     
     return {
-      keyHighlights: highlights.slice(0, 5),
-      weaknesses: weaknesses.slice(0, 3),
-      overallFit
+      keyHighlights: highlights.slice(0, 6),
+      weaknesses: weaknesses.slice(0, 4),
+      overallFit,
+      recommendations: recommendations.slice(0, 3),
+      skillGapAnalysis: {
+        matched: skillsMatch.matched.slice(0, 10),
+        missing: skillsMatch.missing.slice(0, 5),
+        additional: skillsMatch.additional.slice(0, 5),
+        matchPercentage: skillsMatch.matchPercentage
+      }
     };
   }
 
@@ -446,7 +482,7 @@ Return ONLY valid JSON, no markdown or extra text.`;
   }
 
   /**
-   * Main method to analyze a candidate for a job
+   * Main method to analyze a candidate for a job - Enhanced with detailed metrics
    */
   async analyzeCandidate(candidate, jobPosting) {
     try {
@@ -457,6 +493,7 @@ Return ONLY valid JSON, no markdown or extra text.`;
         Current Role: ${candidate.currentDesignation || ''}
         Skills: ${candidate.skills?.join(', ') || ''}
         Education: ${candidate.education?.map(e => `${e.degree} in ${e.specialization}`).join(', ') || ''}
+        Company: ${candidate.currentCompany || ''}
       `.trim();
       
       const jobDescription = `
@@ -464,13 +501,14 @@ Return ONLY valid JSON, no markdown or extra text.`;
         ${jobPosting.description}
         Required Skills: ${jobPosting.skills?.join(', ') || ''}
         Requirements: ${jobPosting.requirements?.join(', ') || ''}
+        Department: ${jobPosting.department?.name || ''}
       `.trim();
       
-      // Perform analyses
+      // Perform detailed analyses
       const skillsMatch = this.analyzeSkillsMatch(jobPosting.skills, candidate.skills);
       const experienceMatch = this.analyzeExperienceMatch(jobPosting.experience, candidate.experience);
       
-      // Calculate semantic similarity (if OpenAI is available)
+      // Calculate semantic similarity (if AI API is available)
       let semanticScore = 0;
       try {
         semanticScore = await this.calculateSemanticSimilarity(jobDescription, candidateProfile);
@@ -484,14 +522,47 @@ Return ONLY valid JSON, no markdown or extra text.`;
       // Calculate overall match score
       const matchScore = this.calculateMatchScore(skillsMatch, experienceMatch, semanticScore);
       
-      // Extract resume insights
+      // Extract detailed resume insights
       const resumeInsights = {
         totalExperience: `${candidate.experience?.years || 0}y ${candidate.experience?.months || 0}m`,
-        keySkills: candidate.skills?.slice(0, 10) || [],
+        keySkills: candidate.skills?.slice(0, 15) || [],
         education: candidate.education?.map(e => `${e.degree} - ${e.specialization}`) || [],
-        certifications: [], // Can be enhanced with resume parsing
-        projects: [] // Can be enhanced with resume parsing
+        certifications: candidate.certifications || [],
+        currentCompany: candidate.currentCompany || 'Not specified',
+        currentDesignation: candidate.currentDesignation || 'Not specified'
       };
+      
+      // Calculate fit indicators
+      const fitIndicators = {
+        skillFit: skillsMatch.matchPercentage,
+        experienceFit: experienceMatch.score,
+        semanticFit: semanticScore,
+        overallFit: matchScore
+      };
+      
+      // Risk assessment
+      const riskFactors = [];
+      if (skillsMatch.matchPercentage < 50) {
+        riskFactors.push('High skill gap - requires significant training');
+      }
+      if (experienceMatch.score < 50) {
+        riskFactors.push('Experience level may not match role requirements');
+      }
+      if (candidate.experience?.years === 0) {
+        riskFactors.push('Fresh graduate - may need extensive mentoring');
+      }
+      
+      // Opportunity indicators
+      const opportunities = [];
+      if (skillsMatch.additional && skillsMatch.additional.length > 0) {
+        opportunities.push(`Candidate has bonus skills: ${skillsMatch.additional.slice(0, 3).join(', ')}`);
+      }
+      if (experienceMatch.score > 100) {
+        opportunities.push('Candidate is overqualified - could be a senior contributor');
+      }
+      if (candidate.education && candidate.education.length > 1) {
+        opportunities.push('Diverse educational background - brings multiple perspectives');
+      }
       
       return {
         matchScore,
@@ -500,8 +571,13 @@ Return ONLY valid JSON, no markdown or extra text.`;
         experienceMatch,
         keyHighlights: insights.keyHighlights,
         weaknesses: insights.weaknesses,
+        recommendations: insights.recommendations || [],
         overallFit: insights.overallFit,
+        skillGapAnalysis: insights.skillGapAnalysis,
         resumeInsights,
+        fitIndicators,
+        riskFactors: riskFactors.slice(0, 3),
+        opportunities: opportunities.slice(0, 3),
         semanticScore,
         isAnalyzed: true
       };

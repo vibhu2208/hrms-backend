@@ -2,6 +2,7 @@ const Candidate = require('../models/Candidate');
 const JobPosting = require('../models/JobPosting');
 const aiService = require('../services/aiService');
 const resumeParser = require('../utils/resumeParser');
+const { getTenantModel } = require('../utils/tenantModels');
 
 /**
  * Analyze a single candidate for a job posting
@@ -70,11 +71,13 @@ exports.analyzeSingleCandidate = async (req, res) => {
  */
 exports.analyzeJobCandidates = async (req, res) => {
   try {
+    const TenantCandidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const TenantJobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
     const { jobId } = req.params;
     const { forceReanalyze = false } = req.query;
 
     // Fetch job posting
-    const jobPosting = await JobPosting.findById(jobId);
+    const jobPosting = await TenantJobPosting.findById(jobId);
     if (!jobPosting) {
       return res.status(404).json({ 
         success: false, 
@@ -90,7 +93,7 @@ exports.analyzeJobCandidates = async (req, res) => {
       query['aiAnalysis.isAnalyzed'] = { $ne: true };
     }
 
-    const candidates = await Candidate.find(query);
+    const candidates = await TenantCandidate.find(query);
 
     if (candidates.length === 0) {
       return res.status(200).json({
