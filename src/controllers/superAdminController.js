@@ -1,9 +1,17 @@
 const Client = require('../models/Client');
+const Company = require('../models/Company');
 const User = require('../models/User');
 const Package = require('../models/Package');
 const SystemConfig = require('../models/SystemConfig');
 const AuditLog = require('../models/AuditLog');
 const { logAction } = require('../middlewares/auditLog');
+const { 
+  createTenantDatabase, 
+  createTenantAdminUser, 
+  initializeTenantDatabase 
+} = require('../utils/databaseProvisioning');
+const { generateAdminPassword } = require('../utils/generatePassword');
+const { sendCompanyAdminCredentials } = require('../services/emailService');
 
 // Dashboard Overview
 const getDashboardStats = async (req, res) => {
@@ -257,19 +265,43 @@ const createClient = async (req, res) => {
       adminEmail: adminEmail
     }, req);
 
-    res.status(201).json({
+    console.log(`✅ Company creation completed successfully: ${companyCreated.companyName}`);
+
+    // Step 6: Send welcome email with credentials if admin was created
+    if (adminUser) {
+      await sendCompanyAdminCredentials({
+        email: adminEmail,
+        firstName: adminFirstName || 'Admin',
+        companyName: companyCreated.companyName,
+        loginUrl: `${process.env.CLIENT_URL || 'https://your-app-url.com'}/login`,
+        email: adminEmail,
+        password: password,
+        supportEmail: process.env.SUPPORT_EMAIL || 'support@yourcompany.com'
+      });
+      console.log(`📧 Welcome email sent to: ${adminEmail}`);
+    }
+
+    // Return success response (without password for security)
+    const response = {
       success: true,
       message: adminEmail ? 'Client and admin user created successfully' : 'Client created successfully',
       data: client,
       adminCreated: !!adminEmail
-    });
+    };
+    res.status(201).json(response);
   } catch (error) {
     console.error('❌ Error creating client:', error);
     res.status(400).json({
       success: false,
-      message: 'Error creating client',
+      message: 'Error creating company',
       error: error.message
     });
+
+    // Log the action
+    await logAction(req.user._id, null, 'UPDATE_CLIENT_SUBSCRIPTION', 'Client', client._id, {
+      companyName: client.companyName,
+      subscriptionChanges: req.body
+    }, req);
   }
 };
 

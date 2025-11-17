@@ -50,9 +50,7 @@ const userSchema = new mongoose.Schema({
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client',
-    required: function() {
-      return this.role !== 'superadmin';
-    }
+    required: false // Made optional for multi-tenant support
   },
   employeeId: {
     type: mongoose.Schema.Types.ObjectId,

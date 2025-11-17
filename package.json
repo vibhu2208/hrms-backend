@@ -45,7 +45,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^7.0.10",
     "pdf-parse": "^1.1.1",
-    "puppeteer": "^24.29.1"
+    "puppeteer": "^24.30.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
