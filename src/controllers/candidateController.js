@@ -1,6 +1,4 @@
-const Candidate = require('../models/Candidate');
-const Employee = require('../models/Employee');
-const Onboarding = require('../models/Onboarding');
+const { getTenantModel } = require('../utils/tenantModels');
 const { 
   sendInterviewNotification,
   sendApplicationReceivedEmail,
@@ -12,6 +10,7 @@ const {
 
 exports.getCandidates = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const { stage, status, source, search } = req.query;
     let query = {};
 
@@ -40,6 +39,7 @@ exports.getCandidates = async (req, res) => {
 
 exports.getCandidate = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const candidate = await Candidate.findById(req.params.id)
       .populate('appliedFor')
       .populate('referredBy')
@@ -57,6 +57,7 @@ exports.getCandidate = async (req, res) => {
 
 exports.createCandidate = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const candidate = await Candidate.create(req.body);
     
     // Send application received email
@@ -79,6 +80,7 @@ exports.createCandidate = async (req, res) => {
 
 exports.updateCandidate = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
@@ -91,6 +93,8 @@ exports.updateCandidate = async (req, res) => {
 
 exports.updateStage = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { stage } = req.body;
     const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
 
@@ -170,6 +174,7 @@ exports.updateStage = async (req, res) => {
 
 exports.scheduleInterview = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const { interviewType, round, scheduledDate, scheduledTime, meetingLink, meetingPlatform, interviewer } = req.body;
     const candidate = await Candidate.findById(req.params.id)
       .populate('appliedFor', 'title')
@@ -254,6 +259,8 @@ exports.scheduleInterview = async (req, res) => {
 
 exports.convertToEmployee = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     const candidate = await Candidate.findById(req.params.id);
 
     if (!candidate) {
@@ -296,6 +303,8 @@ exports.convertToEmployee = async (req, res) => {
 
 exports.moveToOnboarding = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
 
     if (!candidate) {
@@ -350,6 +359,7 @@ exports.moveToOnboarding = async (req, res) => {
 
 exports.deleteCandidate = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const candidate = await Candidate.findByIdAndDelete(req.params.id);
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
@@ -363,6 +373,7 @@ exports.deleteCandidate = async (req, res) => {
 // Update interview feedback
 exports.updateInterviewFeedback = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const { candidateId, interviewId } = req.params;
     const { feedback, rating, decision, notes, status } = req.body;
 
@@ -417,6 +428,7 @@ exports.updateInterviewFeedback = async (req, res) => {
 // Send notification (Email/Call)
 exports.sendNotification = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const { id } = req.params;
     const { type, notes } = req.body; // type: 'interviewEmail', 'interviewCall', 'offerEmail', 'rejectionEmail'
 
@@ -509,6 +521,8 @@ exports.sendNotification = async (req, res) => {
 // Update HR Call
 exports.updateHRCall = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { id } = req.params;
     const { status, scheduledDate, completedDate, summary, decision } = req.body;
 
@@ -653,6 +667,7 @@ exports.updateHRCall = async (req, res) => {
 // Get candidate timeline
 exports.getCandidateTimeline = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const candidate = await Candidate.findById(req.params.id)
       .populate('timeline.performedBy', 'firstName lastName')
       .populate('interviews.interviewer', 'firstName lastName');
@@ -684,6 +699,7 @@ exports.getCandidateTimeline = async (req, res) => {
  */
 exports.sendInterviewEmail = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const { id } = req.params;
     const { interviewId, companyName } = req.body;
 
