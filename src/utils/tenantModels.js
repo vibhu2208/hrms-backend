@@ -21,13 +21,44 @@ const ExitProcess = require('../models/ExitProcess');
 const TalentPool = require('../models/TalentPool');
 const OfferTemplate = require('../models/OfferTemplate');
 
-// Import offboarding related models
-const OffboardingRequest = require('../models/tenant/OffboardingRequest');
-const OffboardingTask = require('../models/tenant/OffboardingTask');
-const HandoverDetail = require('../models/tenant/HandoverDetail');
-const AssetClearance = require('../models/tenant/AssetClearance');
-const FinalSettlement = require('../models/tenant/FinalSettlement');
-const ExitFeedback = require('../models/tenant/ExitFeedback');
+// Import offboarding related models (if they exist)
+let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
+
+try {
+  OffboardingRequest = require('../models/tenant/OffboardingRequest');
+} catch (e) {
+  OffboardingRequest = null;
+}
+
+try {
+  OffboardingTask = require('../models/tenant/OffboardingTask');
+} catch (e) {
+  OffboardingTask = null;
+}
+
+try {
+  HandoverDetail = require('../models/tenant/HandoverDetail');
+} catch (e) {
+  HandoverDetail = null;
+}
+
+try {
+  AssetClearance = require('../models/tenant/AssetClearance');
+} catch (e) {
+  AssetClearance = null;
+}
+
+try {
+  FinalSettlement = require('../models/tenant/FinalSettlement');
+} catch (e) {
+  FinalSettlement = null;
+}
+
+try {
+  ExitFeedback = require('../models/tenant/ExitFeedback');
+} catch (e) {
+  ExitFeedback = null;
+}
 
 /**
  * Get tenant-specific models using the tenant's database connection
@@ -80,13 +111,13 @@ function getTenantModels(tenantConnection) {
   models.TalentPool = createTenantModel('TalentPool', TalentPool);
   models.OfferTemplate = createTenantModel('OfferTemplate', OfferTemplate);
 
-  // Tenant-specific offboarding models
-  models.OffboardingRequest = createTenantModel('OffboardingRequest', OffboardingRequest);
-  models.OffboardingTask = createTenantModel('OffboardingTask', OffboardingTask);
-  models.HandoverDetail = createTenantModel('HandoverDetail', HandoverDetail);
-  models.AssetClearance = createTenantModel('AssetClearance', AssetClearance);
-  models.FinalSettlement = createTenantModel('FinalSettlement', FinalSettlement);
-  models.ExitFeedback = createTenantModel('ExitFeedback', ExitFeedback);
+  // Tenant-specific offboarding models (only if they exist)
+  if (OffboardingRequest) models.OffboardingRequest = createTenantModel('OffboardingRequest', OffboardingRequest);
+  if (OffboardingTask) models.OffboardingTask = createTenantModel('OffboardingTask', OffboardingTask);
+  if (HandoverDetail) models.HandoverDetail = createTenantModel('HandoverDetail', HandoverDetail);
+  if (AssetClearance) models.AssetClearance = createTenantModel('AssetClearance', AssetClearance);
+  if (FinalSettlement) models.FinalSettlement = createTenantModel('FinalSettlement', FinalSettlement);
+  if (ExitFeedback) models.ExitFeedback = createTenantModel('ExitFeedback', ExitFeedback);
 
   // Cache models on connection
   tenantConnection._tenantModels = models;
