@@ -10,9 +10,11 @@ const {
   clearAnalysis
 } = require('../controllers/aiAnalysisController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // Protect all routes
 router.use(protect);
+router.use(tenantMiddleware);
 
 /**
  * @route   POST /api/ai-analysis/candidates/:candidateId/analyze

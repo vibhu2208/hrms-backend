@@ -345,8 +345,15 @@ const onboardingSchema = new mongoose.Schema({
 // Generate onboarding ID
 onboardingSchema.pre('save', async function(next) {
   if (!this.onboardingId) {
-    const count = await mongoose.model('Onboarding').countDocuments();
-    this.onboardingId = `ONB${String(count + 1).padStart(5, '0')}`;
+    try {
+      // Use the current model's collection to count documents
+      const count = await this.constructor.countDocuments();
+      this.onboardingId = `ONB${String(count + 1).padStart(5, '0')}`;
+    } catch (error) {
+      console.error('Error generating onboardingId:', error);
+      // Fallback: generate using timestamp
+      this.onboardingId = `ONB${Date.now()}`;
+    }
   }
   next();
 });

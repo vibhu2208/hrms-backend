@@ -287,7 +287,8 @@ const createClient = async (req, res) => {
       message: adminEmail ? 'Client and admin user created successfully' : 'Client created successfully',
       data: client,
       adminCreated: !!adminEmail
-    });
+    };
+    res.status(201).json(response);
   } catch (error) {
     console.error('❌ Error creating client:', error);
     res.status(400).json({

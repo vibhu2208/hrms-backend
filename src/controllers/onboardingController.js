@@ -1,5 +1,6 @@
 const { getTenantModel } = require('../utils/tenantModels');
 const User = require('../models/User'); // User model stays global
+const OfferTemplate = require('../models/OfferTemplate'); // Global model
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 
@@ -41,6 +42,8 @@ const { sendOnboardingEmail, sendHRNotification, sendOfferEmail, sendDocumentReq
  */
 exports.sendToOnboarding = async (req, res) => {
   try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { id: applicationId } = req.params;
     const { notes } = req.body;
     const hrUserId = req.user.id;
@@ -331,6 +334,7 @@ exports.advanceStage = async (req, res) => {
 
 exports.setJoiningDate = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { joiningDate } = req.body;
     const onboarding = await Onboarding.findById(req.params.id);
 
@@ -349,6 +353,7 @@ exports.setJoiningDate = async (req, res) => {
 
 exports.addTask = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { title, description, assignedTo, dueDate } = req.body;
     const onboarding = await Onboarding.findById(req.params.id);
 
@@ -374,6 +379,7 @@ exports.addTask = async (req, res) => {
 
 exports.completeTask = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { taskId } = req.params;
     const onboarding = await Onboarding.findById(req.params.id);
 
@@ -416,6 +422,7 @@ exports.deleteOnboarding = async (req, res) => {
  */
 exports.updateOnboardingStatus = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { id } = req.params;
     const { status, notes } = req.body;
     const hrUserId = req.user.id;
@@ -493,6 +500,9 @@ exports.updateOnboardingStatus = async (req, res) => {
  */
 exports.sendOffer = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    // Use global OfferTemplate model (not tenant-specific)
     const { id } = req.params;
     const { templateId, offerDetails } = req.body;
     const hrUserId = req.user.id;
@@ -508,34 +518,34 @@ exports.sendOffer = async (req, res) => {
       });
     }
 
-    // Validate status
-    if (onboarding.status !== 'preboarding') {
+    // Validate status - allow preboarding, offer_sent, or any status to send offer
+    if (!onboarding.status) {
       return res.status(400).json({
         success: false,
-        message: `Cannot send offer. Current status: ${onboarding.status}. Required: preboarding`
+        message: 'Onboarding record has no status'
       });
     }
 
     // Get offer template
     let template;
     
-    // If templateId is 'default', fetch the default template for the department's category
-    if (templateId === 'default') {
-      // Try to find a default template (you can adjust category as needed)
+    // If templateId is 'default' or not provided, fetch any available template
+    if (!templateId || templateId === 'default') {
+      // Try to find a default template first
       template = await OfferTemplate.findOne({
-        isDefault: true,
-        status: 'active'
+        isDefault: true
       });
       
-      // If no default template exists, find any active template
+      // If no default template exists, find any template (regardless of status)
       if (!template) {
-        template = await OfferTemplate.findOne({ status: 'active' });
+        template = await OfferTemplate.findOne({});
       }
       
       if (!template) {
+        console.error('No offer templates found in database');
         return res.status(400).json({
           success: false,
-          message: 'No active offer template found. Please create an offer template first.'
+          message: 'No offer template found. Please create an offer template first.'
         });
       }
     } else {
@@ -548,10 +558,10 @@ exports.sendOffer = async (req, res) => {
       }
       
       template = await OfferTemplate.findById(templateId);
-      if (!template || template.status !== 'active') {
+      if (!template) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid or inactive offer template'
+          message: 'Offer template not found'
         });
       }
     }
@@ -733,6 +743,7 @@ exports.acceptOffer = async (req, res) => {
  */
 exports.setJoiningDateAndNotify = async (req, res) => {
   try {
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const { id } = req.params;
     const { joiningDate, notifyTeams } = req.body;
     const hrUserId = req.user.id;
