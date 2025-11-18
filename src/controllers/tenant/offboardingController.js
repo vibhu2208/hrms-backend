@@ -150,7 +150,19 @@ exports.getOffboardingRequest = async (req, res) => {
  */
 exports.initiateOffboarding = async (req, res) => {
   try {
+    console.log('📝 Offboarding Request Body:', req.body);
     const { employeeId, reason, reasonDetails, lastWorkingDay, noticePeriod, priority = 'medium' } = req.body;
+    
+    // Validate required fields
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: 'Employee ID is required' });
+    }
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'Reason is required' });
+    }
+    if (!lastWorkingDay) {
+      return res.status(400).json({ success: false, message: 'Last working day is required' });
+    }
     
     const offboardingData = {
       employeeId,
@@ -158,9 +170,14 @@ exports.initiateOffboarding = async (req, res) => {
       reason,
       reasonDetails,
       lastWorkingDay: new Date(lastWorkingDay),
-      noticePeriod,
+      noticePeriod: {
+        given: noticePeriod || 0,
+        required: 30
+      },
       priority
     };
+    
+    console.log('📝 Processed Offboarding Data:', offboardingData);
 
     const offboardingRequest = await offboardingWorkflow.initiateOffboarding(
       req.tenant.connection,

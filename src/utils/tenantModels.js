@@ -9,7 +9,7 @@ const Payroll = require('../models/Payroll');
 const Asset = require('../models/Asset');
 const JobPosting = require('../models/JobPosting');
 const Onboarding = require('../models/Onboarding');
-const Offboarding = require('../models/Offboarding');
+// const Offboarding = require('../models/Offboarding'); // Removed - using new OffboardingRequest model
 const Project = require('../models/Project');
 const Timesheet = require('../models/Timesheet');
 const Document = require('../models/Document');
@@ -23,6 +23,9 @@ const OfferTemplate = require('../models/OfferTemplate');
 
 // Import offboarding related models (if they exist)
 let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
+
+// Import tenant-specific role management models
+let Role, TenantUser;
 
 try {
   OffboardingRequest = require('../models/tenant/OffboardingRequest');
@@ -58,6 +61,18 @@ try {
   ExitFeedback = require('../models/tenant/ExitFeedback');
 } catch (e) {
   ExitFeedback = null;
+}
+
+try {
+  Role = require('../models/tenant/Role');
+} catch (e) {
+  Role = null;
+}
+
+try {
+  TenantUser = require('../models/tenant/TenantUser');
+} catch (e) {
+  TenantUser = null;
 }
 
 /**
@@ -99,7 +114,7 @@ function getTenantModels(tenantConnection) {
   models.Asset = createTenantModel('Asset', Asset);
   models.JobPosting = createTenantModel('JobPosting', JobPosting);
   models.Onboarding = createTenantModel('Onboarding', Onboarding);
-  models.Offboarding = createTenantModel('Offboarding', Offboarding);
+  // models.Offboarding = createTenantModel('Offboarding', Offboarding); // Removed - using new OffboardingRequest model
   models.Project = createTenantModel('Project', Project);
   models.Timesheet = createTenantModel('Timesheet', Timesheet);
   models.Document = createTenantModel('Document', Document);
@@ -118,6 +133,10 @@ function getTenantModels(tenantConnection) {
   if (AssetClearance) models.AssetClearance = createTenantModel('AssetClearance', AssetClearance);
   if (FinalSettlement) models.FinalSettlement = createTenantModel('FinalSettlement', FinalSettlement);
   if (ExitFeedback) models.ExitFeedback = createTenantModel('ExitFeedback', ExitFeedback);
+
+  // Tenant-specific role management models (only if they exist)
+  if (Role) models.Role = createTenantModel('Role', Role);
+  if (TenantUser) models.TenantUser = createTenantModel('TenantUser', TenantUser);
 
   // Cache models on connection
   tenantConnection._tenantModels = models;
