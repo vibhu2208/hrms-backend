@@ -215,7 +215,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ### Create Company
 ```bash
-curl -X POST http://localhost:5000/api/superadmin/clients \
+curl -X POST http://localhost:5001/api/superadmin/clients \
   -H "Authorization: Bearer YOUR_SUPER_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -227,7 +227,7 @@ curl -X POST http://localhost:5000/api/superadmin/clients \
 
 ### Login as Company Admin
 ```bash
-curl -X POST http://localhost:5000/api/auth/login \
+curl -X POST http://localhost:5001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@testcompany.com",
@@ -237,7 +237,7 @@ curl -X POST http://localhost:5000/api/auth/login \
 
 ### Get Current User
 ```bash
-curl -X GET http://localhost:5000/api/auth/me \
+curl -X GET http://localhost:5001/api/auth/me \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -251,7 +251,7 @@ Create a new Postman collection with these requests:
 
 **Environment Variables:**
 ```
-base_url: http://localhost:5000
+base_url: http://localhost:5001
 super_admin_token: <your_super_admin_token>
 company_admin_token: <company_admin_token>
 ```

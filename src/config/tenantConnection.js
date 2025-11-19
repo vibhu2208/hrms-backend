@@ -41,8 +41,8 @@ class TenantConnectionManager {
         useNewUrlParser: true,
         useUnifiedTopology: true,
         maxPoolSize: 10,
-        serverSelectionTimeoutMS: 5000,
-        socketTimeoutMS: 45000,
+        serverSelectionTimeoutMS: 5001,
+        socketTimeoutMS: 45001,
       });
 
       // Handle connection events

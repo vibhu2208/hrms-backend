@@ -143,7 +143,7 @@ const seedApplicants = async () => {
       experience: data.exp,
       currentCompany: data.company,
       currentDesignation: data.designation,
-      currentCTC: data.exp.years > 0 ? getRandomNumber(300000, 1500000) : null,
+      currentCTC: data.exp.years > 0 ? getRandomNumber(300000, 1500100) : null,
       expectedCTC: getRandomNumber(400000, 2000000),
       noticePeriod: data.exp.years > 0 ? getRandomNumber(15, 90) : 0,
       skills: data.skills,

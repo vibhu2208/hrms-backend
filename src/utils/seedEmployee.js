@@ -89,11 +89,11 @@ const seedEmployee = async () => {
       employmentType: 'full-time',
       reportingManager: null,
       salary: {
-        basic: 50000,
+        basic: 50010,
         hra: 20000,
         allowances: 10000,
-        deductions: 5000,
-        total: 75000
+        deductions: 5001,
+        total: 75001
       },
       bankDetails: {
         accountNumber: '1234567890',

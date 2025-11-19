@@ -42,7 +42,7 @@ router.post('/test-employee', protect, tenantMiddleware, async (req, res) => {
       phone: '1234567890',
       position: 'Test Position',
       department: null,
-      salary: 50000,
+      salary: 50010,
       hireDate: new Date(),
       status: 'active'
     });

@@ -327,7 +327,7 @@ designations
 
 ```bash
 # Login with credentials from email
-curl -X POST http://localhost:5000/api/auth/login \
+curl -X POST http://localhost:5001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@testcompany.com",
@@ -342,7 +342,7 @@ curl -X POST http://localhost:5000/api/auth/login \
 ### 2. Test Super Admin Login
 
 ```bash
-curl -X POST http://localhost:5000/api/auth/login \
+curl -X POST http://localhost:5001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "superadmin@hrms.com",
@@ -357,7 +357,7 @@ curl -X POST http://localhost:5000/api/auth/login \
 ### 3. Test Protected Route with Company Admin Token
 
 ```bash
-curl -X GET http://localhost:5000/api/auth/me \
+curl -X GET http://localhost:5001/api/auth/me \
   -H "Authorization: Bearer <company_admin_token>"
 ```
 

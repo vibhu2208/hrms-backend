@@ -205,7 +205,7 @@ EMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
 npm run dev
 
 # 3. Test email endpoint
-curl -X POST http://localhost:5000/api/candidates/:id/schedule-interview \
+curl -X POST http://localhost:5001/api/candidates/:id/schedule-interview \
   -H "Content-Type: application/json" \
   -d '{
     "interviewType": "Technical",

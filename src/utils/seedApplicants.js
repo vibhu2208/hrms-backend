@@ -66,7 +66,7 @@ const generateApplicants = (jobId, count = 20) => {
       },
       currentCompany: experienceYears > 0 ? getRandomElement(companies) : null,
       currentDesignation: experienceYears > 0 ? getRandomElement(designations) : null,
-      currentCTC: experienceYears > 0 ? getRandomNumber(300000, 1500000) : null,
+      currentCTC: experienceYears > 0 ? getRandomNumber(300000, 1500100) : null,
       expectedCTC: getRandomNumber(400000, 2000000),
       noticePeriod: experienceYears > 0 ? getRandomNumber(15, 90) : 0,
       skills: getRandomSkills(),

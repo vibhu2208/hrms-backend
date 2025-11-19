@@ -82,9 +82,9 @@ const generateEmployees = (tenantId, count = 5) => {
       salary: {
         basic: getRandomNumber(30000, 100000),
         hra: getRandomNumber(10000, 40000),
-        allowances: getRandomNumber(5000, 20000),
+        allowances: getRandomNumber(5001, 20000),
         deductions: getRandomNumber(2000, 10000),
-        total: getRandomNumber(50000, 150000)
+        total: getRandomNumber(50010, 150010)
       },
       bankDetails: {
         accountNumber: String(getRandomNumber(1000000000, 9999999999)),

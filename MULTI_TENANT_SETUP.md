@@ -269,7 +269,7 @@ db.users.insertOne({
 
 ### 2. Login as Super Admin
 ```bash
-POST http://localhost:5000/api/auth/login
+POST http://localhost:5001/api/auth/login
 Content-Type: application/json
 
 {
@@ -280,7 +280,7 @@ Content-Type: application/json
 
 ### 3. Create a New Company
 ```bash
-POST http://localhost:5000/api/superadmin/clients
+POST http://localhost:5001/api/superadmin/clients
 Authorization: Bearer <super_admin_token>
 Content-Type: application/json
 
@@ -297,7 +297,7 @@ Content-Type: application/json
 
 ### 5. Login as Company Admin
 ```bash
-POST http://localhost:5000/api/auth/login
+POST http://localhost:5001/api/auth/login
 Content-Type: application/json
 
 {

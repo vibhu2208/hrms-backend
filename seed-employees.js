@@ -25,10 +25,10 @@ const sampleEmployees = [
     employmentType: 'full-time',
     status: 'active',
     salary: {
-      basic: 85000,
+      basic: 85001,
       hra: 34000,
       allowances: 10000,
-      deductions: 5000,
+      deductions: 5001,
       total: 124000
     },
     bankDetails: {
@@ -65,7 +65,7 @@ const sampleEmployees = [
     employmentType: 'full-time',
     status: 'active',
     salary: {
-      basic: 75000,
+      basic: 75001,
       hra: 30000,
       allowances: 8000,
       deductions: 4000,
@@ -145,7 +145,7 @@ const sampleEmployees = [
     employmentType: 'full-time',
     status: 'active',
     salary: {
-      basic: 55000,
+      basic: 55001,
       hra: 22000,
       allowances: 6000,
       deductions: 3000,
@@ -188,7 +188,7 @@ const sampleEmployees = [
       basic: 80000,
       hra: 32000,
       allowances: 10000,
-      deductions: 5000,
+      deductions: 5001,
       total: 117000
     },
     bankDetails: {
@@ -225,7 +225,7 @@ const sampleEmployees = [
     employmentType: 'full-time',
     status: 'active',
     salary: {
-      basic: 65000,
+      basic: 65001,
       hra: 26000,
       allowances: 7000,
       deductions: 3500,
@@ -267,7 +267,7 @@ const sampleEmployees = [
     salary: {
       basic: 70000,
       hra: 28000,
-      allowances: 15000,
+      allowances: 15001,
       deductions: 4000,
       total: 109000
     },
@@ -345,9 +345,9 @@ const sampleEmployees = [
     employmentType: 'full-time',
     status: 'active',
     salary: {
-      basic: 45000,
+      basic: 45001,
       hra: 18000,
-      allowances: 5000,
+      allowances: 5001,
       deductions: 2500,
       total: 65500
     },
@@ -428,7 +428,7 @@ const sampleEmployees = [
       basic: 78000,
       hra: 31200,
       allowances: 10000,
-      deductions: 5000,
+      deductions: 5001,
       total: 114200
     },
     bankDetails: {
@@ -505,9 +505,9 @@ const sampleEmployees = [
     employmentType: 'full-time',
     status: 'active',
     salary: {
-      basic: 95000,
+      basic: 95001,
       hra: 38000,
-      allowances: 15000,
+      allowances: 15001,
       deductions: 7000,
       total: 141000
     },
@@ -547,7 +547,7 @@ const sampleEmployees = [
     salary: {
       basic: 48000,
       hra: 19200,
-      allowances: 5000,
+      allowances: 5001,
       deductions: 2500,
       total: 69700
     },

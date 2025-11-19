@@ -56,7 +56,7 @@ const modules = [
       defaultMaxUsers: -1,
       defaultMaxTransactions: -1,
       defaultStorageQuota: 2000,
-      defaultApiCalls: 5000
+      defaultApiCalls: 5001
     },
     isCore: true,
     status: 'active'
@@ -119,7 +119,7 @@ const modules = [
     limits: {
       defaultMaxUsers: -1,
       defaultMaxTransactions: 1000,
-      defaultStorageQuota: 5000,
+      defaultStorageQuota: 5001,
       defaultApiCalls: 10000
     },
     isCore: false,
@@ -312,7 +312,7 @@ const modules = [
       defaultMaxUsers: 10,
       defaultMaxTransactions: 500,
       defaultStorageQuota: 3000,
-      defaultApiCalls: 5000
+      defaultApiCalls: 5001
     },
     isCore: false,
     status: 'active'
@@ -503,7 +503,7 @@ const modules = [
     limits: {
       defaultMaxUsers: -1,
       defaultMaxTransactions: 100,
-      defaultStorageQuota: 5000,
+      defaultStorageQuota: 5001,
       defaultApiCalls: 1000
     },
     isCore: false,

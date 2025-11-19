@@ -94,7 +94,7 @@ exports.getAuthUrl = async (req, res) => {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/employees/google-sheets/callback'
+      process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5001/api/employees/google-sheets/callback'
     );
 
     const scopes = [
@@ -136,7 +136,7 @@ exports.handleOAuthCallback = async (req, res) => {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/employees/google-sheets/callback'
+      process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5001/api/employees/google-sheets/callback'
     );
 
     const { tokens } = await oauth2Client.getToken(code);

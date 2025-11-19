@@ -111,7 +111,7 @@ const handleUploadError = (error, req, res, next) => {
 
 // Helper function to get file URL
 const getFileUrl = (filename, type = 'resume') => {
-  const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+  const baseUrl = process.env.BACKEND_URL || 'http://localhost:5001';
   return `${baseUrl}/uploads/${type}s/${filename}`;
 };
 

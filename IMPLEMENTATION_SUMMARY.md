@@ -155,14 +155,14 @@ node test-company-creation.js
 **Option B: Use the API**
 ```bash
 # 1. Login as Super Admin
-POST http://localhost:5000/api/auth/login
+POST http://localhost:5001/api/auth/login
 {
   "email": "superadmin@hrms.com",
   "password": "your-password"
 }
 
 # 2. Create a Company
-POST http://localhost:5000/api/superadmin/clients
+POST http://localhost:5001/api/superadmin/clients
 Authorization: Bearer <token>
 {
   "companyName": "Test Company",
@@ -173,7 +173,7 @@ Authorization: Bearer <token>
 # 3. Check email inbox for credentials
 
 # 4. Login as Company Admin
-POST http://localhost:5000/api/auth/login
+POST http://localhost:5001/api/auth/login
 {
   "email": "admin@testcompany.com",
   "password": "<password-from-email>"

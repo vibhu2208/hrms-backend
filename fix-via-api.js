@@ -6,8 +6,8 @@ const fixViaAPI = async () => {
     
     // Since we can't directly access Atlas, let's create a temporary endpoint
     // First, let's check if we can reach the server
-    const healthCheck = await axios.get('http://localhost:5000/api/auth/me', {
-      timeout: 5000
+    const healthCheck = await axios.get('http://localhost:5001/api/auth/me', {
+      timeout: 5001
     }).catch(err => {
       if (err.response && err.response.status === 401) {
         console.log('✅ Server is running (got expected 401 for unauthorized request)');
