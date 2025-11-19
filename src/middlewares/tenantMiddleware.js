@@ -12,42 +12,29 @@ const tenantMiddleware = async (req, res, next) => {
       return next();
     }
 
-    // Get clientId from user (set by auth middleware)
-    const clientId = req.user?.clientId;
+    // Get companyId from auth middleware (new multi-tenant system)
+    const companyId = req.companyId;
     
-    if (!clientId) {
+    if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'Client ID not found in user context'
+        message: 'Company ID not found in request context'
       });
     }
 
-    // Validate client exists and is active
-    const client = await Client.findById(clientId);
-    if (!client) {
-      return res.status(404).json({
-        success: false,
-        message: 'Client not found'
-      });
-    }
-
-    if (!client.isActive || client.status !== 'active') {
-      return res.status(403).json({
-        success: false,
-        message: 'Client account is inactive'
-      });
-    }
-
-    // Get tenant database connection
-    const tenantConnection = await tenantConnectionManager.getTenantConnection(clientId);
+    // Get tenant database connection using new system
+    const { getTenantConnection } = require('../config/database.config');
+    const tenantConnection = await getTenantConnection(companyId);
     
     // Inject tenant context into request
     req.tenant = {
-      clientId: clientId.toString(),
-      client: client,
+      clientId: companyId, // For backward compatibility
+      companyId: companyId,
       connection: tenantConnection,
-      dbName: `hrms_tenant_${clientId}`
+      dbName: `tenant_${companyId}`
     };
+    
+    console.log(`🏢 Tenant Context: Company ${companyId}`);
     
     next();
   } catch (error) {

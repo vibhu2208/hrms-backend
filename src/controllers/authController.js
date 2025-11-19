@@ -3,7 +3,7 @@ const Employee = require('../models/Employee');
 const Company = require('../models/Company');
 const { generateToken } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
-const { getTenantConnection } = require('../utils/databaseProvisioning');
+const { getTenantConnection } = require('../config/database.config');
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -128,12 +128,29 @@ exports.login = async (req, res) => {
             user = tenantUser;
             isTenantUser = true;
             userCompany = company;
+          } else {
+            // User not found in the selected company
+            console.log(`❌ User ${email} not found in company ${company.companyName}`);
+            if (tenantConnection) await tenantConnection.close();
+            return res.status(401).json({
+              success: false,
+              message: `User not found in ${company.companyName}. Please select the correct company.`
+            });
           }
         } catch (tenantError) {
           console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+          if (tenantConnection) await tenantConnection.close();
+          return res.status(500).json({
+            success: false,
+            message: 'Error accessing company database'
+          });
         }
       } else {
         console.log('⚠️  Company not found or inactive');
+        return res.status(404).json({
+          success: false,
+          message: 'Company not found or inactive'
+        });
       }
     }
     
@@ -182,6 +199,8 @@ exports.login = async (req, res) => {
 
     // Check if password matches
     console.log('🔍 Comparing password for user:', user.email);
+    console.log('🔍 Password provided:', password);
+    console.log('🔍 User has password field:', !!user.password);
     const isMatch = await user.comparePassword(password);
     console.log('🔍 Password match result:', isMatch);
 
