@@ -214,9 +214,23 @@ const validatePasswordStrength = (password) => {
   return result;
 };
 
+/**
+ * Generate a random password (alias for generatePassword with default settings)
+ * @returns {string} Generated password
+ */
+const generateRandomPassword = () => {
+  return generatePassword(12, {
+    includeUppercase: true,
+    includeLowercase: true,
+    includeNumbers: true,
+    includeSymbols: true
+  });
+};
+
 module.exports = {
   generatePassword,
   generateMemorablePassword,
   generateEmployeeId,
-  validatePasswordStrength
+  validatePasswordStrength,
+  generateRandomPassword
 };

@@ -1,30 +1,38 @@
-const { getTenantModel } = require('../utils/tenantModels');
+const TenantUserSchema = require('../models/tenant/TenantUser');
 
 // @desc    Get all employees
 // @route   GET /api/employees
 // @access  Private
 exports.getEmployees = async (req, res) => {
   try {
-    // Get tenant-specific Employee model
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const { status, department, search } = req.query;
-    let query = {};
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const { status, department, search, role } = req.query;
+    let query = { isActive: true };
 
-    if (status) query.status = status;
+    // Filter by role (default: employees and managers)
+    if (role) {
+      query.role = role;
+    } else {
+      query.role = { $in: ['employee', 'manager'] };
+    }
+
     if (department) query.department = department;
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },
         { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { employeeCode: { $regex: search, $options: 'i' } }
+        { email: { $regex: search, $options: 'i' } }
       ];
     }
 
-    const employees = await Employee.find(query)
-      .populate('department')
-      .populate('reportingManager', 'firstName lastName email')
+    const employees = await TenantUser.find(query)
+      .select('-password')
       .sort({ createdAt: -1 });
+
+    console.log(`📋 Found ${employees.length} employees for company ${req.tenant.companyId}`);
 
     res.status(200).json({
       success: true,
@@ -32,6 +40,7 @@ exports.getEmployees = async (req, res) => {
       data: employees
     });
   } catch (error) {
+    console.error('Error fetching employees:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -44,10 +53,11 @@ exports.getEmployees = async (req, res) => {
 // @access  Private
 exports.getEmployee = async (req, res) => {
   try {
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const employee = await Employee.findById(req.params.id)
-      .populate('department')
-      .populate('reportingManager', 'firstName lastName email designation');
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const employee = await TenantUser.findById(req.params.id)
+      .select('-password');
 
     if (!employee) {
       return res.status(404).json({
@@ -61,6 +71,7 @@ exports.getEmployee = async (req, res) => {
       data: employee
     });
   } catch (error) {
+    console.error('Error fetching employee:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -73,8 +84,10 @@ exports.getEmployee = async (req, res) => {
 // @access  Private (Admin, HR)
 exports.createEmployee = async (req, res) => {
   try {
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const employee = await Employee.create(req.body);
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const employee = await TenantUser.create(req.body);
 
     res.status(201).json({
       success: true,
@@ -82,6 +95,7 @@ exports.createEmployee = async (req, res) => {
       data: employee
     });
   } catch (error) {
+    console.error('Error creating employee:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -94,12 +108,14 @@ exports.createEmployee = async (req, res) => {
 // @access  Private (Admin, HR)
 exports.updateEmployee = async (req, res) => {
   try {
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const employee = await Employee.findByIdAndUpdate(
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const employee = await TenantUser.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
-    );
+    ).select('-password');
 
     if (!employee) {
       return res.status(404).json({
@@ -114,6 +130,7 @@ exports.updateEmployee = async (req, res) => {
       data: employee
     });
   } catch (error) {
+    console.error('Error updating employee:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -126,8 +143,10 @@ exports.updateEmployee = async (req, res) => {
 // @access  Private (Admin)
 exports.deleteEmployee = async (req, res) => {
   try {
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const employee = await Employee.findByIdAndDelete(req.params.id);
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const employee = await TenantUser.findByIdAndDelete(req.params.id);
 
     if (!employee) {
       return res.status(404).json({

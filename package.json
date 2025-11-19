@@ -17,7 +17,8 @@
     "seed:employee": "node src/utils/seedEmployee.js",
     "seed:offer-template": "node src/scripts/seedOfferTemplate.js",
     "seed:modules": "node src/scripts/seedModules.js",
-    "seed:packages": "node src/scripts/seedPackages.js"
+    "seed:packages": "node src/scripts/seedPackages.js",
+    "seed:tcs": "node src/scripts/seedTCSSystem.js"
   },
   "keywords": [
     "hrms",
