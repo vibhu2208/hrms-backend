@@ -39,6 +39,7 @@ const candidateDocumentRoutes = require('./routes/candidateDocumentRoutes');
 const userRoutes = require('./routes/userRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const testRoutes = require('./routes/testRoutes');
+const managerRoutes = require('./routes/managerRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -107,6 +108,7 @@ app.use('/api/offer-templates', offerTemplateRoutes);
 app.use('/api/employee', employeeDashboardRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
+app.use('/api/manager', managerRoutes);
 app.use('/api/test', testRoutes);
 
 // Error handler (must be last)

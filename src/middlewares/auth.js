@@ -1,7 +1,7 @@
 const { verifyToken } = require('../utils/jwt');
-const User = require('../models/User');
-const Company = require('../models/Company');
-const { getTenantConnection } = require('../utils/databaseProvisioning');
+const TenantUserSchema = require('../models/tenant/TenantUser');
+const { getTenantConnection } = require('../config/database.config');
+const { getSuperAdmin } = require('../models/global');
 
 const protect = async (req, res, next) => {
   let tenantConnection = null;
@@ -32,12 +32,15 @@ const protect = async (req, res, next) => {
     let user = null;
 
     // Check if token contains company info (tenant user)
-    if (decoded.databaseName) {
+    if (decoded.companyId) {
       // User is from a tenant database
       try {
-        tenantConnection = await getTenantConnection(decoded.databaseName);
-        const TenantUser = tenantConnection.model('User', User.schema);
-        user = await TenantUser.findById(decoded.id).select('-password');
+        console.log(`🔍 Auth middleware: Fetching user from tenant DB for company: ${decoded.companyId}`);
+        tenantConnection = await getTenantConnection(decoded.companyId);
+        const TenantUser = tenantConnection.model('User', TenantUserSchema);
+        user = await TenantUser.findById(decoded.userId).select('-password');
+        
+        console.log(`✅ User found in tenant DB: ${user?.email}`);
         
         if (tenantConnection) {
           await tenantConnection.close();
@@ -52,7 +55,10 @@ const protect = async (req, res, next) => {
       }
     } else {
       // User is from main database (super admin, etc.)
-      user = await User.findById(decoded.id).select('-password');
+      console.log('🔍 Auth middleware: Fetching super admin from global DB');
+      const SuperAdmin = await getSuperAdmin();
+      user = await SuperAdmin.findById(decoded.userId).select('-password');
+      console.log(`✅ Super admin found: ${user?.email}`);
     }
 
     if (!user) {

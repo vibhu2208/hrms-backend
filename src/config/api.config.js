@@ -18,10 +18,10 @@ const getCurrentEnvironment = () => {
 
 // Backend URLs for different environments
 const BACKEND_URLS = {
-  [ENV.DEVELOPMENT]: `http://localhost:${process.env.PORT || 5000}`,
+  [ENV.DEVELOPMENT]: `http://localhost:${process.env.PORT || 5001}`,
   [ENV.PRODUCTION]: process.env.BACKEND_URL || 'https://hrms-backend-xbz8.onrender.com',
   [ENV.STAGING]: process.env.BACKEND_URL || 'https://hrms-backend-xbz8.onrender.com',
-  [ENV.TEST]: `http://localhost:${process.env.PORT || 5000}`
+  [ENV.TEST]: `http://localhost:${process.env.PORT || 5001}`
 };
 
 // Frontend URLs for different environments (for CORS)
@@ -71,7 +71,7 @@ const config = {
   isTest: currentEnv === ENV.TEST,
   
   // Server Configuration
-  port: parseInt(process.env.PORT || '5000', 10),
+  port: parseInt(process.env.PORT || '5001', 10),
   backendUrl: BACKEND_URLS[currentEnv],
   
   // CORS Configuration

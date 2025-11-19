@@ -60,9 +60,24 @@ const tenantUserSchema = new mongoose.Schema({
     ref: 'Employee' // Reference to employee in same tenant DB
   },
   // Department (for managers and employees)
+  department: {
+    type: String,
+    trim: true
+  },
   departmentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Department'
+  },
+  // Designation/Job Title
+  designation: {
+    type: String,
+    trim: true
+  },
+  // Reporting Manager (email of manager)
+  reportingManager: {
+    type: String,
+    trim: true,
+    lowercase: true
   },
   // Permissions
   permissions: {

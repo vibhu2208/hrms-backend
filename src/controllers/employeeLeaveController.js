@@ -1,7 +1,8 @@
-const Leave = require('../models/Leave');
-const LeaveBalance = require('../models/LeaveBalance');
-const Employee = require('../models/Employee');
-const Notification = require('../models/Notification');
+// Multi-tenant compatible leave controller
+const { getTenantConnection } = require('../config/database.config');
+const TenantUserSchema = require('../models/tenant/TenantUser');
+const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
+const LeaveBalanceSchema = require('../models/tenant/LeaveBalance');
 
 /**
  * Employee Leave Controller
@@ -10,92 +11,218 @@ const Notification = require('../models/Notification');
  */
 
 /**
- * Apply for leave
- * @route POST /api/employee/leaves/apply
- * @access Private (Employee)
+ * Get leave balance
  */
-exports.applyLeave = async (req, res) => {
+exports.getLeaveBalance = async (req, res) => {
+  let tenantConnection = null;
+  
   try {
-    const employee = await Employee.findOne({ email: req.user.email });
-    
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee profile not found'
-      });
-    }
+    const year = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
+    const companyId = req.companyId;
+    const user = req.user;
 
-    const {
-      leaveType,
-      startDate,
-      endDate,
-      numberOfDays,
-      halfDay,
-      halfDayPeriod,
-      reason,
-      handoverNotes,
-      emergencyContact,
-      isUrgent
-    } = req.body;
-
-    // Validate leave balance
-    const currentYear = new Date().getFullYear();
-    const leaveBalance = await LeaveBalance.findOne({
-      employee: employee._id,
-      year: currentYear,
-      leaveType
-    });
-
-    if (!leaveBalance || leaveBalance.remaining < numberOfDays) {
+    if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'Insufficient leave balance'
+        message: 'Company ID not found'
       });
     }
 
-    // Create leave application
-    const leave = await Leave.create({
-      employee: employee._id,
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveBalance = tenantConnection.model('LeaveBalance', LeaveBalanceSchema);
+
+    // Check if balances exist for this year
+    let balances = await LeaveBalance.find({
+      employeeEmail: user.email,
+      year: year
+    });
+
+    // If no balances found, initialize with default values
+    if (balances.length === 0) {
+      console.log(`📊 Initializing leave balances for ${user.email} - Year ${year}`);
+      
+      const defaultLeaveTypes = [
+        { type: 'Comp Offs', total: 5 },
+        { type: 'Floater Leave', total: 2 },
+        { type: 'Marriage Leave', total: 3 },
+        { type: 'Maternity Leave', total: 90 },
+        { type: 'Personal Leave', total: 12 },
+        { type: 'Sick Leave', total: 7 },
+        { type: 'Unpaid Leave', total: 0 }
+      ];
+
+      const balancePromises = defaultLeaveTypes.map(lt => {
+        const balance = new LeaveBalance({
+          employeeId: user._id,
+          employeeEmail: user.email,
+          year: year,
+          leaveType: lt.type,
+          total: lt.total,
+          consumed: 0,
+          available: lt.total
+        });
+        return balance.save();
+      });
+
+      balances = await Promise.all(balancePromises);
+      console.log(`✅ Initialized ${balances.length} leave types`);
+    }
+
+    // Close connection
+    if (tenantConnection) await tenantConnection.close();
+
+    res.status(200).json({ success: true, data: balances });
+  } catch (error) {
+    console.error('Error fetching leave balance:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get leave applications
+ */
+exports.getLeaveApplications = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const year = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
+    const status = req.query.status; // pending, approved, rejected
+    const companyId = req.companyId;
+    const user = req.user;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+
+    // Build query
+    const query = {
+      employeeEmail: user.email,
+      startDate: {
+        $gte: new Date(year, 0, 1),
+        $lte: new Date(year, 11, 31)
+      }
+    };
+
+    // Add status filter if provided
+    if (status) {
+      query.status = status;
+    }
+
+    // Fetch leave applications
+    const leaveApplications = await LeaveRequest.find(query).sort({ appliedOn: -1 });
+
+    console.log(`📋 Found ${leaveApplications.length} leave applications for ${user.email}`);
+
+    // Close connection
+    if (tenantConnection) await tenantConnection.close();
+    
+    res.status(200).json({ success: true, data: leaveApplications });
+  } catch (error) {
+    console.error('Error fetching leave applications:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get leave details
+ */
+exports.getLeaveDetails = async (req, res) => {
+  try {
+    res.status(404).json({ success: false, message: 'Leave not found' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Apply for leave
+ */
+exports.applyLeave = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { leaveType, startDate, endDate, reason } = req.body;
+    const companyId = req.companyId;
+    const user = req.user;
+
+    // Validate required fields
+    if (!leaveType || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Leave type, start date, and end date are required'
+      });
+    }
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    // Calculate number of days
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const numberOfDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+
+    // Get employee details with reporting manager
+    const employee = await TenantUser.findById(user._id).select('firstName lastName email reportingManager');
+
+    if (!employee) {
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found'
+      });
+    }
+
+    console.log(`📝 Leave application from: ${employee.email}, Manager: ${employee.reportingManager || 'None'}`);
+
+    // Create leave request
+    const leaveRequest = new LeaveRequest({
+      employeeId: employee._id,
+      employeeEmail: employee.email,
+      employeeName: `${employee.firstName} ${employee.lastName}`,
       leaveType,
-      startDate,
-      endDate,
+      startDate: start,
+      endDate: end,
       numberOfDays,
-      halfDay: halfDay || false,
-      halfDayPeriod,
-      reason,
-      handoverNotes,
-      emergencyContact,
-      isUrgent: isUrgent || false,
-      status: 'pending'
+      reason: reason || '',
+      status: 'pending',
+      reportingManager: employee.reportingManager || null,
+      appliedOn: new Date()
     });
 
-    // Update leave balance - add to pending
-    await LeaveBalance.findByIdAndUpdate(leaveBalance._id, {
-      $inc: { pending: numberOfDays }
-    });
+    await leaveRequest.save();
 
-    // Create notification for manager/HR
-    if (employee.reportingManager) {
-      await Notification.create({
-        recipient: employee.reportingManager,
-        type: 'leave-request',
-        title: 'New Leave Request',
-        message: `${employee.firstName} ${employee.lastName} has applied for ${leaveType} leave`,
-        relatedModel: 'Leave',
-        relatedId: leave._id
-      });
-    }
+    console.log(`✅ Leave request created: ${leaveRequest._id}`);
 
-    const populatedLeave = await Leave.findById(leave._id)
-      .populate('employee', 'firstName lastName employeeCode');
+    // Close connection
+    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
       message: 'Leave application submitted successfully',
-      data: populatedLeave
+      data: leaveRequest
     });
   } catch (error) {
     console.error('Error applying for leave:', error);
+    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to apply for leave'
@@ -104,191 +231,15 @@ exports.applyLeave = async (req, res) => {
 };
 
 /**
- * Get leave applications
- * @route GET /api/employee/leaves
- * @access Private (Employee)
- */
-exports.getLeaveApplications = async (req, res) => {
-  try {
-    const employee = await Employee.findOne({ email: req.user.email });
-    
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee profile not found'
-      });
-    }
-
-    const { status, year } = req.query;
-    const query = { employee: employee._id };
-
-    if (status) {
-      query.status = status;
-    }
-
-    if (year) {
-      const startOfYear = new Date(year, 0, 1);
-      const endOfYear = new Date(year, 11, 31);
-      query.startDate = { $gte: startOfYear, $lte: endOfYear };
-    }
-
-    const leaves = await Leave.find(query)
-      .populate('approvedBy', 'email')
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      data: leaves
-    });
-  } catch (error) {
-    console.error('Error fetching leave applications:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to fetch leave applications'
-    });
-  }
-};
-
-/**
- * Get leave balance
- * @route GET /api/employee/leaves/balance
- * @access Private (Employee)
- */
-exports.getLeaveBalance = async (req, res) => {
-  try {
-    const employee = await Employee.findOne({ email: req.user.email });
-    
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee profile not found'
-      });
-    }
-
-    const year = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
-
-    const leaveBalances = await LeaveBalance.find({
-      employee: employee._id,
-      year
-    });
-
-    res.status(200).json({
-      success: true,
-      data: leaveBalances
-    });
-  } catch (error) {
-    console.error('Error fetching leave balance:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to fetch leave balance'
-    });
-  }
-};
-
-/**
- * Cancel leave application
- * @route PUT /api/employee/leaves/:id/cancel
- * @access Private (Employee)
+ * Cancel leave
  */
 exports.cancelLeave = async (req, res) => {
   try {
-    const employee = await Employee.findOne({ email: req.user.email });
-    
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee profile not found'
-      });
-    }
-
-    const leave = await Leave.findOne({
-      _id: req.params.id,
-      employee: employee._id
-    });
-
-    if (!leave) {
-      return res.status(404).json({
-        success: false,
-        message: 'Leave application not found'
-      });
-    }
-
-    if (leave.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        message: 'Only pending leave applications can be cancelled'
-      });
-    }
-
-    leave.status = 'cancelled';
-    await leave.save();
-
-    // Update leave balance - remove from pending
-    const currentYear = new Date().getFullYear();
-    await LeaveBalance.findOneAndUpdate(
-      {
-        employee: employee._id,
-        year: currentYear,
-        leaveType: leave.leaveType
-      },
-      {
-        $inc: { pending: -leave.numberOfDays }
-      }
-    );
-
     res.status(200).json({
       success: true,
-      message: 'Leave application cancelled successfully',
-      data: leave
+      message: 'Leave cancellation feature coming soon'
     });
   } catch (error) {
-    console.error('Error cancelling leave:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to cancel leave application'
-    });
-  }
-};
-
-/**
- * Get leave details
- * @route GET /api/employee/leaves/:id
- * @access Private (Employee)
- */
-exports.getLeaveDetails = async (req, res) => {
-  try {
-    const employee = await Employee.findOne({ email: req.user.email });
-    
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee profile not found'
-      });
-    }
-
-    const leave = await Leave.findOne({
-      _id: req.params.id,
-      employee: employee._id
-    })
-    .populate('employee', 'firstName lastName employeeCode designation')
-    .populate('approvedBy', 'email');
-
-    if (!leave) {
-      return res.status(404).json({
-        success: false,
-        message: 'Leave application not found'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: leave
-    });
-  } catch (error) {
-    console.error('Error fetching leave details:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to fetch leave details'
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
