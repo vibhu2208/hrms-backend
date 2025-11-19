@@ -72,7 +72,7 @@ exports.login = async (req, res) => {
   
   try {
     console.log('🔍 Login attempt:', req.body);
-    const { email, password } = req.body;
+    const { email, password, companyId } = req.body;
 
     // Validate email & password
     if (!email || !password) {
@@ -82,40 +82,93 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Step 1: Check if this email belongs to a company admin (in tenant database)
-    console.log('🔍 Checking if user is a company admin...');
-    const company = await Company.findOne({ 
-      'adminUser.email': email,
-      status: 'active',
-      databaseStatus: 'active'
-    });
-
+    // Step 1: Check if this is a super admin (in hrms_global)
+    console.log('🔍 Checking if user is a super admin...');
+    const { getSuperAdmin, getCompanyRegistry } = require('../models/global');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
     let user = null;
     let isTenantUser = false;
-
-    if (company) {
-      // User is a company admin - authenticate against tenant database
-      console.log(`🏢 User belongs to company: ${company.companyName} (${company.databaseName})`);
-      isTenantUser = true;
+    let userCompany = null;
+    
+    try {
+      const SuperAdmin = await getSuperAdmin();
+      const superAdmin = await SuperAdmin.findOne({ email }).select('+password');
       
-      try {
-        tenantConnection = await getTenantConnection(company.databaseName);
-        const TenantUser = tenantConnection.model('User', User.schema);
-        
-        user = await TenantUser.findOne({ email }).select('+password').populate('employeeId');
-        console.log('🔍 Tenant user found:', !!user);
-      } catch (tenantError) {
-        console.error('❌ Error connecting to tenant database:', tenantError);
-        return res.status(500).json({
-          success: false,
-          message: 'Error connecting to company database'
-        });
+      if (superAdmin) {
+        console.log('✅ Super admin found');
+        user = superAdmin;
+        isTenantUser = false;
       }
-    } else {
-      // Check in main database (for super admins, etc.)
-      console.log('🔍 Looking for user in main database...');
-      user = await User.findOne({ email }).select('+password').populate('employeeId');
-      console.log('🔍 Main database user found:', !!user);
+    } catch (err) {
+      console.log('⚠️  Error checking super admin:', err.message);
+    }
+    
+    // Step 2: If not super admin and companyId provided, check specific company database
+    if (!user && companyId) {
+      console.log(`🔍 Checking specific company database: ${companyId}`);
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          console.log(`🏢 Authenticating against: ${company.companyName} (${company.tenantDatabaseName})`);
+          tenantConnection = await getTenantConnection(company.companyId);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ email }).select('+password');
+          
+          if (tenantUser) {
+            console.log(`✅ User found in ${company.companyName}`);
+            user = tenantUser;
+            isTenantUser = true;
+            userCompany = company;
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+        }
+      } else {
+        console.log('⚠️  Company not found or inactive');
+      }
+    }
+    
+    // Step 3: If still not found and no companyId, check all companies (fallback)
+    if (!user && !companyId) {
+      console.log('🔍 Checking all company databases...');
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const companies = await CompanyRegistry.find({
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      console.log(`📊 Found ${companies.length} active companies`);
+      
+      for (const company of companies) {
+        try {
+          console.log(`🔍 Checking company: ${company.companyName}`);
+          tenantConnection = await getTenantConnection(company.companyId);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ email }).select('+password');
+          
+          if (tenantUser) {
+            console.log(`✅ User found in ${company.companyName}`);
+            user = tenantUser;
+            isTenantUser = true;
+            userCompany = company;
+            break;
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+          continue;
+        }
+      }
     }
 
     if (!user) {
@@ -173,10 +226,10 @@ exports.login = async (req, res) => {
       role: user.role
     };
     
-    if (isTenantUser && company) {
-      tokenPayload.companyId = company._id;
-      tokenPayload.companyCode = company.companyCode;
-      tokenPayload.databaseName = company.databaseName;
+    if (isTenantUser && userCompany) {
+      tokenPayload.companyId = userCompany.companyId;
+      tokenPayload.companyCode = userCompany.companyCode;
+      tokenPayload.tenantDatabaseName = userCompany.tenantDatabaseName;
     }
 
     const token = generateToken(user._id, tokenPayload);
@@ -193,11 +246,13 @@ exports.login = async (req, res) => {
           isFirstLogin: isFirstLogin,
           mustChangePassword: user.mustChangePassword,
           themePreference: user.themePreference || 'dark',
+          firstName: user.firstName,
+          lastName: user.lastName,
           // Add company info for tenant users
-          ...(isTenantUser && company ? {
-            companyId: company._id,
-            companyName: company.companyName,
-            companyCode: company.companyCode
+          ...(isTenantUser && userCompany ? {
+            companyId: userCompany.companyId,
+            companyName: userCompany.companyName,
+            companyCode: userCompany.companyCode
           } : {})
         },
         token
@@ -423,6 +478,35 @@ exports.googleLogin = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Google login failed'
+    });
+  }
+};
+
+// @desc    Get list of active companies for login selection
+// @route   GET /api/auth/companies
+// @access  Public
+exports.getActiveCompanies = async (req, res) => {
+  try {
+    // Import global models
+    const { getCompanyRegistry } = require('../models/global');
+    const CompanyRegistry = await getCompanyRegistry();
+    
+    const companies = await CompanyRegistry.find({
+      status: 'active',
+      databaseStatus: 'active'
+    })
+    .select('companyId companyName companyCode tenantDatabaseName status subscription.plan subscription.status')
+    .sort({ companyName: 1 });
+
+    res.status(200).json({
+      success: true,
+      data: companies
+    });
+  } catch (error) {
+    console.error('Error fetching companies:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching companies'
     });
   }
 };
