@@ -16,7 +16,7 @@ const employeeRequestController = require('../controllers/employeeRequestControl
 
 // Apply authentication and authorization middleware to all routes
 router.use(protect);
-router.use(authorize('employee', 'hr', 'admin'));
+router.use(authorize('employee', 'hr', 'manager', 'company_admin'));
 
 // ==================== Dashboard Routes ====================
 /**
