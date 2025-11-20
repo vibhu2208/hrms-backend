@@ -32,7 +32,17 @@ const applicantsData = [
   { firstName: 'Varun', lastName: 'Agarwal', location: 'Kolkata', company: 'Paytm', designation: 'Backend Developer', exp: { years: 2, months: 8 }, skills: ['Node.js', 'MongoDB', 'Redis', 'Microservices'] },
   { firstName: 'Divya', lastName: 'Bose', location: 'Bangalore', company: 'Swiggy', designation: 'Full Stack Developer', exp: { years: 3, months: 3 }, skills: ['React', 'Node.js', 'PostgreSQL', 'Docker'] },
   { firstName: 'Nikhil', lastName: 'Sinha', location: 'Mumbai', company: 'Zomato', designation: 'Mobile Developer', exp: { years: 4, months: 2 }, skills: ['React Native', 'JavaScript', 'Redux', 'Firebase'] },
-  { firstName: 'Shreya', lastName: 'Pillai', location: 'Delhi', company: 'Ola', designation: 'Data Engineer', exp: { years: 3, months: 7 }, skills: ['Python', 'Spark', 'Hadoop', 'Airflow'] }
+  { firstName: 'Shreya', lastName: 'Pillai', location: 'Delhi', company: 'Ola', designation: 'Data Engineer', exp: { years: 3, months: 7 }, skills: ['Python', 'Spark', 'Hadoop', 'Airflow'] },
+  { firstName: 'Manish', lastName: 'Thakur', location: 'Bangalore', company: 'Adobe', designation: 'UI/UX Developer', exp: { years: 4, months: 4 }, skills: ['Figma', 'React', 'CSS', 'JavaScript'] },
+  { firstName: 'Ananya', lastName: 'Krishnan', location: 'Hyderabad', company: 'Salesforce', designation: 'Cloud Engineer', exp: { years: 3, months: 2 }, skills: ['AWS', 'Terraform', 'Python', 'CI/CD'] },
+  { firstName: 'Rajesh', lastName: 'Pandey', location: 'Mumbai', company: 'HDFC Bank', designation: 'Software Developer', exp: { years: 5, months: 8 }, skills: ['Java', 'Spring', 'Oracle', 'Microservices'] },
+  { firstName: 'Tanvi', lastName: 'Shah', location: 'Pune', company: null, designation: null, exp: { years: 0, months: 3 }, skills: ['HTML', 'CSS', 'JavaScript', 'Bootstrap'] },
+  { firstName: 'Suresh', lastName: 'Menon', location: 'Chennai', company: 'Cognizant', designation: 'Business Analyst', exp: { years: 4, months: 1 }, skills: ['SQL', 'Tableau', 'Excel', 'Agile'] },
+  { firstName: 'Ishita', lastName: 'Banerjee', location: 'Kolkata', company: 'TCS', designation: 'QA Automation Engineer', exp: { years: 2, months: 9 }, skills: ['Selenium', 'Python', 'Jenkins', 'API Testing'] },
+  { firstName: 'Gaurav', lastName: 'Saxena', location: 'Noida', company: 'PhonePe', designation: 'Backend Engineer', exp: { years: 3, months: 11 }, skills: ['Go', 'Kafka', 'Redis', 'PostgreSQL'] },
+  { firstName: 'Nisha', lastName: 'Reddy', location: 'Bangalore', company: 'Uber', designation: 'Data Scientist', exp: { years: 4, months: 5 }, skills: ['Python', 'Machine Learning', 'TensorFlow', 'SQL'] },
+  { firstName: 'Deepak', lastName: 'Mishra', location: 'Delhi', company: 'Snapdeal', designation: 'Full Stack Developer', exp: { years: 2, months: 4 }, skills: ['Vue.js', 'Node.js', 'MySQL', 'Docker'] },
+  { firstName: 'Sonal', lastName: 'Jain', location: 'Jaipur', company: null, designation: null, exp: { years: 0, months: 8 }, skills: ['React', 'JavaScript', 'Git', 'REST API'] }
 ];
 
 const stages = ['applied', 'screening', 'shortlisted', 'interview-scheduled', 'interview-completed', 'offer-extended'];

@@ -1,18 +1,10 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
-const Candidate = require('../models/Candidate');
-const JobPosting = require('../models/JobPosting');
 
-// Get job ID from command line argument
-const jobId = process.argv[2];
+const tenantId = '691e237d4f4469770021830f';
+const jobId = '691e363f75f473d1b479cd6e'; // The job ID you provided
 
-if (!jobId) {
-  console.log('❌ Please provide a job ID as argument');
-  console.log('Usage: node seedApplicantsToJob.js <JOB_ID>');
-  process.exit(1);
-}
-
-// Sample data
+// Sample data - 30 candidates
 const applicantsData = [
   { firstName: 'Rahul', lastName: 'Sharma', location: 'Mumbai', company: 'TCS', designation: 'Software Engineer', exp: { years: 3, months: 6 }, skills: ['JavaScript', 'React', 'Node.js', 'MongoDB'] },
   { firstName: 'Priya', lastName: 'Patel', location: 'Delhi', company: 'Infosys', designation: 'Senior Developer', exp: { years: 5, months: 2 }, skills: ['Python', 'Django', 'PostgreSQL', 'REST API'] },
@@ -54,79 +46,96 @@ const getRandomElement = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const getRandomNumber = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 const seedApplicants = async () => {
+  let tenantConnection;
   try {
-    await mongoose.connect(process.env.MONGODB_URI, {
+    const dbName = `tenant_${tenantId}`;
+    const mongoUri = process.env.MONGODB_URI.replace(/\/[^\/]*$/, `/${dbName}`);
+    
+    console.log(`🔗 Connecting to tenant database: ${dbName}\n`);
+    
+    tenantConnection = await mongoose.createConnection(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
-    console.log('✅ Connected to MongoDB');
+    
+    console.log('✅ Connected to tenant MongoDB\n');
 
-    // Verify job exists
-    const job = await JobPosting.findById(jobId);
-    if (!job) {
-      console.log(`❌ Job with ID ${jobId} not found`);
-      process.exit(1);
-    }
+    // Define schemas matching your database structure
+    const candidateSchema = new mongoose.Schema({
+      candidateCode: String,
+      appliedFor: mongoose.Schema.Types.ObjectId,
+      firstName: String,
+      lastName: String,
+      email: String,
+      phone: String,
+      resume: String,
+      coverLetter: String,
+      experience: Number,
+      currentCompany: String,
+      currentPosition: String,
+      skills: [String],
+      education: {
+        degree: String,
+        institution: String,
+        year: Number
+      },
+      stage: String,
+      status: String,
+      appliedDate: Date,
+      notes: String
+    }, { timestamps: true });
 
-    console.log(`📋 Job Found: ${job.title}`);
-    console.log(`📍 Department: ${job.department}`);
+    const TenantCandidate = tenantConnection.model('Candidate', candidateSchema);
 
-    // Create applicants
+    // Create candidates matching your database structure
+    const timestamp = Date.now();
     const candidates = applicantsData.map((data, index) => ({
+      candidateCode: `CAN-${timestamp}-${index}`,
+      appliedFor: jobId,
       firstName: data.firstName,
       lastName: data.lastName,
-      email: `${data.firstName.toLowerCase()}.${data.lastName.toLowerCase()}@example.com`,
-      phone: `+91${9000000000 + index}`,
-      currentLocation: data.location,
-      preferredLocation: [data.location],
-      source: getRandomElement(sources),
-      appliedFor: jobId,
-      experience: data.exp,
-      currentCompany: data.company,
-      currentDesignation: data.designation,
-      currentCTC: data.exp.years > 0 ? getRandomNumber(300000, 1500000) : null,
-      expectedCTC: getRandomNumber(400000, 2000000),
-      noticePeriod: data.exp.years > 0 ? getRandomNumber(15, 90) : 0,
+      email: `${data.firstName.toLowerCase()}.${data.lastName.toLowerCase()}@gmail.com`,
+      phone: `+91 ${4813757996 + index}`,
+      resume: `resumes/${data.firstName}_${data.lastName}_Resume.pdf`,
+      coverLetter: `With strong fundamentals in data structures and algorithms, I am confi...`,
+      experience: data.exp.years,
+      currentCompany: data.company || 'Startup',
+      currentPosition: data.designation || 'Trainee',
       skills: data.skills,
-      education: [{
-        degree: 'B.Tech',
-        specialization: 'Computer Science',
-        institution: 'University',
-        passingYear: 2020 - data.exp.years,
-        percentage: getRandomNumber(70, 95)
-      }],
-      resume: {
-        url: `https://example.com/resumes/${data.firstName}_${data.lastName}.pdf`,
-        uploadedAt: new Date(Date.now() - getRandomNumber(1, 30) * 24 * 60 * 60 * 1000)
+      education: {
+        degree: 'B.Sc in Computer Science',
+        institution: `${data.location} University`,
+        year: 2024 - data.exp.years
       },
-      stage: getRandomElement(stages),
-      status: getRandomElement(statuses),
-      notes: `Applied for ${job.title}`,
-      isActive: true
+      stage: 'applied',
+      status: 'active',
+      appliedDate: new Date(Date.now() - getRandomNumber(1, 30) * 24 * 60 * 60 * 1000),
+      notes: null
     }));
 
-    // Insert candidates one by one to trigger pre-save hooks
-    const result = [];
-    for (const candidateData of candidates) {
-      const candidate = new Candidate(candidateData);
-      await candidate.save();
-      result.push(candidate);
-    }
-    console.log(`✅ Added ${result.length} applicants`);
+    // Insert candidates
+    const result = await TenantCandidate.insertMany(candidates);
+    console.log(`✅ Added ${result.length} applicants to tenant database`);
 
-    // Update job applications count
-    const totalApplicants = await Candidate.countDocuments({ appliedFor: jobId });
-    await JobPosting.findByIdAndUpdate(jobId, { applications: totalApplicants });
-    console.log(`✅ Updated job applications count to ${totalApplicants}`);
+    // Count total applicants for this job
+    const totalApplicants = await TenantCandidate.countDocuments({ appliedFor: jobId });
+    console.log(`✅ Total applicants for job ${jobId}: ${totalApplicants}`);
 
     console.log('\n📊 Summary:');
-    console.log(`   Job: ${job.title}`);
+    console.log(`   Tenant Database: ${dbName}`);
+    console.log(`   Job ID: ${jobId}`);
+    console.log(`   New Applicants: ${result.length}`);
     console.log(`   Total Applicants: ${totalApplicants}`);
 
     process.exit(0);
   } catch (error) {
     console.error('❌ Error:', error.message);
+    console.error(error);
     process.exit(1);
+  } finally {
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
   }
 };
 

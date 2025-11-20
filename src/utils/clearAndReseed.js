@@ -1,18 +1,10 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
-const Candidate = require('../models/Candidate');
-const JobPosting = require('../models/JobPosting');
 
-// Get job ID from command line argument
-const jobId = process.argv[2];
+const tenantId = '691e237d4f4469770021830f';
+const jobId = '691e363f75f473d1b479cd6e';
 
-if (!jobId) {
-  console.log('❌ Please provide a job ID as argument');
-  console.log('Usage: node seedApplicantsToJob.js <JOB_ID>');
-  process.exit(1);
-}
-
-// Sample data
+// Sample data - 30 candidates
 const applicantsData = [
   { firstName: 'Rahul', lastName: 'Sharma', location: 'Mumbai', company: 'TCS', designation: 'Software Engineer', exp: { years: 3, months: 6 }, skills: ['JavaScript', 'React', 'Node.js', 'MongoDB'] },
   { firstName: 'Priya', lastName: 'Patel', location: 'Delhi', company: 'Infosys', designation: 'Senior Developer', exp: { years: 5, months: 2 }, skills: ['Python', 'Django', 'PostgreSQL', 'REST API'] },
@@ -24,12 +16,12 @@ const applicantsData = [
   { firstName: 'Kavya', lastName: 'Mehta', location: 'Ahmedabad', company: 'Capgemini', designation: 'Data Analyst', exp: { years: 1, months: 8 }, skills: ['Python', 'SQL', 'Tableau', 'Excel'] },
   { firstName: 'Arjun', lastName: 'Joshi', location: 'Jaipur', company: 'IBM', designation: 'System Engineer', exp: { years: 2, months: 3 }, skills: ['Linux', 'Networking', 'Cloud', 'Security'] },
   { firstName: 'Meera', lastName: 'Nair', location: 'Noida', company: 'Oracle', designation: 'Technical Lead', exp: { years: 6, months: 5 }, skills: ['Java', 'Microservices', 'Spring', 'Kafka'] },
-  { firstName: 'Karan', lastName: 'Rao', location: 'Mumbai', company: null, designation: null, exp: { years: 0, months: 0 }, skills: ['JavaScript', 'HTML', 'CSS', 'React'] },
+  { firstName: 'Karan', lastName: 'Rao', location: 'Mumbai', company: 'Startup', designation: 'Trainee', exp: { years: 0, months: 0 }, skills: ['JavaScript', 'HTML', 'CSS', 'React'] },
   { firstName: 'Pooja', lastName: 'Desai', location: 'Bangalore', company: 'Flipkart', designation: 'Software Developer', exp: { years: 3, months: 0 }, skills: ['React', 'Redux', 'Node.js', 'GraphQL'] },
   { firstName: 'Siddharth', lastName: 'Iyer', location: 'Delhi', company: 'Amazon', designation: 'SDE-2', exp: { years: 4, months: 6 }, skills: ['Java', 'AWS', 'DynamoDB', 'Lambda'] },
   { firstName: 'Neha', lastName: 'Malhotra', location: 'Hyderabad', company: 'Microsoft', designation: 'Software Engineer', exp: { years: 3, months: 9 }, skills: ['C#', '.NET', 'Azure', 'SQL Server'] },
   { firstName: 'Aditya', lastName: 'Chopra', location: 'Chennai', company: 'Google', designation: 'Frontend Engineer', exp: { years: 5, months: 1 }, skills: ['React', 'TypeScript', 'Next.js', 'TailwindCSS'] },
-  { firstName: 'Riya', lastName: 'Kapoor', location: 'Pune', company: null, designation: null, exp: { years: 0, months: 6 }, skills: ['Python', 'Flask', 'SQL', 'Git'] },
+  { firstName: 'Riya', lastName: 'Kapoor', location: 'Pune', company: 'Startup', designation: 'Trainee', exp: { years: 0, months: 6 }, skills: ['Python', 'Flask', 'SQL', 'Git'] },
   { firstName: 'Varun', lastName: 'Agarwal', location: 'Kolkata', company: 'Paytm', designation: 'Backend Developer', exp: { years: 2, months: 8 }, skills: ['Node.js', 'MongoDB', 'Redis', 'Microservices'] },
   { firstName: 'Divya', lastName: 'Bose', location: 'Bangalore', company: 'Swiggy', designation: 'Full Stack Developer', exp: { years: 3, months: 3 }, skills: ['React', 'Node.js', 'PostgreSQL', 'Docker'] },
   { firstName: 'Nikhil', lastName: 'Sinha', location: 'Mumbai', company: 'Zomato', designation: 'Mobile Developer', exp: { years: 4, months: 2 }, skills: ['React Native', 'JavaScript', 'Redux', 'Firebase'] },
@@ -37,97 +29,118 @@ const applicantsData = [
   { firstName: 'Manish', lastName: 'Thakur', location: 'Bangalore', company: 'Adobe', designation: 'UI/UX Developer', exp: { years: 4, months: 4 }, skills: ['Figma', 'React', 'CSS', 'JavaScript'] },
   { firstName: 'Ananya', lastName: 'Krishnan', location: 'Hyderabad', company: 'Salesforce', designation: 'Cloud Engineer', exp: { years: 3, months: 2 }, skills: ['AWS', 'Terraform', 'Python', 'CI/CD'] },
   { firstName: 'Rajesh', lastName: 'Pandey', location: 'Mumbai', company: 'HDFC Bank', designation: 'Software Developer', exp: { years: 5, months: 8 }, skills: ['Java', 'Spring', 'Oracle', 'Microservices'] },
-  { firstName: 'Tanvi', lastName: 'Shah', location: 'Pune', company: null, designation: null, exp: { years: 0, months: 3 }, skills: ['HTML', 'CSS', 'JavaScript', 'Bootstrap'] },
+  { firstName: 'Tanvi', lastName: 'Shah', location: 'Pune', company: 'Startup', designation: 'Trainee', exp: { years: 0, months: 3 }, skills: ['HTML', 'CSS', 'JavaScript', 'Bootstrap'] },
   { firstName: 'Suresh', lastName: 'Menon', location: 'Chennai', company: 'Cognizant', designation: 'Business Analyst', exp: { years: 4, months: 1 }, skills: ['SQL', 'Tableau', 'Excel', 'Agile'] },
   { firstName: 'Ishita', lastName: 'Banerjee', location: 'Kolkata', company: 'TCS', designation: 'QA Automation Engineer', exp: { years: 2, months: 9 }, skills: ['Selenium', 'Python', 'Jenkins', 'API Testing'] },
   { firstName: 'Gaurav', lastName: 'Saxena', location: 'Noida', company: 'PhonePe', designation: 'Backend Engineer', exp: { years: 3, months: 11 }, skills: ['Go', 'Kafka', 'Redis', 'PostgreSQL'] },
   { firstName: 'Nisha', lastName: 'Reddy', location: 'Bangalore', company: 'Uber', designation: 'Data Scientist', exp: { years: 4, months: 5 }, skills: ['Python', 'Machine Learning', 'TensorFlow', 'SQL'] },
   { firstName: 'Deepak', lastName: 'Mishra', location: 'Delhi', company: 'Snapdeal', designation: 'Full Stack Developer', exp: { years: 2, months: 4 }, skills: ['Vue.js', 'Node.js', 'MySQL', 'Docker'] },
-  { firstName: 'Sonal', lastName: 'Jain', location: 'Jaipur', company: null, designation: null, exp: { years: 0, months: 8 }, skills: ['React', 'JavaScript', 'Git', 'REST API'] }
+  { firstName: 'Sonal', lastName: 'Jain', location: 'Jaipur', company: 'Startup', designation: 'Trainee', exp: { years: 0, months: 8 }, skills: ['React', 'JavaScript', 'Git', 'REST API'] }
 ];
 
-const stages = ['applied', 'screening', 'shortlisted', 'interview-scheduled', 'interview-completed', 'offer-extended'];
-const sources = ['linkedin', 'naukri', 'referral', 'job-portal', 'walk-in'];
-const statuses = ['active', 'active', 'active', 'rejected'];
-
-const getRandomElement = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const getRandomNumber = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-const seedApplicants = async () => {
+const clearAndReseed = async () => {
+  let tenantConnection;
   try {
-    await mongoose.connect(process.env.MONGODB_URI, {
+    const dbName = `tenant_${tenantId}`;
+    const mongoUri = process.env.MONGODB_URI.replace(/\/[^\/]*$/, `/${dbName}`);
+    
+    console.log(`🔗 Connecting to tenant database: ${dbName}\n`);
+    
+    tenantConnection = await mongoose.createConnection(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
-    console.log('✅ Connected to MongoDB');
+    
+    console.log('✅ Connected to tenant MongoDB\n');
 
-    // Verify job exists
-    const job = await JobPosting.findById(jobId);
-    if (!job) {
-      console.log(`❌ Job with ID ${jobId} not found`);
-      process.exit(1);
-    }
+    // Define schema matching your database structure
+    const candidateSchema = new mongoose.Schema({
+      jobId: mongoose.Schema.Types.ObjectId,
+      firstName: String,
+      lastName: String,
+      email: String,
+      phone: String,
+      resume: String,
+      coverLetter: String,
+      experience: Number,
+      currentCompany: String,
+      currentPosition: String,
+      skills: [String],
+      education: {
+        degree: String,
+        institution: String,
+        year: Number
+      },
+      status: String,
+      appliedDate: Date,
+      notes: String
+    }, { timestamps: true });
 
-    console.log(`📋 Job Found: ${job.title}`);
-    console.log(`📍 Department: ${job.department}`);
+    const TenantCandidate = tenantConnection.model('Candidate', candidateSchema);
 
-    // Create applicants
+    // Clear existing candidates for this job
+    const deleteResult = await TenantCandidate.deleteMany({ 
+      $or: [
+        { jobId: jobId },
+        { appliedFor: jobId }
+      ]
+    });
+    console.log(`🗑️  Deleted ${deleteResult.deletedCount} existing candidates\n`);
+
+    // Create new candidates matching your database structure
     const candidates = applicantsData.map((data, index) => ({
+      appliedFor: new mongoose.Types.ObjectId(jobId),
       firstName: data.firstName,
       lastName: data.lastName,
-      email: `${data.firstName.toLowerCase()}.${data.lastName.toLowerCase()}@example.com`,
-      phone: `+91${9000000000 + index}`,
-      currentLocation: data.location,
-      preferredLocation: [data.location],
-      source: getRandomElement(sources),
-      appliedFor: jobId,
-      experience: data.exp,
+      email: `${data.firstName.toLowerCase()}.${data.lastName.toLowerCase()}@gmail.com`,
+      phone: `+91 ${4813757996 + index}`,
+      resume: `resumes/${data.firstName}_${data.lastName}_Resume.pdf`,
+      coverLetter: `With strong fundamentals in data structures and algorithms, I am confident in my ability to contribute effectively.`,
+      experience: data.exp.years,
       currentCompany: data.company,
-      currentDesignation: data.designation,
-      currentCTC: data.exp.years > 0 ? getRandomNumber(300000, 1500000) : null,
-      expectedCTC: getRandomNumber(400000, 2000000),
-      noticePeriod: data.exp.years > 0 ? getRandomNumber(15, 90) : 0,
+      currentPosition: data.designation,
       skills: data.skills,
-      education: [{
-        degree: 'B.Tech',
-        specialization: 'Computer Science',
-        institution: 'University',
-        passingYear: 2020 - data.exp.years,
-        percentage: getRandomNumber(70, 95)
-      }],
-      resume: {
-        url: `https://example.com/resumes/${data.firstName}_${data.lastName}.pdf`,
-        uploadedAt: new Date(Date.now() - getRandomNumber(1, 30) * 24 * 60 * 60 * 1000)
+      education: {
+        degree: 'B.Sc in Computer Science',
+        institution: `${data.location} University`,
+        year: 2024 - data.exp.years
       },
-      stage: getRandomElement(stages),
-      status: getRandomElement(statuses),
-      notes: `Applied for ${job.title}`,
-      isActive: true
+      status: 'applied',
+      appliedDate: new Date(Date.now() - getRandomNumber(1, 30) * 24 * 60 * 60 * 1000),
+      notes: null
     }));
 
-    // Insert candidates one by one to trigger pre-save hooks
-    const result = [];
-    for (const candidateData of candidates) {
-      const candidate = new Candidate(candidateData);
-      await candidate.save();
-      result.push(candidate);
-    }
-    console.log(`✅ Added ${result.length} applicants`);
+    // Debug: Check first candidate
+    console.log('Sample candidate data:');
+    console.log(JSON.stringify(candidates[0], null, 2));
+    
+    // Insert candidates
+    const result = await TenantCandidate.insertMany(candidates);
+    console.log(`✅ Added ${result.length} new applicants to tenant database`);
 
-    // Update job applications count
-    const totalApplicants = await Candidate.countDocuments({ appliedFor: jobId });
-    await JobPosting.findByIdAndUpdate(jobId, { applications: totalApplicants });
-    console.log(`✅ Updated job applications count to ${totalApplicants}`);
+    // Count total applicants for this job
+    const totalApplicants = await TenantCandidate.countDocuments({ appliedFor: new mongoose.Types.ObjectId(jobId) });
+    console.log(`✅ Total applicants for job ${jobId}: ${totalApplicants}`);
 
     console.log('\n📊 Summary:');
-    console.log(`   Job: ${job.title}`);
+    console.log(`   Tenant Database: ${dbName}`);
+    console.log(`   Job ID: ${jobId}`);
+    console.log(`   New Applicants: ${result.length}`);
     console.log(`   Total Applicants: ${totalApplicants}`);
+    console.log('\n✅ Seeding completed successfully!');
 
     process.exit(0);
   } catch (error) {
     console.error('❌ Error:', error.message);
+    console.error(error);
     process.exit(1);
+  } finally {
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
   }
 };
 
-seedApplicants();
+clearAndReseed();
