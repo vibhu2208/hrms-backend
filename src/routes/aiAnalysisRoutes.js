@@ -7,7 +7,8 @@ const {
   getCandidateInsights,
   getAnalysisStats,
   parseResume,
-  clearAnalysis
+  clearAnalysis,
+  resumeSearchAndShortlist
 } = require('../controllers/aiAnalysisController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
@@ -81,6 +82,16 @@ router.post('/candidates/:candidateId/parse-resume',
 router.delete('/jobs/:jobId/clear', 
   authorize('admin'), 
   clearAnalysis
+);
+
+/**
+ * @route   POST /api/ai-analysis/resume-search
+ * @desc    AI-powered resume search and shortlisting
+ * @access  Private (HR, Admin)
+ */
+router.post('/resume-search', 
+  authorize('admin', 'hr'), 
+  resumeSearchAndShortlist
 );
 
 module.exports = router;
