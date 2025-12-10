@@ -40,6 +40,7 @@ const userRoutes = require('./routes/userRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const testRoutes = require('./routes/testRoutes');
 const managerRoutes = require('./routes/managerRoutes');
+const resumePoolRoutes = require('./routes/resumePoolRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -110,6 +111,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/manager', managerRoutes);
 app.use('/api/test', testRoutes);
+app.use('/api/resume-pool', resumePoolRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

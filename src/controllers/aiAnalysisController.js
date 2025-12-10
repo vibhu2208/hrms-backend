@@ -385,4 +385,100 @@ exports.clearAnalysis = async (req, res) => {
   }
 };
 
+/**
+ * Resume Search and Shortlisting API
+ * AI-powered resume screening and ranking based on job requirements
+ */
+exports.resumeSearchAndShortlist = async (req, res) => {
+  try {
+    const TenantCandidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const {
+      requiredSkills = [],
+      preferredSkills = [],
+      minimumExperience = 0,
+      candidateIds = [],
+      maxResults = 10,
+      includeAllCandidates = false
+    } = req.body;
+
+    // Build query to get candidates
+    let query = { status: 'active' };
+    
+    if (candidateIds.length > 0 && !includeAllCandidates) {
+      query._id = { $in: candidateIds };
+    }
+
+    // Fetch candidates
+    const candidates = await TenantCandidate.find(query)
+      .select('firstName lastName email phone skills experience currentCompany currentDesignation education resume resumeText')
+      .populate('appliedFor', 'title department');
+
+    if (candidates.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No candidates found',
+        data: []
+      });
+    }
+
+    // Enhance candidates with resume text if available
+    const enhancedCandidates = await Promise.all(
+      candidates.map(async (candidate) => {
+        let enhancedCandidate = candidate.toObject();
+        
+        // If resumeText is not available but resume URL exists, parse it
+        if (!enhancedCandidate.resumeText && enhancedCandidate.resume?.url) {
+          try {
+            const resumeData = await resumeParser.parseResume(enhancedCandidate.resume.url);
+            enhancedCandidate.resumeText = resumeData.rawText;
+            
+            // Update candidate with parsed skills if not already present
+            if (resumeData.skills && resumeData.skills.length > 0) {
+              const existingSkills = enhancedCandidate.skills || [];
+              enhancedCandidate.skills = [...new Set([...existingSkills, ...resumeData.skills])];
+            }
+            
+            // Update experience if extracted and not present
+            if (resumeData.experience && !enhancedCandidate.experience?.years) {
+              enhancedCandidate.experience = {
+                years: resumeData.experience,
+                months: 0
+              };
+            }
+          } catch (error) {
+            console.warn(`Resume parsing failed for candidate ${candidate._id}:`, error.message);
+          }
+        }
+        
+        return enhancedCandidate;
+      })
+    );
+
+    // Use AI service for resume screening and shortlisting
+    const shortlistingResults = await aiService.screenAndShortlistResumes(
+      enhancedCandidates,
+      {
+        requiredSkills,
+        preferredSkills,
+        minimumExperience,
+        maxResults
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Resume screening completed. Found ${shortlistingResults.length} shortlisted candidates.`,
+      data: shortlistingResults
+    });
+
+  } catch (error) {
+    console.error('Error in resume search and shortlisting:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process resume search and shortlisting',
+      error: error.message
+    });
+  }
+};
+
 module.exports = exports;
