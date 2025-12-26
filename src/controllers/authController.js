@@ -48,7 +48,7 @@ exports.register = async (req, res) => {
       message: 'User registered successfully',
       data: {
         user: {
-          id: user._id,
+          userId: user._id,
           email: user.email,
           role: user.role
         },
@@ -258,7 +258,7 @@ exports.login = async (req, res) => {
       message: 'Login successful',
       data: {
         user: {
-          id: user._id,
+          userId: user._id,
           email: user.email,
           role: user.role,
           employee: user.employeeId,

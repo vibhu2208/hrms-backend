@@ -29,6 +29,15 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // Handle both 'id' and 'userId' fields for backward compatibility
+    const userId = decoded.userId || decoded.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token: missing user identifier'
+      });
+    }
+
     let user = null;
 
     // Check if token contains company info (tenant user)
@@ -38,7 +47,7 @@ const protect = async (req, res, next) => {
         console.log(`🔍 Auth middleware: Fetching user from tenant DB for company: ${decoded.companyId}`);
         tenantConnection = await getTenantConnection(decoded.companyId);
         const TenantUser = tenantConnection.model('User', TenantUserSchema);
-        user = await TenantUser.findById(decoded.userId).select('-password');
+        user = await TenantUser.findById(userId).select('-password');
         
         console.log(`✅ User found in tenant DB: ${user?.email}`);
         
@@ -57,7 +66,7 @@ const protect = async (req, res, next) => {
       // User is from main database (super admin, etc.)
       console.log('🔍 Auth middleware: Fetching super admin from global DB');
       const SuperAdmin = await getSuperAdmin();
-      user = await SuperAdmin.findById(decoded.userId).select('-password');
+      user = await SuperAdmin.findById(userId).select('-password');
       console.log(`✅ Super admin found: ${user?.email}`);
     }
 
