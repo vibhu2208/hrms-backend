@@ -1,7 +1,7 @@
 const ResumePool = require('../models/ResumePool');
 const resumeParser = require('../utils/resumeParser');
 const aiService = require('../services/aiService');
-const getTenantModel = require('../utils/tenantModel');
+const getTenantModel = require('../utils/tenantModels');
 
 /**
  * Upload raw resume text to pool
