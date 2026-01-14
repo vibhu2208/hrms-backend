@@ -53,6 +53,20 @@ const employeeSchema = new mongoose.Schema({
     zipCode: String,
     country: String
   },
+  permanentAddress: {
+    street: String,
+    city: String,
+    state: String,
+    zipCode: String,
+    country: String
+  },
+  correspondenceAddress: {
+    street: String,
+    city: String,
+    state: String,
+    zipCode: String,
+    country: String
+  },
   department: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Department',
@@ -114,7 +128,17 @@ const employeeSchema = new mongoose.Schema({
     specialization: String,
     institution: String,
     passingYear: Number,
-    percentage: Number
+    percentage: Number,
+    documentUrl: String,
+    verified: {
+      type: Boolean,
+      default: false
+    },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    verifiedAt: Date
   }],
   experience: [{
     company: String,

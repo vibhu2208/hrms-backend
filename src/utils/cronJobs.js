@@ -143,19 +143,27 @@ const checkExpiringContracts = cron.schedule('0 9 * * *', async () => {
   scheduled: false
 });
 
+// Import leave accrual jobs
+const { startAccrualJobs } = require('./leaveAccrualJobs');
+
 // Start all cron jobs
 const startCronJobs = () => {
   checkExpiringDocuments.start();
   checkDueCompliances.start();
   checkExpiringContracts.start();
+  startAccrualJobs();
   console.log('✅ Cron jobs started');
 };
+
+// Import leave accrual jobs stop function
+const { stopAccrualJobs } = require('./leaveAccrualJobs');
 
 // Stop all cron jobs
 const stopCronJobs = () => {
   checkExpiringDocuments.stop();
   checkDueCompliances.stop();
   checkExpiringContracts.stop();
+  stopAccrualJobs();
   console.log('⏹️  Cron jobs stopped');
 };
 
