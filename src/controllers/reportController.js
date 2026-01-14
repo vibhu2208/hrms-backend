@@ -11,6 +11,10 @@ const {
   exportTimesheetReport,
   exportPayrollReport
 } = require('../utils/excelExport');
+const reportsService = require('../services/reportsService');
+const analyticsService = require('../services/analyticsService');
+const { exportToExcel, exportToCSV } = require('../utils/reportExport');
+const { getTenantConnection } = require('../config/database.config');
 
 exports.exportEmployees = async (req, res) => {
   try {
@@ -148,6 +152,355 @@ exports.getComplianceReport = async (req, res) => {
         dueCompliances,
         expiringContracts
       }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============ Leave Reports ============
+
+exports.getLeaveEntitlementReport = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await reportsService.generateLeaveEntitlementReport(companyId, filters);
+
+    // Export if requested
+    if (req.query.export === 'excel' || req.query.export === 'csv') {
+      const format = req.query.export;
+      let exportData;
+
+      if (format === 'excel') {
+        const workbook = await exportToExcel(result.data);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=leave-entitlement-${result.year}.xlsx`);
+        const XLSX = require('xlsx');
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        return res.send(buffer);
+      } else {
+        const csv = await exportToCSV(result.data);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=leave-entitlement-${result.year}.csv`);
+        return res.send(csv);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getLeaveBalanceReport = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await reportsService.generateLeaveBalanceReport(companyId, filters);
+
+    if (req.query.export === 'excel' || req.query.export === 'csv') {
+      const format = req.query.export;
+      if (format === 'excel') {
+        const workbook = await exportToExcel(result.data);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=leave-balance-${result.year}.xlsx`);
+        const XLSX = require('xlsx');
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        return res.send(buffer);
+      } else {
+        const csv = await exportToCSV(result.data);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=leave-balance-${result.year}.csv`);
+        return res.send(csv);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getLeaveUtilizationReport = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await reportsService.generateLeaveUtilizationReport(companyId, filters);
+
+    if (req.query.export === 'excel' || req.query.export === 'csv') {
+      const format = req.query.export;
+      if (format === 'excel') {
+        const workbook = await exportToExcel(result.data);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=leave-utilization.xlsx');
+        const XLSX = require('xlsx');
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        return res.send(buffer);
+      } else {
+        const csv = await exportToCSV(result.data);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=leave-utilization.csv');
+        return res.send(csv);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============ Attendance Reports ============
+
+exports.getAttendanceSummaryReport = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await reportsService.generateAttendanceSummaryReport(companyId, filters);
+
+    if (req.query.export === 'excel' || req.query.export === 'csv') {
+      const format = req.query.export;
+      if (format === 'excel') {
+        const workbook = await exportToExcel(result.data);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=attendance-summary.xlsx');
+        const XLSX = require('xlsx');
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        return res.send(buffer);
+      } else {
+        const csv = await exportToCSV(result.data);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=attendance-summary.csv');
+        return res.send(csv);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getAttendanceExceptionReport = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await reportsService.generateAttendanceExceptionReport(companyId, filters);
+
+    if (req.query.export === 'excel' || req.query.export === 'csv') {
+      const format = req.query.export;
+      if (format === 'excel') {
+        const workbook = await exportToExcel(result.data);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=attendance-exceptions.xlsx');
+        const XLSX = require('xlsx');
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        return res.send(buffer);
+      } else {
+        const csv = await exportToCSV(result.data);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=attendance-exceptions.csv');
+        return res.send(csv);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============ Compliance Reports ============
+
+exports.getComplianceStatusReport = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await reportsService.generateComplianceStatusReport(companyId, filters);
+
+    if (req.query.export === 'excel' || req.query.export === 'csv') {
+      const format = req.query.export;
+      // Combine documents and compliances for export
+      const exportData = [
+        ...result.data.expiringDocuments.map(d => ({ ...d, type: 'Document' })),
+        ...result.data.dueCompliances.map(c => ({ ...c, type: 'Compliance' }))
+      ];
+
+      if (format === 'excel') {
+        const workbook = await exportToExcel(exportData);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=compliance-status.xlsx');
+        const XLSX = require('xlsx');
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        return res.send(buffer);
+      } else {
+        const csv = await exportToCSV(exportData);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=compliance-status.csv');
+        return res.send(csv);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============ Analytics ============
+
+exports.getAttendanceAnalytics = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await analyticsService.getAttendanceTrends(companyId, filters);
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getLeaveAnalytics = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await analyticsService.getLeavePatterns(companyId, filters);
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getComplianceAnalytics = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await analyticsService.getComplianceMetrics(companyId, filters);
+
+    res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getPerformanceIndicators = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const filters = req.query;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await analyticsService.getPerformanceIndicators(companyId, filters);
+
+    res.status(200).json({
+      success: true,
+      ...result
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

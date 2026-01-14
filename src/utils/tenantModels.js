@@ -20,6 +20,7 @@ const Notification = require('../models/Notification');
 const ExitProcess = require('../models/ExitProcess');
 const TalentPool = require('../models/TalentPool');
 const OfferTemplate = require('../models/OfferTemplate');
+const ResumePool = require('../models/ResumePool');
 
 // Import offboarding related models (if they exist)
 let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
@@ -110,6 +111,7 @@ function getTenantModels(tenantConnection) {
   models.ExitProcess = createTenantModel('ExitProcess', ExitProcess);
   models.TalentPool = createTenantModel('TalentPool', TalentPool);
   models.OfferTemplate = createTenantModel('OfferTemplate', OfferTemplate);
+  models.ResumePool = createTenantModel('ResumePool', ResumePool);
 
   // Tenant-specific offboarding models (only if they exist)
   if (OffboardingRequest) models.OffboardingRequest = createTenantModel('OffboardingRequest', OffboardingRequest);

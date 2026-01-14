@@ -145,13 +145,44 @@ exports.getLeaveDetails = async (req, res) => {
 };
 
 /**
+ * Map frontend leaveType values to backend enum values
+ */
+const mapLeaveType = (leaveType) => {
+  if (!leaveType) return leaveType;
+  
+  const mapping = {
+    'casual': 'Casual Leave',
+    'sick': 'Sick Leave',
+    'earned': 'Personal Leave',
+    'personal': 'Personal Leave',
+    'maternity': 'Maternity Leave',
+    'paternity': 'Paternity Leave',
+    'unpaid': 'Unpaid Leave',
+    'comp off': 'Comp Offs',
+    'comp offs': 'Comp Offs',
+    'floater': 'Floater Leave',
+    'marriage': 'Marriage Leave'
+  };
+  
+  // If already in correct format, return as is
+  const validEnums = ['Personal Leave', 'Sick Leave', 'Casual Leave', 'Comp Offs', 'Floater Leave', 'Marriage Leave', 'Maternity Leave', 'Paternity Leave', 'Unpaid Leave'];
+  if (validEnums.includes(leaveType)) {
+    return leaveType;
+  }
+  
+  // Map lowercase/short values to enum values
+  const normalized = leaveType.toLowerCase().trim();
+  return mapping[normalized] || leaveType;
+};
+
+/**
  * Apply for leave
  */
 exports.applyLeave = async (req, res) => {
   let tenantConnection = null;
   
   try {
-    const { leaveType, startDate, endDate, reason } = req.body;
+    let { leaveType, startDate, endDate, reason } = req.body;
     const companyId = req.companyId;
     const user = req.user;
 
@@ -160,6 +191,18 @@ exports.applyLeave = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Leave type, start date, and end date are required'
+      });
+    }
+    
+    // Map leaveType to valid enum value
+    leaveType = mapLeaveType(leaveType);
+    
+    // Validate that the mapped leaveType is a valid enum value
+    const validEnums = ['Personal Leave', 'Sick Leave', 'Casual Leave', 'Comp Offs', 'Floater Leave', 'Marriage Leave', 'Maternity Leave', 'Paternity Leave', 'Unpaid Leave'];
+    if (!validEnums.includes(leaveType)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid leave type. Valid types are: ${validEnums.join(', ')}`
       });
     }
 

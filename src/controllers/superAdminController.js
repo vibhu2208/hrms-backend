@@ -218,14 +218,18 @@ const getClient = async (req, res) => {
 };
 
 const createClient = async (req, res) => {
+  let client = null;
+  let adminUser = null;
+  const defaultPassword = 'password123';
+  
   try {
-    const { adminEmail, ...clientData } = req.body;
+    const { adminEmail, adminFirstName, ...clientData } = req.body;
     
     console.log('🎯 Creating client with data:', clientData);
     console.log('👤 Admin email provided:', adminEmail);
     
     // Create the client
-    const client = new Client(clientData);
+    client = new Client(clientData);
     await client.save();
     console.log('✅ Client created:', client.companyName);
 
@@ -238,11 +242,12 @@ const createClient = async (req, res) => {
         const existingUser = await User.findOne({ email: adminEmail });
         if (existingUser) {
           console.log('⚠️ Admin user already exists:', adminEmail);
+          adminUser = existingUser;
         } else {
           // Create admin user
-          const adminUser = new User({
+          adminUser = new User({
             email: adminEmail,
-            password: 'password123', // Default password
+            password: defaultPassword,
             authProvider: 'local',
             role: 'admin',
             clientId: client._id,
@@ -258,27 +263,31 @@ const createClient = async (req, res) => {
       }
     }
 
-    // Log the action
-    await logAction(req.user._id, null, 'CREATE_CLIENT', 'Client', client._id, {
+    // Log the action with correct enum value
+    await logAction(req.user._id, null, 'client_create', 'client', client._id, {
       companyName: client.companyName,
       clientCode: client.clientCode,
       adminEmail: adminEmail
     }, req);
 
-    console.log(`✅ Company creation completed successfully: ${companyCreated.companyName}`);
+    console.log(`✅ Company creation completed successfully: ${client.companyName}`);
 
-    // Step 6: Send welcome email with credentials if admin was created
-    if (adminUser) {
-      await sendCompanyAdminCredentials({
-        email: adminEmail,
-        firstName: adminFirstName || 'Admin',
-        companyName: companyCreated.companyName,
-        loginUrl: `${process.env.CLIENT_URL || 'https://your-app-url.com'}/login`,
-        email: adminEmail,
-        password: password,
-        supportEmail: process.env.SUPPORT_EMAIL || 'support@yourcompany.com'
-      });
-      console.log(`📧 Welcome email sent to: ${adminEmail}`);
+    // Send welcome email with credentials if admin was created
+    if (adminUser && adminEmail) {
+      try {
+        await sendCompanyAdminCredentials({
+          email: adminEmail,
+          firstName: adminFirstName || 'Admin',
+          companyName: client.companyName,
+          loginUrl: `${process.env.CLIENT_URL || 'https://your-app-url.com'}/login`,
+          password: defaultPassword,
+          supportEmail: process.env.SUPPORT_EMAIL || 'support@yourcompany.com'
+        });
+        console.log(`📧 Welcome email sent to: ${adminEmail}`);
+      } catch (emailError) {
+        console.error('❌ Error sending welcome email:', emailError);
+        // Don't fail the client creation if email fails
+      }
     }
 
     // Return success response (without password for security)
@@ -286,22 +295,29 @@ const createClient = async (req, res) => {
       success: true,
       message: adminEmail ? 'Client and admin user created successfully' : 'Client created successfully',
       data: client,
-      adminCreated: !!adminEmail
+      adminCreated: !!adminUser
     };
     res.status(201).json(response);
   } catch (error) {
     console.error('❌ Error creating client:', error);
+    
+    // Only log action if client was created
+    if (client && client._id) {
+      try {
+        await logAction(req.user?._id || null, null, 'client_create', 'client', client._id, {
+          companyName: client.companyName,
+          error: error.message
+        }, req);
+      } catch (logError) {
+        console.error('❌ Error logging failed action:', logError);
+      }
+    }
+    
     res.status(400).json({
       success: false,
       message: 'Error creating company',
       error: error.message
     });
-
-    // Log the action
-    await logAction(req.user._id, null, 'UPDATE_CLIENT_SUBSCRIPTION', 'Client', client._id, {
-      companyName: client.companyName,
-      subscriptionChanges: req.body
-    }, req);
   }
 };
 

@@ -11,6 +11,7 @@ const {
   recordAssetReturn,
   updateClearance,
   processFinalSettlement,
+  cancelOffboarding,
   deleteOffboarding
 } = require('../controllers/offboardingController');
 const { protect, authorize } = require('../middlewares/auth');
@@ -30,6 +31,8 @@ router.post('/:id/exit-interview/complete', completeExitInterview);
 router.post('/:id/assets/return', recordAssetReturn);
 router.post('/:id/clearance', updateClearance);
 router.post('/:id/settlement', processFinalSettlement);
+
+router.put('/:id/cancel', cancelOffboarding);
 
 router.route('/:id')
   .get(getOffboarding)
