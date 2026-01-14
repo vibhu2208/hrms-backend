@@ -1,4 +1,22 @@
 require('dotenv').config();
+
+// Global error handlers to prevent crashes
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Promise Rejection:', err.message);
+  console.error('Stack:', err.stack);
+  // Don't exit - allow server to continue running
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err.message);
+  console.error('Stack:', err.stack);
+  // Only exit for critical errors
+  if (err.code === 'EADDRINUSE') {
+    console.error('Port already in use. Exiting...');
+    process.exit(1);
+  }
+});
+
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -41,6 +59,16 @@ const superAdminRoutes = require('./routes/superAdminRoutes');
 const testRoutes = require('./routes/testRoutes');
 const managerRoutes = require('./routes/managerRoutes');
 const resumePoolRoutes = require('./routes/resumePoolRoutes');
+const workScheduleRoutes = require('./routes/workScheduleRoutes');
+const holidayRoutes = require('./routes/holidayRoutes');
+const biometricRoutes = require('./routes/biometricRoutes');
+const sapRoutes = require('./routes/sapRoutes');
+const leaveAccrualRoutes = require('./routes/leaveAccrualRoutes');
+const leaveManagementRoutes = require('./routes/leaveManagementRoutes');
+const approvalWorkflowRoutes = require('./routes/approvalWorkflowRoutes');
+const employeeProfileRoutes = require('./routes/employeeProfileRoutes');
+const leaveEncashmentRoutes = require('./routes/leaveEncashmentRoutes');
+const advancedReportsRoutes = require('./routes/advancedReportsRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -85,7 +113,17 @@ app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/leave', leaveRoutes);
+app.use('/api/leave-accrual', leaveAccrualRoutes);
+app.use('/api/leave-management', leaveManagementRoutes);
+app.use('/api/approval', approvalWorkflowRoutes);
+app.use('/api/employee/profile', employeeProfileRoutes);
+app.use('/api/leave-encashment', leaveEncashmentRoutes);
+app.use('/api/reports', advancedReportsRoutes);
 app.use('/api/attendance', attendanceRoutes);
+app.use('/api/work-schedule', workScheduleRoutes);
+app.use('/api/holidays', holidayRoutes);
+app.use('/api/biometric', biometricRoutes);
+app.use('/api/sap', sapRoutes);
 app.use('/api/payroll', payrollRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/jobs', jobPostingRoutes);

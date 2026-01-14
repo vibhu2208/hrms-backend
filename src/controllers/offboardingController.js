@@ -4,20 +4,134 @@ exports.getOffboardingList = async (req, res) => {
   try {
     // Get tenant-specific models
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     
-    const { status } = req.query;
+    const { 
+      status, 
+      stage, 
+      page = 1, 
+      limit = 10, 
+      search,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      startDate,
+      endDate
+    } = req.query;
+    
     let query = {};
 
-    if (status) query.status = status;
+    // Filter by status
+    if (status && status !== 'all') {
+      query.status = status;
+    }
 
-    const offboardingList = await Offboarding.find(query)
-      .populate('employee', 'firstName lastName email employeeCode')
-      .populate('initiatedBy', 'firstName lastName')
-      .populate('exitInterview.conductedBy', 'firstName lastName')
-      .sort({ createdAt: -1 });
+    // Filter by stage
+    if (stage) {
+      query.currentStage = stage;
+    }
 
-    res.status(200).json({ success: true, count: offboardingList.length, data: offboardingList });
+    // Date range filter
+    if (startDate || endDate) {
+      query.lastWorkingDate = {};
+      if (startDate) query.lastWorkingDate.$gte = new Date(startDate);
+      if (endDate) query.lastWorkingDate.$lte = new Date(endDate);
+    }
+
+    // Search functionality - search by employee name/email
+    if (search) {
+      // First, find employees matching the search
+      const employeeIds = await Employee.find({
+        $or: [
+          { firstName: { $regex: search, $options: 'i' } },
+          { lastName: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { employeeCode: { $regex: search, $options: 'i' } }
+        ]
+      }).select('_id');
+      
+      const employeeIdArray = employeeIds.map(emp => emp._id);
+      query.employee = { $in: employeeIdArray };
+    }
+
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    // Pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    let offboardingList = await Offboarding.find(query)
+      .populate('initiatedBy', 'firstName lastName email')
+      .populate('exitInterview.conductedBy', 'firstName lastName email')
+      .populate('clearance.hr.clearedBy', 'firstName lastName')
+      .populate('clearance.finance.clearedBy', 'firstName lastName')
+      .populate('clearance.it.clearedBy', 'firstName lastName')
+      .populate('clearance.admin.clearedBy', 'firstName lastName')
+      .populate('assetsReturned.asset', 'name serialNumber')
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Manually populate employee data since Employee model might not match
+    const Department = getTenantModel(req.tenant.connection, 'Department');
+    for (let item of offboardingList) {
+      if (item.employee) {
+        try {
+          const employee = await Employee.findById(item.employee)
+            .select('firstName lastName email employeeCode designation department')
+            .lean();
+          
+          if (employee) {
+            // Populate department if it exists
+            if (employee.department && Department) {
+              const dept = await Department.findById(employee.department).select('name').lean();
+              if (dept) {
+                employee.department = dept;
+              }
+            }
+            item.employee = employee;
+          }
+        } catch (err) {
+          console.error('Error populating employee:', err);
+          // Keep employee as ObjectId if populate fails
+        }
+      }
+    }
+
+    // Get total count for pagination
+    const total = await Offboarding.countDocuments(query);
+
+    // Calculate summary statistics
+    const allOffboardings = await Offboarding.find({}).select('status currentStage');
+    const summary = {
+      total: allOffboardings.length,
+      inProgress: allOffboardings.filter(o => o.status === 'in-progress').length,
+      completed: allOffboardings.filter(o => o.status === 'completed').length,
+      cancelled: allOffboardings.filter(o => o.status === 'cancelled').length,
+      byStage: {}
+    };
+
+    // Count by stage
+    allOffboardings.forEach(off => {
+      if (off.currentStage) {
+        summary.byStage[off.currentStage] = (summary.byStage[off.currentStage] || 0) + 1;
+      }
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      count: offboardingList.length,
+      data: offboardingList,
+      summary,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
   } catch (error) {
+    console.error('Error fetching offboarding list:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -25,18 +139,102 @@ exports.getOffboardingList = async (req, res) => {
 exports.getOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const offboarding = await Offboarding.findById(req.params.id)
-      .populate('employee')
-      .populate('initiatedBy')
-      .populate('exitInterview.conductedBy')
-      .populate('assetsReturned.asset');
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
+    const Department = getTenantModel(req.tenant.connection, 'Department');
+    
+    let offboarding = await Offboarding.findById(req.params.id)
+      .populate('initiatedBy', 'firstName lastName email')
+      .populate('exitInterview.conductedBy', 'firstName lastName email')
+      .populate('clearance.hr.clearedBy', 'firstName lastName email')
+      .populate('clearance.finance.clearedBy', 'firstName lastName email')
+      .populate('clearance.it.clearedBy', 'firstName lastName email')
+      .populate('clearance.admin.clearedBy', 'firstName lastName email')
+      .populate('assetsReturned.asset', 'name serialNumber category condition status')
+      .lean();
 
     if (!offboarding) {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
     }
 
-    res.status(200).json({ success: true, data: offboarding });
+    // Manually populate employee data
+    if (offboarding.employee) {
+      try {
+        const employee = await Employee.findById(offboarding.employee)
+          .select('firstName lastName email employeeCode designation department joiningDate phone address')
+          .lean();
+        
+        if (employee) {
+          // Populate department
+          if (employee.department && Department) {
+            const dept = await Department.findById(employee.department).select('name').lean();
+            if (dept) {
+              employee.department = dept;
+            }
+          }
+          
+          // Populate reporting manager
+          if (employee.reportingManager) {
+            const manager = await Employee.findById(employee.reportingManager)
+              .select('firstName lastName email')
+              .lean();
+            if (manager) {
+              employee.reportingManager = manager;
+            }
+          }
+          
+          offboarding.employee = employee;
+        }
+      } catch (err) {
+        console.error('Error populating employee:', err);
+      }
+    }
+
+    // Calculate clearance summary
+    const clearanceSummary = {
+      hr: {
+        cleared: offboarding.clearance?.hr?.cleared || false,
+        clearedAt: offboarding.clearance?.hr?.clearedAt,
+        clearedBy: offboarding.clearance?.hr?.clearedBy,
+        notes: offboarding.clearance?.hr?.notes
+      },
+      finance: {
+        cleared: offboarding.clearance?.finance?.cleared || false,
+        clearedAt: offboarding.clearance?.finance?.clearedAt,
+        clearedBy: offboarding.clearance?.finance?.clearedBy,
+        notes: offboarding.clearance?.finance?.notes
+      },
+      it: {
+        cleared: offboarding.clearance?.it?.cleared || false,
+        clearedAt: offboarding.clearance?.it?.clearedAt,
+        clearedBy: offboarding.clearance?.it?.clearedBy,
+        notes: offboarding.clearance?.it?.notes
+      },
+      admin: {
+        cleared: offboarding.clearance?.admin?.cleared || false,
+        clearedAt: offboarding.clearance?.admin?.clearedAt,
+        clearedBy: offboarding.clearance?.admin?.clearedBy,
+        notes: offboarding.clearance?.admin?.notes
+      }
+    };
+
+    // Count cleared departments
+    const clearedCount = Object.values(clearanceSummary).filter(dept => dept.cleared).length;
+    const totalDepartments = Object.keys(clearanceSummary).length;
+
+    res.status(200).json({ 
+      success: true, 
+      data: {
+        ...offboarding,
+        clearanceSummary,
+        clearanceProgress: {
+          cleared: clearedCount,
+          total: totalDepartments,
+          percentage: Math.round((clearedCount / totalDepartments) * 100)
+        }
+      }
+    });
   } catch (error) {
+    console.error('Error fetching offboarding:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -44,17 +242,86 @@ exports.getOffboarding = async (req, res) => {
 exports.createOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const { employee, lastWorkingDate, resignationType, reason } = req.body;
+    // Map frontend field names to backend field names
+    const { employee, employeeId, lastWorkingDate, lastWorkingDay, resignationType, reason } = req.body;
+
+    // Support both field names (employee/employeeId, lastWorkingDate/lastWorkingDay)
+    const employeeIdValue = employee || employeeId;
+    const lastWorkingDateValue = lastWorkingDate || lastWorkingDay;
+    
+    // Map reason to resignationType if resignationType is not provided
+    let resignationTypeValue = resignationType;
+    if (!resignationTypeValue && reason) {
+      // Map reason enum values to resignationType enum values
+      const reasonMap = {
+        'voluntary_resignation': 'voluntary',
+        'involuntary_termination': 'involuntary',
+        'retirement': 'retirement',
+        'contract_end': 'contract-end',
+        'layoff': 'involuntary',
+        'performance_issues': 'involuntary',
+        'misconduct': 'involuntary',
+        'mutual_agreement': 'voluntary',
+        'other': 'voluntary'
+      };
+      resignationTypeValue = reasonMap[reason] || 'voluntary';
+    }
+
+    // Validate required fields
+    if (!employeeIdValue) {
+      return res.status(400).json({
+        success: false,
+        message: 'Employee ID is required'
+      });
+    }
+
+    if (!lastWorkingDateValue) {
+      return res.status(400).json({
+        success: false,
+        message: 'Last working date is required'
+      });
+    }
+
+    if (!resignationTypeValue) {
+      return res.status(400).json({
+        success: false,
+        message: 'Resignation type is required'
+      });
+    }
+
+    // Validate last working date (should be in the future)
+    const lastWorkingDateObj = new Date(lastWorkingDateValue);
+    if (isNaN(lastWorkingDateObj.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid last working date format'
+      });
+    }
+
+    // Initialize clearance status properly
+    const clearanceStatus = {
+      hr: { cleared: false },
+      finance: { cleared: false },
+      it: { cleared: false },
+      admin: { cleared: false }
+    };
 
     const offboarding = await Offboarding.create({
-      employee,
+      employee: employeeIdValue,
       initiatedBy: req.user.employeeId,
-      lastWorkingDate,
-      resignationType,
-      reason,
+      lastWorkingDate: lastWorkingDateObj,
+      resignationType: resignationTypeValue,
+      reason: reason,
       stages: ['exitDiscussion', 'assetReturn', 'documentation', 'finalSettlement', 'success'],
       currentStage: 'exitDiscussion',
-      status: 'in-progress'
+      status: 'in-progress',
+      clearance: clearanceStatus,
+      exitInterview: {
+        completed: false
+      },
+      finalSettlement: {
+        paymentStatus: 'pending'
+      }
     });
 
     res.status(201).json({ success: true, message: 'Offboarding process initiated', data: offboarding });
@@ -217,6 +484,38 @@ exports.processFinalSettlement = async (req, res) => {
   }
 };
 
+exports.cancelOffboarding = async (req, res) => {
+  try {
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
+    const { reason } = req.body;
+    const offboarding = await Offboarding.findById(req.params.id);
+
+    if (!offboarding) {
+      return res.status(404).json({ success: false, message: 'Offboarding record not found' });
+    }
+
+    if (offboarding.status === 'completed') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cannot cancel a completed offboarding process' 
+      });
+    }
+
+    offboarding.status = 'cancelled';
+    if (reason) {
+      offboarding.notes = (offboarding.notes || '') + `\n[Cancelled] ${reason}`;
+    }
+    offboarding.completedAt = new Date();
+
+    await offboarding.save();
+
+    res.status(200).json({ success: true, message: 'Offboarding cancelled successfully', data: offboarding });
+  } catch (error) {
+    console.error('Error cancelling offboarding:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.deleteOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
@@ -226,6 +525,7 @@ exports.deleteOffboarding = async (req, res) => {
     }
     res.status(200).json({ success: true, message: 'Offboarding deleted successfully' });
   } catch (error) {
+    console.error('Error deleting offboarding:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

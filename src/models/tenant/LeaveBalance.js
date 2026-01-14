@@ -37,14 +37,44 @@ const leaveBalanceSchema = new mongoose.Schema({
   available: {
     type: Number,
     default: 0
-  }
+  },
+  accrued: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  carriedForward: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  lapsed: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  lastAccrualDate: {
+    type: Date
+  },
+  accrualHistory: [{
+    accrualDate: Date,
+    amount: Number,
+    type: {
+      type: String,
+      enum: ['regular', 'pro-rata', 'carry-forward', 'adjustment']
+    },
+    notes: String
+  }]
 }, {
   timestamps: true
 });
 
 // Calculate available before saving
 leaveBalanceSchema.pre('save', function(next) {
-  this.available = this.total - this.consumed;
+  // Total = accrued + carriedForward (initial allocation)
+  // Available = total - consumed
+  this.total = (this.accrued || 0) + (this.carriedForward || 0);
+  this.available = this.total - (this.consumed || 0);
   next();
 });
 

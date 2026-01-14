@@ -506,20 +506,59 @@ exports.googleLogin = async (req, res) => {
 // @access  Public
 exports.getActiveCompanies = async (req, res) => {
   try {
-    // Import global models
+    // Import models
     const { getCompanyRegistry } = require('../models/global');
     const CompanyRegistry = await getCompanyRegistry();
+    const Client = require('../models/Client');
     
-    const companies = await CompanyRegistry.find({
+    // Fetch companies from CompanyRegistry
+    const registryCompanies = await CompanyRegistry.find({
       status: 'active',
       databaseStatus: 'active'
     })
     .select('companyId companyName companyCode tenantDatabaseName status subscription.plan subscription.status')
-    .sort({ companyName: 1 });
+    .sort({ companyName: 1 })
+    .lean();
+    
+    // Fetch active clients and format them to match the expected structure
+    const clients = await Client.find({
+      status: 'active',
+      isActive: true
+    })
+    .select('_id companyName clientCode email phone status subscription')
+    .sort({ companyName: 1 })
+    .lean();
+    
+    // Map clients to match the expected format
+    const formattedClients = clients.map(client => ({
+      companyId: client._id.toString(),
+      companyName: client.companyName,
+      companyCode: client.clientCode,
+      tenantDatabaseName: `tenant_${client._id.toString()}`,
+      databaseName: `tenant_${client._id.toString()}`,
+      status: client.status,
+      subscription: {
+        plan: client.subscription?.plan || 'trial',
+        status: client.subscription?.status || 'trial'
+      },
+      email: client.email,
+      phone: client.phone
+    }));
+    
+    // Merge and combine both lists
+    const allCompanies = [...registryCompanies, ...formattedClients];
+    
+    // Remove duplicates based on companyName (in case a client was also added to CompanyRegistry)
+    const uniqueCompanies = Array.from(
+      new Map(allCompanies.map(company => [company.companyName, company])).values()
+    );
+    
+    // Sort by company name
+    uniqueCompanies.sort((a, b) => a.companyName.localeCompare(b.companyName));
 
     res.status(200).json({
       success: true,
-      data: companies
+      data: uniqueCompanies
     });
   } catch (error) {
     console.error('Error fetching companies:', error);
