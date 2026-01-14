@@ -51,12 +51,9 @@ const protect = async (req, res, next) => {
         
         console.log(`✅ User found in tenant DB: ${user?.email}`);
         
-        if (tenantConnection) {
-          await tenantConnection.close();
-        }
+        // Don't close the connection - it's cached and reused by getTenantConnection
       } catch (tenantError) {
         console.error('Error accessing tenant database:', tenantError);
-        if (tenantConnection) await tenantConnection.close();
         return res.status(500).json({
           success: false,
           message: 'Error accessing company database'
@@ -95,9 +92,7 @@ const protect = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
+    // Don't close tenant connection - it's cached and reused
     res.status(401).json({
       success: false,
       message: 'Not authorized to access this route'
@@ -107,10 +102,16 @@ const protect = async (req, res, next) => {
 
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const userRole = req.user.role;
+    
+    // Map company_admin to admin for authorization checks
+    const normalizedRole = userRole === 'company_admin' ? 'admin' : userRole;
+    
+    // Check if user's role (or normalized role) is in allowed roles
+    if (!roles.includes(userRole) && !roles.includes(normalizedRole)) {
       return res.status(403).json({
         success: false,
-        message: `User role '${req.user.role}' is not authorized to access this route`
+        message: `User role '${userRole}' is not authorized to access this route`
       });
     }
     next();

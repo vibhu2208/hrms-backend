@@ -8,9 +8,13 @@ const {
   getComplianceReport
 } = require('../controllers/reportController');
 const { protect, authorize } = require('../middlewares/auth');
+const advancedReportsRoutes = require('./advancedReportsRoutes');
 
 router.use(protect);
 router.use(authorize('admin', 'hr'));
+
+// Advanced reports routes
+router.use('/', advancedReportsRoutes);
 
 router.get('/export/employees', exportEmployees);
 router.get('/export/attendance', exportAttendance);

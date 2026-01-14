@@ -1,14 +1,14 @@
 const ResumePool = require('../models/ResumePool');
 const resumeParser = require('../utils/resumeParser');
 const aiService = require('../services/aiService');
-const getTenantModel = require('../utils/tenantModels');
+const { getTenantModel } = require('../utils/tenantModels');
 
 /**
  * Upload raw resume text to pool
  */
 exports.uploadResumeText = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const {
       name,
@@ -72,7 +72,7 @@ exports.uploadResumeText = async (req, res) => {
  */
 exports.uploadBatchResumes = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     const { resumes } = req.body;
 
     if (!Array.isArray(resumes) || resumes.length === 0) {
@@ -140,7 +140,7 @@ exports.uploadBatchResumes = async (req, res) => {
  */
 exports.uploadResumeFile = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     if (!req.file) {
       return res.status(400).json({
@@ -218,7 +218,7 @@ exports.uploadResumeFile = async (req, res) => {
  */
 exports.getResumePool = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const {
       page = 1,
@@ -294,7 +294,7 @@ exports.getResumePool = async (req, res) => {
  */
 exports.getResumeById = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const resume = await TenantResumePool.findById(req.params.id);
     
@@ -325,7 +325,7 @@ exports.getResumeById = async (req, res) => {
  */
 exports.updateResume = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const {
       name,
@@ -376,7 +376,7 @@ exports.updateResume = async (req, res) => {
  */
 exports.deleteResume = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const resume = await TenantResumePool.findById(req.params.id);
     
@@ -409,7 +409,7 @@ exports.deleteResume = async (req, res) => {
  */
 exports.getProcessingStats = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const stats = await TenantResumePool.getProcessingStats();
     
@@ -440,7 +440,7 @@ exports.getProcessingStats = async (req, res) => {
  */
 exports.searchResumes = async (req, res) => {
   try {
-    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool', ResumePool);
+    const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
     
     const {
       query,

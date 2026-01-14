@@ -52,7 +52,9 @@ const connectGlobalDB = async () => {
     console.error('   2. Verify network access (IP whitelist)');
     console.error('   3. Check if credentials are correct');
     console.error('   4. Try accessing from MongoDB Compass');
-    throw error;
+    console.error('⚠️  Returning null connection - operations may fail until connection is restored');
+    // Return null instead of throwing to allow server to continue
+    return null;
   }
 };
 
