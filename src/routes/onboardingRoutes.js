@@ -18,8 +18,10 @@ const {
   uploadDocument,
   verifyDocument,
   getDocuments,
-  requestDocumentResubmission
+  requestDocumentResubmission,
+  requestDocuments
 } = require('../controllers/onboardingController');
+const { sendTestOnboardingEmail } = require('../controllers/testEmailController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
@@ -51,9 +53,13 @@ router.get('/:id/documents', getDocuments);
 router.post('/:id/documents', uploadDocument);
 router.put('/:id/documents/:docId/verify', verifyDocument);
 router.post('/:id/documents/:docId/request-resubmission', requestDocumentResubmission);
+router.post('/:id/request-documents', requestDocuments);
 
 // Complete onboarding and create employee account
 router.post('/:id/complete', completeOnboardingProcess);
+
+// Test email endpoint
+router.post('/:onboardingId/send-test-email', sendTestOnboardingEmail);
 
 router.route('/:id')
   .get(getOnboarding)

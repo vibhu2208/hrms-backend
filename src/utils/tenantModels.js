@@ -24,6 +24,7 @@ const ResumePool = require('../models/ResumePool');
 
 // Import offboarding related models (if they exist)
 let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
+let CandidateDocumentUploadToken, CandidateDocument, DocumentConfiguration;
 
 try {
   OffboardingRequest = require('../models/tenant/OffboardingRequest');
@@ -61,6 +62,25 @@ try {
   ExitFeedback = null;
 }
 
+// Import document upload models
+try {
+  CandidateDocumentUploadToken = require('../models/tenant/CandidateDocumentUploadToken');
+} catch (e) {
+  CandidateDocumentUploadToken = null;
+}
+
+try {
+  CandidateDocument = require('../models/tenant/CandidateDocument');
+} catch (e) {
+  CandidateDocument = null;
+}
+
+try {
+  DocumentConfiguration = require('../models/tenant/DocumentConfiguration');
+} catch (e) {
+  DocumentConfiguration = null;
+}
+
 /**
  * Get tenant-specific models using the tenant's database connection
  * @param {mongoose.Connection} tenantConnection - Tenant database connection
@@ -77,8 +97,16 @@ function getTenantModels(tenantConnection) {
   // Helper function to safely create tenant model
   const createTenantModel = (modelName, originalModel) => {
     try {
-      // Get schema from the original model
-      const schema = originalModel.schema || originalModel.prototype.schema;
+      // Check if originalModel is already a schema (for tenant-specific models)
+      let schema;
+      if (originalModel instanceof mongoose.Schema) {
+        schema = originalModel;
+      } else if (originalModel.schema) {
+        schema = originalModel.schema;
+      } else if (originalModel.prototype && originalModel.prototype.schema) {
+        schema = originalModel.prototype.schema;
+      }
+      
       if (schema) {
         return tenantConnection.model(modelName, schema);
       } else {
@@ -120,6 +148,11 @@ function getTenantModels(tenantConnection) {
   if (AssetClearance) models.AssetClearance = createTenantModel('AssetClearance', AssetClearance);
   if (FinalSettlement) models.FinalSettlement = createTenantModel('FinalSettlement', FinalSettlement);
   if (ExitFeedback) models.ExitFeedback = createTenantModel('ExitFeedback', ExitFeedback);
+
+  // Tenant-specific document upload models
+  if (CandidateDocumentUploadToken) models.CandidateDocumentUploadToken = createTenantModel('CandidateDocumentUploadToken', CandidateDocumentUploadToken);
+  if (CandidateDocument) models.CandidateDocument = createTenantModel('CandidateDocument', CandidateDocument);
+  if (DocumentConfiguration) models.DocumentConfiguration = createTenantModel('DocumentConfiguration', DocumentConfiguration);
 
   // Cache models on connection
   tenantConnection._tenantModels = models;

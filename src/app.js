@@ -69,6 +69,8 @@ const approvalWorkflowRoutes = require('./routes/approvalWorkflowRoutes');
 const employeeProfileRoutes = require('./routes/employeeProfileRoutes');
 const leaveEncashmentRoutes = require('./routes/leaveEncashmentRoutes');
 const advancedReportsRoutes = require('./routes/advancedReportsRoutes');
+const publicDocumentUploadRoutes = require('./routes/publicDocumentUploadRoutes');
+const documentVerificationRoutes = require('./routes/documentVerificationRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -81,6 +83,8 @@ const { startCronJobs } = require('./utils/cronJobs');
 startCronJobs();
 
 const app = express();
+
+app.set('etag', false);
 
 // Middleware - Use centralized CORS configuration
 app.use(cors(apiConfig.corsOptions));
@@ -106,6 +110,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Public API Routes (no authentication required)
 app.use('/api/public/jobs', publicJobRoutes);
+app.use('/api/public/document-upload', publicDocumentUploadRoutes);
 app.use('/api/candidate-documents', candidateDocumentRoutes);
 
 // Protected API Routes (tenant isolation handled within route files)
@@ -150,6 +155,7 @@ app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/manager', managerRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/resume-pool', resumePoolRoutes);
+app.use('/api/document-verification', documentVerificationRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

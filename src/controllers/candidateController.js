@@ -305,54 +305,169 @@ exports.moveToOnboarding = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
     const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
 
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
+    // Validate required fields
+    if (!candidate.appliedFor || !candidate.appliedFor._id) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Candidate must have an associated job posting to move to onboarding' 
+      });
+    }
+
+    if (!candidate.appliedFor.department) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Job posting must have an associated department' 
+      });
+    }
+
     // Check if candidate is shortlisted or offer-accepted
-    if (!['shortlisted', 'offer-accepted', 'offer-extended'].includes(candidate.stage)) {
+    if (!['shortlisted', 'offer-accepted', 'offer-extended', 'active'].includes(candidate.stage)) {
       return res.status(400).json({ 
         success: false, 
         message: 'Only shortlisted or offer-accepted candidates can be moved to onboarding' 
       });
     }
 
-    // Check if already in onboarding
-    const existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+    // Check if already in onboarding - if exists and not completed, update it instead
+    let existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+    let onboarding;
+    
     if (existingOnboarding) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Candidate is already in onboarding process' 
+      // If onboarding exists but is not completed, update it
+      if (existingOnboarding.status === 'completed') {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Candidate has already completed onboarding' 
+        });
+      }
+      
+      // Update existing onboarding record
+      console.log(`♻️ Updating existing onboarding record for ${candidate.email}`);
+      existingOnboarding.applicationId = candidate._id;
+      existingOnboarding.jobId = candidate.appliedFor._id;
+      existingOnboarding.candidateName = `${candidate.firstName} ${candidate.lastName}`;
+      existingOnboarding.candidatePhone = candidate.phone;
+      existingOnboarding.position = candidate.appliedFor.title || 'Position';
+      existingOnboarding.department = candidate.appliedFor.department;
+      existingOnboarding.joiningDate = candidate.offerDetails?.joiningDate || req.body.joiningDate;
+      existingOnboarding.status = 'preboarding';
+      existingOnboarding.createdBy = req.user._id;
+      existingOnboarding.assignedHR = req.user._id;
+      
+      // Add audit trail entry
+      if (!existingOnboarding.auditTrail) existingOnboarding.auditTrail = [];
+      existingOnboarding.auditTrail.push({
+        action: 'reinitialized',
+        description: 'Onboarding record reinitialized from recruitment',
+        performedBy: req.user._id,
+        previousStatus: existingOnboarding.status,
+        newStatus: 'preboarding',
+        metadata: { notes: 'Re-moved from recruitment' },
+        timestamp: new Date()
       });
-    }
-
-    // Create onboarding record
-    const onboarding = await Onboarding.create({
+      
+      await existingOnboarding.save();
+      onboarding = existingOnboarding;
+    } else {
+      // Create new onboarding record with correct schema fields
+      onboarding = await Onboarding.create({
+      applicationId: candidate._id,
+      jobId: candidate.appliedFor._id,
       candidateName: `${candidate.firstName} ${candidate.lastName}`,
       candidateEmail: candidate.email,
       candidatePhone: candidate.phone,
-      position: candidate.appliedFor?.title || candidate.currentDesignation || 'Position',
-      department: candidate.appliedFor?.department,
+      position: candidate.appliedFor.title || 'Position',
+      department: candidate.appliedFor.department,
       joiningDate: candidate.offerDetails?.joiningDate || req.body.joiningDate,
-      stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
-      currentStage: 'interview1',
-      status: 'in-progress',
-      notes: `Moved from recruitment. Applied for: ${candidate.appliedFor?.title || 'N/A'}`
+      status: 'preboarding',
+      createdBy: req.user._id,
+      assignedHR: req.user._id,
+      requiredDocuments: [
+        { type: 'aadhar', isRequired: true },
+        { type: 'pan', isRequired: true },
+        { type: 'bank_details', isRequired: true },
+        { type: 'address_proof', isRequired: true },
+        { type: 'education_certificates', isRequired: true },
+        { type: 'photo', isRequired: true }
+      ],
+      auditTrail: [{
+        action: 'moved_to_onboarding',
+        description: 'Candidate moved to onboarding from recruitment',
+        performedBy: req.user._id,
+        previousStatus: candidate.stage,
+        newStatus: 'preboarding',
+        metadata: { notes: `Moved from recruitment. Applied for: ${candidate.appliedFor?.title || 'N/A'}` },
+        timestamp: new Date()
+      }],
+      sla: {
+        expectedCompletionDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      }
     });
+    }
+
+    // Auto-generate document upload token
+    const { sendOfferLetterWithDocumentLink } = require('../services/emailService');
+    let uploadUrl = null;
+    
+    if (CandidateDocumentUploadToken) {
+      try {
+        const token = require('crypto').randomBytes(32).toString('hex');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30);
+
+        const uploadToken = await CandidateDocumentUploadToken.create({
+          onboardingId: onboarding._id,
+          candidateId: onboarding.onboardingId,
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          token,
+          expiresAt,
+          generatedBy: req.user._id
+        });
+
+        const tenantId = req.tenant.companyId || req.tenant.clientId;
+        const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+        console.log(`✅ Upload token generated for ${onboarding.candidateName}: ${uploadUrl}`);
+
+        // Send offer letter with document upload link
+        await sendOfferLetterWithDocumentLink({
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          joiningDate: onboarding.joiningDate,
+          uploadUrl,
+          companyName: req.tenant?.companyName || 'Our Company'
+        });
+        console.log(`📧 Offer letter with document link sent to ${onboarding.candidateEmail}`);
+      } catch (tokenError) {
+        console.error('Error generating upload token:', tokenError);
+      }
+    }
 
     // Update candidate stage
-    candidate.stage = 'joined';
-    candidate.status = 'active';
+    candidate.stage = 'sent-to-onboarding';
+    candidate.onboardingRecord = onboarding._id;
+    candidate.sentToOnboardingAt = new Date();
+    candidate.sentToOnboardingBy = req.user._id;
     await candidate.save();
 
     res.status(201).json({ 
       success: true, 
       message: 'Candidate moved to onboarding successfully', 
-      data: onboarding 
+      data: onboarding,
+      uploadUrl 
     });
   } catch (error) {
+    console.error('Error moving candidate to onboarding:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -526,7 +641,11 @@ exports.updateHRCall = async (req, res) => {
     const { id } = req.params;
     const { status, scheduledDate, completedDate, summary, decision } = req.body;
 
-    const candidate = await Candidate.findById(id).populate('appliedFor', 'title');
+    console.log(`📞 updateHRCall called for candidate ${id}`);
+    console.log(`   Status: ${status}, Decision: ${decision}`);
+    console.log(`   Request body:`, req.body);
+
+    const candidate = await Candidate.findById(id).populate('appliedFor', 'title department');
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
@@ -575,10 +694,195 @@ exports.updateHRCall = async (req, res) => {
     const position = candidate.appliedFor?.title || 'Position';
     const companyName = req.body.companyName || 'TechThrive System';
 
-    if (decision === 'move-to-onboarding') {
-      candidate.stage = 'offer-accepted';
+    const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : status;
+    const normalizedDecision = typeof decision === 'string' ? decision.trim().toLowerCase() : decision;
+
+    const onboardingDecisionTriggers = ['selected', 'move-to-onboarding'];
+
+    console.log(`🔍 Checking automatic onboarding condition:`);
+    console.log(`   status === 'completed': ${normalizedStatus === 'completed'} (actual: '${normalizedStatus}')`);
+    console.log(`   decision triggers onboarding: ${onboardingDecisionTriggers.includes(normalizedDecision)} (actual: '${normalizedDecision}')`);
+    console.log(`   Both conditions: ${normalizedStatus === 'completed' && onboardingDecisionTriggers.includes(normalizedDecision)}`);
+
+    // Automatically move to onboarding when HR call is completed with a final positive decision
+    if (normalizedStatus === 'completed' && onboardingDecisionTriggers.includes(normalizedDecision)) {
+      console.log(`🎯 HR call completed with 'selected' decision for ${candidateName}`);
+      console.log(`   Candidate ID: ${candidate._id}`);
+      console.log(`   Applied For: ${candidate.appliedFor?._id}`);
+      console.log(`   Department: ${candidate.appliedFor?.department}`);
+      
+      candidate.stage = 'sent-to-onboarding';
       
       // Send offer extended email
+      try {
+        await sendOfferExtendedEmail({
+          candidateName,
+          candidateEmail: candidate.email,
+          position,
+          joiningDate: candidate.offerDetails?.joiningDate,
+          companyName
+        });
+        
+        candidate.timeline.push({
+          action: 'Offer Email Sent',
+          description: 'Offer letter email sent to candidate after HR call completion',
+          performedBy: req.user?._id
+        });
+      } catch (emailError) {
+        console.error('Failed to send offer email:', emailError);
+      }
+      
+      // Automatically create onboarding record
+      console.log(`🔍 Checking for existing onboarding record for ${candidate.email}...`);
+      const existingOnboarding = await Onboarding.findOne({ 
+        $or: [
+          { candidateEmail: candidate.email },
+          { applicationId: candidate._id }
+        ]
+      });
+      
+      if (existingOnboarding) {
+        console.log(`♻️ Existing onboarding found (${existingOnboarding._id}). Updating/linking it...`);
+        try {
+          if (existingOnboarding.status !== 'completed') {
+            existingOnboarding.applicationId = candidate._id;
+            existingOnboarding.jobId = candidate.appliedFor?._id;
+            existingOnboarding.candidateName = `${candidate.firstName} ${candidate.lastName}`;
+            existingOnboarding.candidateEmail = candidate.email;
+            existingOnboarding.candidatePhone = candidate.phone;
+            existingOnboarding.position = candidate.appliedFor?.title || candidate.currentDesignation || 'Position';
+            existingOnboarding.department = candidate.appliedFor?.department;
+            existingOnboarding.status = 'preboarding';
+            await existingOnboarding.save();
+          }
+
+          candidate.onboardingRecord = existingOnboarding._id;
+          candidate.sentToOnboardingAt = candidate.sentToOnboardingAt || new Date();
+          candidate.sentToOnboardingBy = candidate.sentToOnboardingBy || req.user?._id;
+        } catch (updateExistingError) {
+          console.error('❌ Failed to update/link existing onboarding:', updateExistingError.message);
+        }
+      } else {
+        console.log(`✅ No existing onboarding found. Creating new onboarding record...`);
+        try {
+          // Validate required fields before creating onboarding
+          if (!candidate.appliedFor || !candidate.appliedFor._id) {
+            console.error('❌ Cannot create onboarding: Missing job posting');
+            console.error('   Candidate appliedFor:', candidate.appliedFor);
+            throw new Error('Job posting is required for onboarding');
+          }
+          
+          if (!candidate.appliedFor.department) {
+            console.error('❌ Cannot create onboarding: Missing department');
+            console.error('   Job posting department:', candidate.appliedFor.department);
+            throw new Error('Department is required for onboarding');
+          }
+          
+          console.log(`✅ Validation passed. Creating onboarding with:`);
+          console.log(`   ApplicationId: ${candidate._id}`);
+          console.log(`   JobId: ${candidate.appliedFor._id}`);
+          console.log(`   Department: ${candidate.appliedFor.department}`);
+          
+          const onboardingData = {
+            applicationId: candidate._id,
+            jobId: candidate.appliedFor._id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            candidatePhone: candidate.phone,
+            position: candidate.appliedFor.title || 'Position',
+            department: candidate.appliedFor.department,
+            status: 'preboarding',
+            createdBy: req.user?._id,
+            assignedHR: req.user?._id,
+            requiredDocuments: [
+              { type: 'aadhar', isRequired: true },
+              { type: 'pan', isRequired: true },
+              { type: 'bank_details', isRequired: true },
+              { type: 'address_proof', isRequired: true },
+              { type: 'education_certificates', isRequired: true },
+              { type: 'photo', isRequired: true }
+            ],
+            auditTrail: [{
+              action: 'auto_created',
+              description: 'Automatically created from HR call completion',
+              performedBy: req.user?._id,
+              previousStatus: candidate.stage,
+              newStatus: 'preboarding',
+              metadata: { notes: `Auto-created from HR call completion. Decision: Selected` },
+              timestamp: new Date()
+            }],
+            sla: {
+              expectedCompletionDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+            }
+          };
+          
+          const onboarding = await Onboarding.create(onboardingData);
+          console.log(`✅ Onboarding record created: ${onboarding._id}`);
+          
+          // Auto-generate document upload token
+          const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
+          const { sendOfferLetterWithDocumentLink } = require('../services/emailService');
+          
+          if (CandidateDocumentUploadToken) {
+            try {
+              const token = require('crypto').randomBytes(32).toString('hex');
+              const expiresAt = new Date();
+              expiresAt.setDate(expiresAt.getDate() + 30);
+
+              await CandidateDocumentUploadToken.create({
+                onboardingId: onboarding._id,
+                candidateId: onboarding.onboardingId,
+                candidateName: onboarding.candidateName,
+                candidateEmail: onboarding.candidateEmail,
+                position: onboarding.position,
+                token,
+                expiresAt,
+                generatedBy: req.user?._id
+              });
+
+              const tenantId = req.tenant.companyId || req.tenant.clientId;
+              const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+              const uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+              console.log(`✅ Upload token generated: ${uploadUrl}`);
+
+              // Send offer letter with document upload link
+              await sendOfferLetterWithDocumentLink({
+                candidateName: onboarding.candidateName,
+                candidateEmail: onboarding.candidateEmail,
+                position: onboarding.position,
+                joiningDate: onboarding.joiningDate,
+                uploadUrl,
+                companyName: req.tenant?.companyName || companyName
+              });
+              console.log(`📧 Offer letter with document link sent to ${onboarding.candidateEmail}`);
+            } catch (tokenError) {
+              console.error('Error generating upload token:', tokenError);
+            }
+          }
+          
+          // Link onboarding record to candidate
+          candidate.onboardingRecord = onboarding._id;
+          candidate.sentToOnboardingAt = new Date();
+          candidate.sentToOnboardingBy = req.user?._id;
+          
+          // Add to timeline
+          candidate.timeline.push({
+            action: 'Automatically Moved to Onboarding',
+            description: `Candidate automatically moved to onboarding after HR call completion with 'selected' decision`,
+            performedBy: req.user?._id,
+            metadata: { onboardingId: onboarding._id, onboardingStatus: 'preboarding' }
+          });
+          
+          console.log(`✅ Candidate ${candidate.candidateCode} automatically moved to onboarding (ID: ${onboarding.onboardingId})`);
+        } catch (onboardingError) {
+          console.error('❌ Failed to create onboarding:', onboardingError.message);
+          // Don't fail the HR call update if onboarding creation fails
+        }
+      }
+    } else if (normalizedDecision === 'move-to-onboarding') {
+      // Legacy support for manual move-to-onboarding decision
+      candidate.stage = 'sent-to-onboarding';
+      
       try {
         await sendOfferExtendedEmail({
           candidateName,
@@ -596,45 +900,7 @@ exports.updateHRCall = async (req, res) => {
       } catch (emailError) {
         console.error('Failed to send offer email:', emailError);
       }
-      
-      // Create onboarding record if it doesn't exist
-      const existingOnboarding = await Onboarding.findOne({ 
-        $or: [
-          { candidateEmail: candidate.email },
-          { candidate: candidate._id }
-        ]
-      });
-      
-      if (!existingOnboarding) {
-        try {
-          const onboardingData = {
-            candidate: candidate._id,
-            candidateName: `${candidate.firstName} ${candidate.lastName}`,
-            candidateEmail: candidate.email,
-            candidatePhone: candidate.phone,
-            position: candidate.appliedFor?.title || candidate.currentDesignation || 'Position',
-            department: candidate.appliedFor?.department,
-            joiningDate: candidate.offerDetails?.joiningDate,
-            stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
-            currentStage: 'interview1',
-            status: 'in-progress'
-          };
-          
-          const onboarding = await Onboarding.create(onboardingData);
-          
-          // Add to timeline
-          candidate.timeline.push({
-            action: 'Moved to Onboarding',
-            description: `Candidate moved to onboarding process`,
-            performedBy: req.user?._id,
-            metadata: { onboardingId: onboarding._id }
-          });
-        } catch (onboardingError) {
-          console.error('Failed to create onboarding:', onboardingError);
-          // Don't fail the HR call update if onboarding creation fails
-        }
-      }
-    } else if (decision === 'reject') {
+    } else if (normalizedDecision === 'reject') {
       candidate.stage = 'rejected';
       candidate.status = 'rejected';
       
