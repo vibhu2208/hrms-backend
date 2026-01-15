@@ -60,23 +60,27 @@ const connectGlobalDB = async () => {
 
 /**
  * Get or Create Tenant Database Connection
- * @param {string} companyId - Company ID for tenant database
+ * @param {string} companyIdOrDbName - Company ID or full database name (e.g., 'tenant_xxx')
  * @returns {Connection} Mongoose connection to tenant database
  */
-const getTenantConnection = async (companyId) => {
+const getTenantConnection = async (companyIdOrDbName) => {
   try {
+    // Determine the actual database name
+    // If it already starts with 'tenant_', use it as-is
+    // Otherwise, add the 'tenant_' prefix
+    const tenantDbName = companyIdOrDbName.startsWith('tenant_') 
+      ? companyIdOrDbName 
+      : `tenant_${companyIdOrDbName}`;
+    
     // Check if connection already exists and is active
-    if (tenantConnections.has(companyId)) {
-      const connection = tenantConnections.get(companyId);
+    if (tenantConnections.has(tenantDbName)) {
+      const connection = tenantConnections.get(tenantDbName);
       if (connection.readyState === 1) {
         return connection;
       }
       // If connection is dead, remove it
-      tenantConnections.delete(companyId);
+      tenantConnections.delete(tenantDbName);
     }
-
-    // Create new tenant database connection
-    const tenantDbName = `tenant_${companyId}`;
     
     const baseUri = process.env.MONGODB_URI.split('?')[0];
     const queryParams = process.env.MONGODB_URI.split('?')[1] || 'retryWrites=true&w=majority';
@@ -93,8 +97,8 @@ const getTenantConnection = async (companyId) => {
       family: 4, // Force IPv4
     });
 
-    // Cache the connection
-    tenantConnections.set(companyId, connection);
+    // Cache the connection using the database name as key
+    tenantConnections.set(tenantDbName, connection);
     
     console.log(`✅ Connected to Tenant Database: ${tenantDbName}`);
     return connection;

@@ -143,6 +143,48 @@ const checkExpiringContracts = cron.schedule('0 9 * * *', async () => {
   scheduled: false
 });
 
+// Check for SLA breaches in approval workflows every 2 hours
+const checkApprovalSLAs = cron.schedule('0 */2 * * *', async () => {
+  try {
+    console.log('🔍 Running approval SLA breach check...');
+    
+    const { connectGlobalDB } = require('../config/database.config');
+    const approvalEngine = require('../services/approvalEngine');
+    
+    // Get all companies from global DB
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+    
+    const companies = await CompanyRegistry.find({ status: 'active' });
+    
+    let totalEscalated = 0;
+    
+    for (const company of companies) {
+      try {
+        const { getTenantConnection } = require('../config/database.config');
+        const tenantConnection = await getTenantConnection(company.companyId);
+        
+        // Check and escalate SLA breaches for this tenant
+        const escalated = await approvalEngine.checkAndEscalateSLAs(tenantConnection);
+        totalEscalated += escalated.length;
+        
+        if (escalated.length > 0) {
+          console.log(`   ⚠️  ${company.companyName}: Escalated ${escalated.length} approval(s)`);
+        }
+      } catch (tenantError) {
+        console.error(`   ❌ Error checking SLAs for ${company.companyName}:`, tenantError.message);
+      }
+    }
+    
+    console.log(`✅ SLA check completed - Total escalated: ${totalEscalated}`);
+  } catch (error) {
+    console.error('❌ Error in approval SLA check:', error);
+  }
+}, {
+  scheduled: false
+});
+
 // Import leave accrual jobs
 const { startAccrualJobs } = require('./leaveAccrualJobs');
 
@@ -151,8 +193,9 @@ const startCronJobs = () => {
   checkExpiringDocuments.start();
   checkDueCompliances.start();
   checkExpiringContracts.start();
+  checkApprovalSLAs.start();
   startAccrualJobs();
-  console.log('✅ Cron jobs started');
+  console.log('✅ Cron jobs started (including SLA monitoring every 2 hours)');
 };
 
 // Import leave accrual jobs stop function
@@ -163,6 +206,7 @@ const stopCronJobs = () => {
   checkExpiringDocuments.stop();
   checkDueCompliances.stop();
   checkExpiringContracts.stop();
+  checkApprovalSLAs.stop();
   stopAccrualJobs();
   console.log('⏹️  Cron jobs stopped');
 };

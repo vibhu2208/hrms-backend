@@ -4,7 +4,8 @@ exports.getOffboardingList = async (req, res) => {
   try {
     // Get tenant-specific models
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = req.tenant.connection.model('User', TenantUserSchema);
     
     const { 
       status, 
@@ -40,7 +41,8 @@ exports.getOffboardingList = async (req, res) => {
     // Search functionality - search by employee name/email
     if (search) {
       // First, find employees matching the search
-      const employeeIds = await Employee.find({
+      const employeeIds = await TenantUser.find({
+        role: 'employee',
         $or: [
           { firstName: { $regex: search, $options: 'i' } },
           { lastName: { $regex: search, $options: 'i' } },
@@ -72,19 +74,19 @@ exports.getOffboardingList = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Manually populate employee data since Employee model might not match
+    // Manually populate employee data using TenantUser
     const Department = getTenantModel(req.tenant.connection, 'Department');
     for (let item of offboardingList) {
       if (item.employee) {
         try {
-          const employee = await Employee.findById(item.employee)
-            .select('firstName lastName email employeeCode designation department')
+          const employee = await TenantUser.findById(item.employee)
+            .select('firstName lastName email employeeCode designation departmentId')
             .lean();
           
           if (employee) {
             // Populate department if it exists
-            if (employee.department && Department) {
-              const dept = await Department.findById(employee.department).select('name').lean();
+            if (employee.departmentId && Department) {
+              const dept = await Department.findById(employee.departmentId).select('name').lean();
               if (dept) {
                 employee.department = dept;
               }
@@ -139,7 +141,8 @@ exports.getOffboardingList = async (req, res) => {
 exports.getOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = req.tenant.connection.model('User', TenantUserSchema);
     const Department = getTenantModel(req.tenant.connection, 'Department');
     
     let offboarding = await Offboarding.findById(req.params.id)
@@ -156,17 +159,17 @@ exports.getOffboarding = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
     }
 
-    // Manually populate employee data
+    // Manually populate employee data using TenantUser
     if (offboarding.employee) {
       try {
-        const employee = await Employee.findById(offboarding.employee)
-          .select('firstName lastName email employeeCode designation department joiningDate phone address')
+        const employee = await TenantUser.findById(offboarding.employee)
+          .select('firstName lastName email employeeCode designation departmentId joiningDate dateOfJoining phone address')
           .lean();
         
         if (employee) {
           // Populate department
-          if (employee.department && Department) {
-            const dept = await Department.findById(employee.department).select('name').lean();
+          if (employee.departmentId && Department) {
+            const dept = await Department.findById(employee.departmentId).select('name').lean();
             if (dept) {
               employee.department = dept;
             }
@@ -174,7 +177,7 @@ exports.getOffboarding = async (req, res) => {
           
           // Populate reporting manager
           if (employee.reportingManager) {
-            const manager = await Employee.findById(employee.reportingManager)
+            const manager = await TenantUser.findOne({ email: employee.reportingManager })
               .select('firstName lastName email')
               .lean();
             if (manager) {
@@ -308,7 +311,7 @@ exports.createOffboarding = async (req, res) => {
 
     const offboarding = await Offboarding.create({
       employee: employeeIdValue,
-      initiatedBy: req.user.employeeId,
+      initiatedBy: req.user._id || req.user.id,
       lastWorkingDate: lastWorkingDateObj,
       resignationType: resignationTypeValue,
       reason: reason,

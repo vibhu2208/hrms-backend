@@ -5,11 +5,13 @@
  */
 
 const { getTenantConnection } = require('../config/database.config');
+const { getTenantModel } = require('../utils/tenantModels');
 const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
 const LeaveBalanceSchema = require('../models/tenant/LeaveBalance');
 const Attendance = require('../models/Attendance');
 const Document = require('../models/Document');
 const Compliance = require('../models/Compliance');
+const Employee = require('../models/Employee');
 
 class AnalyticsService {
   /**
@@ -19,6 +21,10 @@ class AnalyticsService {
     try {
       const { startDate, endDate, groupBy = 'month' } = filters;
 
+      const tenantConnection = await getTenantConnection(companyId);
+      const AttendanceModel = getTenantModel(tenantConnection, 'Attendance') || tenantConnection.model('Attendance', Attendance.schema);
+      const EmployeeModel = getTenantModel(tenantConnection, 'Employee') || tenantConnection.model('Employee', Employee.schema);
+
       const query = {};
       if (startDate || endDate) {
         query.date = {};
@@ -26,8 +32,8 @@ class AnalyticsService {
         if (endDate) query.date.$lte = new Date(endDate);
       }
 
-      const attendanceRecords = await Attendance.find(query)
-        .populate('employee', 'department designation')
+      const attendanceRecords = await AttendanceModel.find(query)
+        .populate({ path: 'employee', select: 'firstName lastName department designation employeeCode', model: EmployeeModel })
         .lean();
 
       // Group by time period
@@ -109,6 +115,8 @@ class AnalyticsService {
           ? periodData.totalWorkingHours / periodData.recordCount
           : 0;
       });
+
+      if (tenantConnection) await tenantConnection.close();
 
       return {
         success: true,
@@ -350,7 +358,9 @@ class AnalyticsService {
 
       const tenantConnection = await getTenantConnection(companyId);
       const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
-      const TenantUser = tenantConnection.model('User', TenantUserSchema);
+      const TenantUser = getTenantModel(tenantConnection, 'TenantUser')
+        || tenantConnection.model('TenantUser', require('../models/tenant/TenantUser'));
+      const AttendanceModel = getTenantModel(tenantConnection, 'Attendance') || tenantConnection.model('Attendance', Attendance.schema);
 
       // Get active employees
       const activeEmployees = await TenantUser.countDocuments({
@@ -366,7 +376,7 @@ class AnalyticsService {
         if (endDate) attendanceQuery.date.$lte = new Date(endDate);
       }
 
-      const attendanceRecords = await Attendance.find(attendanceQuery).lean();
+      const attendanceRecords = await AttendanceModel.find(attendanceQuery).lean();
       const totalAttendanceDays = attendanceRecords.length;
       const presentDays = attendanceRecords.filter(r => r.status === 'present').length;
       const attendanceRate = totalAttendanceDays > 0 
@@ -410,6 +420,7 @@ class AnalyticsService {
         indicators: indicators
       };
     } catch (error) {
+      if (tenantConnection) await tenantConnection.close();
       throw new Error(`Performance indicators analysis failed: ${error.message}`);
     }
   }

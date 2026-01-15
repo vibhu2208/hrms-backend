@@ -276,12 +276,82 @@ exports.getPayslipHistory = async (req, res) => {
  */
 exports.getEmployeeProjects = async (req, res) => {
   try {
-    // Mock projects data
-    const projects = [];
+    const tenantConnection = req.tenant.connection;
+    const userId = req.user.id;
+    
+    // Helper to get/create tenant-scoped models safely
+    const getTenantModel = (modelName, modelPath) => {
+      if (tenantConnection.models[modelName]) {
+        return tenantConnection.models[modelName];
+      }
+
+      const modelModule = require(modelPath);
+      const schema = modelModule.schema || modelModule;
+      return tenantConnection.model(modelName, schema);
+    };
+
+    // Register required tenant models (ensures population works)
+    const Project = getTenantModel('Project', '../models/Project');
+    getTenantModel('Client', '../models/Client');
+    getTenantModel('Employee', '../models/Employee');
+    const TenantUser = getTenantModel('User', '../models/tenant/TenantUser');
+
+    // Get current user to find their employee record
+    const currentUser = await TenantUser.findById(userId);
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Find projects where the user is a team member or project manager
+    const projects = await Project.find({
+      $or: [
+        { 'teamMembers.employee': currentUser._id },
+        { projectManager: currentUser._id }
+      ],
+      isActive: true
+    })
+    .populate('client', 'name companyName')
+    .populate('projectManager', 'firstName lastName email')
+    .populate('teamMembers.employee', 'firstName lastName email')
+    .sort({ startDate: -1 });
+
+    // Format projects with user's role
+    const formattedProjects = projects.map(project => {
+      const teamMember = project.teamMembers.find(
+        tm => tm.employee && tm.employee._id.toString() === currentUser._id.toString()
+      );
+      
+      const isManager = project.projectManager && 
+        project.projectManager._id.toString() === currentUser._id.toString();
+
+      return {
+        _id: project._id,
+        name: project.name,
+        projectCode: project.projectCode,
+        description: project.description,
+        status: project.status,
+        startDate: project.startDate,
+        endDate: project.endDate,
+        client: project.client,
+        projectManager: project.projectManager ? {
+          name: `${project.projectManager.firstName} ${project.projectManager.lastName}`,
+          email: project.projectManager.email
+        } : null,
+        myRole: isManager ? 'Project Manager' : (teamMember?.role || 'Team Member'),
+        teamSize: project.teamMembers.length,
+        isActive: project.isActive
+      };
+    });
+
+    console.log(`📋 Found ${formattedProjects.length} projects for user ${currentUser.email}`);
 
     res.status(200).json({
       success: true,
-      data: projects
+      count: formattedProjects.length,
+      data: formattedProjects
     });
   } catch (error) {
     console.error('Error fetching employee projects:', error);

@@ -166,6 +166,86 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+// Get leave calendar data - shows employees on leave by date
+exports.getLeaveCalendar = async (req, res) => {
+  try {
+    const tenantConnection = req.tenant.connection;
+    const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const { startDate, endDate, department, leaveType } = req.query;
+    
+    // Default to current month if not provided
+    const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const end = endDate ? new Date(endDate) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
+    
+    // Build query for approved leaves that overlap with the date range
+    const query = {
+      status: 'approved',
+      $or: [
+        { startDate: { $lte: end }, endDate: { $gte: start } }
+      ]
+    };
+    
+    if (leaveType) query.leaveType = leaveType;
+    
+    const leaves = await LeaveRequest.find(query)
+      .populate('employeeId', 'firstName lastName email employeeCode departmentId')
+      .sort({ startDate: 1 });
+    
+    // Filter by department if specified
+    let filteredLeaves = leaves;
+    if (department) {
+      filteredLeaves = leaves.filter(leave => {
+        const empDept = leave.employeeId?.departmentId?.toString();
+        return empDept === department.toString();
+      });
+    }
+    
+    // Group leaves by date
+    const calendarData = {};
+    filteredLeaves.forEach(leave => {
+      const start = new Date(leave.startDate);
+      const end = new Date(leave.endDate);
+      
+      // Iterate through each day in the leave range
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateKey = d.toISOString().split('T')[0];
+        if (!calendarData[dateKey]) {
+          calendarData[dateKey] = [];
+        }
+        calendarData[dateKey].push({
+          id: leave._id,
+          employeeName: leave.employeeName || `${leave.employeeId?.firstName || ''} ${leave.employeeId?.lastName || ''}`.trim(),
+          employeeEmail: leave.employeeEmail,
+          employeeCode: leave.employeeId?.employeeCode,
+          leaveType: leave.leaveType,
+          startDate: leave.startDate,
+          endDate: leave.endDate,
+          numberOfDays: leave.numberOfDays,
+          reason: leave.reason,
+          department: leave.employeeId?.departmentId
+        });
+      }
+    });
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        calendar: calendarData,
+        totalLeaves: filteredLeaves.length,
+        dateRange: { start, end }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching leave calendar:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 exports.getHRDashboardStats = async (req, res) => {
   try {
     // Get tenant connection
