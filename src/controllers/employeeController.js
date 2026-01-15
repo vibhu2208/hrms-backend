@@ -87,12 +87,40 @@ exports.createEmployee = async (req, res) => {
     const tenantConnection = req.tenant.connection;
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
     
-    const employee = await TenantUser.create(req.body);
+    // Generate employee code
+    const employeeCount = await TenantUser.countDocuments({ role: { $in: ['employee', 'manager'] } });
+    const employeeCode = `EMP${String(employeeCount + 1).padStart(5, '0')}`;
+    
+    // Generate temporary password
+    const crypto = require('crypto');
+    const tempPassword = crypto.randomBytes(8).toString('hex');
+    
+    // Prepare employee data with required fields
+    const employeeData = {
+      ...req.body,
+      employeeCode,
+      role: req.body.role || 'employee', // Default to 'employee' if not provided
+      password: tempPassword, // Will be hashed by pre-save hook
+      authProvider: 'local',
+      isActive: true,
+      isFirstLogin: true,
+      mustChangePassword: true
+    };
+    
+    const employee = await TenantUser.create(employeeData);
+    
+    // Remove password from response
+    const employeeResponse = employee.toObject();
+    delete employeeResponse.password;
 
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
-      data: employee
+      data: {
+        ...employeeResponse,
+        tempPassword: tempPassword // Send temp password in response for HR to share
+      },
+      note: 'Please share the temporary password with the employee. They must change it on first login.'
     });
   } catch (error) {
     console.error('Error creating employee:', error);
@@ -134,6 +162,76 @@ exports.updateEmployee = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
+
+// @desc    Reset employee password
+// @route   PUT /api/employees/:id/reset-password
+// @access  Private (Admin, HR)
+exports.resetEmployeePassword = async (req, res) => {
+  try {
+    console.log('🔄 Reset password request for employee ID:', req.params.id);
+    
+    // Check if tenant connection exists
+    if (!req.tenant || !req.tenant.connection) {
+      console.error('❌ No tenant connection found');
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant connection not found'
+      });
+    }
+
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    console.log('✅ Tenant connection established');
+    
+    // Must select password field explicitly since it has select: false
+    const employee = await TenantUser.findById(req.params.id).select('+password');
+
+    if (!employee) {
+      console.error('❌ Employee not found with ID:', req.params.id);
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found'
+      });
+    }
+
+    console.log('✅ Employee found:', employee.email);
+
+    // Generate new temporary password
+    const crypto = require('crypto');
+    const newTempPassword = crypto.randomBytes(8).toString('hex');
+    
+    console.log('🔑 Generated new temporary password');
+    
+    // Update password and force change on next login
+    employee.password = newTempPassword; // Will be hashed by pre-save hook
+    employee.mustChangePassword = true;
+    employee.isFirstLogin = true;
+    
+    console.log('💾 Saving employee with new password...');
+    await employee.save();
+    console.log('✅ Password reset successful');
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully',
+      data: {
+        employeeId: employee._id,
+        email: employee.email,
+        name: `${employee.firstName} ${employee.lastName}`,
+        tempPassword: newTempPassword
+      },
+      note: 'Please share this temporary password with the employee. They must change it on first login.'
+    });
+  } catch (error) {
+    console.error('❌ Error resetting employee password:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: `Failed to reset password: ${error.message}`
     });
   }
 };

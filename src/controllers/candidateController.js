@@ -7,6 +7,7 @@ const {
   sendOfferExtendedEmail,
   sendRejectionEmail
 } = require('../services/emailService');
+const onboardingAutomationService = require('../services/onboardingAutomationService');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -534,6 +535,52 @@ exports.updateInterviewFeedback = async (req, res) => {
     });
 
     await candidate.save();
+
+    // 🔥 AUTO-MOVE TO ONBOARDING: Check if HR call completed with selected decision
+    const isHRInterview = interview.interviewType?.toLowerCase().includes('hr') || 
+                          interview.round?.toLowerCase().includes('hr');
+    const isCompleted = status === 'completed';
+    const isSelected = decision === 'selected' || decision === 'hire';
+
+    if (isHRInterview && isCompleted && isSelected) {
+      console.log('🎯 HR call completed with selection - Auto-moving to onboarding...');
+      
+      try {
+        // Update candidate final decision
+        candidate.finalDecision = 'selected';
+        candidate.status = 'selected';
+        await candidate.save();
+
+        // Auto-create onboarding record
+        const onboardingResult = await onboardingAutomationService.autoMoveToOnboarding(
+          candidate._id,
+          req.tenant.connection,
+          {
+            selectedBy: req.user?._id,
+            comments: notes || feedback
+          }
+        );
+
+        if (onboardingResult.success && !onboardingResult.alreadyExists) {
+          console.log('✅ Candidate automatically moved to onboarding');
+          
+          // Add timeline entry
+          candidate.timeline.push({
+            action: 'Auto-moved to Onboarding',
+            description: 'Candidate automatically moved to onboarding after HR selection',
+            performedBy: req.user?._id,
+            metadata: { 
+              onboardingId: onboardingResult.onboarding._id,
+              automated: true
+            }
+          });
+          await candidate.save();
+        }
+      } catch (autoMoveError) {
+        console.error('❌ Failed to auto-move to onboarding:', autoMoveError.message);
+        // Don't fail the interview update if onboarding creation fails
+      }
+    }
     res.status(200).json({ success: true, message: 'Interview feedback updated successfully', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

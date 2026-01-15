@@ -6,22 +6,42 @@
 const mongoose = require('mongoose');
 
 const approvalWorkflowSchema = new mongoose.Schema({
-  workflowName: {
+  name: {
     type: String,
     required: [true, 'Workflow name is required'],
     trim: true
   },
+  workflowName: {
+    type: String,
+    trim: true
+  },
+  requestType: {
+    type: String,
+    required: [true, 'Request type is required'],
+    enum: ['leave', 'attendance', 'expense', 'payroll', 'asset', 'document', 'offboarding', 'roster_change', 'profile_update', 'attendance_regularization', 'other'],
+    index: true
+  },
   entityType: {
     type: String,
-    required: [true, 'Entity type is required'],
-    enum: ['leave', 'roster_change', 'profile_update', 'attendance_regularization', 'expense', 'other'],
-    index: true
+    enum: ['leave', 'roster_change', 'profile_update', 'attendance_regularization', 'expense', 'other']
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  priority: {
+    type: Number,
+    default: 0
   },
   isDefault: {
     type: Boolean,
     default: false
   },
-  levels: [{
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  approvalSteps: [{
     level: {
       type: Number,
       required: true,
@@ -29,7 +49,7 @@ const approvalWorkflowSchema = new mongoose.Schema({
     },
     approverType: {
       type: String,
-      enum: ['reporting_manager', 'department_head', 'hr', 'admin', 'specific_user', 'role_based'],
+      enum: ['manager', 'reporting_manager', 'department_head', 'hr', 'finance', 'ceo', 'company_admin', 'admin', 'specific_user', 'role_based', 'custom'],
       required: true
     },
     approverId: {
@@ -51,10 +71,28 @@ const approvalWorkflowSchema = new mongoose.Schema({
       type: Boolean,
       default: true
     },
+    slaHours: {
+      type: Number,
+      default: 24
+    },
     slaMinutes: {
       type: Number,
-      default: 1440 // 24 hours default
+      default: 1440
+    },
+    escalationHours: {
+      type: Number,
+      default: 36
     }
+  }],
+  levels: [{
+    level: Number,
+    approverType: String,
+    approverId: mongoose.Schema.Types.ObjectId,
+    approverRole: String,
+    approverEmail: String,
+    isRequired: Boolean,
+    canDelegate: Boolean,
+    slaMinutes: Number
   }],
   slaMinutes: {
     type: Number,
@@ -82,18 +120,33 @@ const approvalWorkflowSchema = new mongoose.Schema({
       type: Number // Auto-approve if no response after X minutes (optional)
     }
   },
-  conditions: {
+  conditions: [{
+    field: {
+      type: String,
+      required: true
+    },
+    operator: {
+      type: String,
+      enum: ['equals', 'not_equals', 'greater_than', 'less_than', 'greater_than_or_equal', 'less_than_or_equal', 'in', 'not_in', 'contains', 'not_contains'],
+      required: true
+    },
+    value: {
+      type: mongoose.Schema.Types.Mixed,
+      required: true
+    }
+  }],
+  legacyConditions: {
     leaveType: [String],
     amountRange: {
       min: Number,
       max: Number
     },
     department: [mongoose.Schema.Types.ObjectId],
-    designation: [String]
-  },
-  isActive: {
-    type: Boolean,
-    default: true
+    designation: [String],
+    duration: {
+      min: Number,
+      max: Number
+    }
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
