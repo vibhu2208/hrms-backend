@@ -5,7 +5,41 @@ const WorkScheduleSchema = require('../models/tenant/WorkSchedule');
 const RosterAssignmentSchema = require('../models/tenant/RosterAssignment');
 const RosterChangeRequestSchema = require('../models/tenant/RosterChangeRequest');
 const TenantUserSchema = require('../models/tenant/TenantUser');
+const DepartmentModel = require('../models/Department');
 const XLSX = require('xlsx');
+
+const DepartmentSchema = DepartmentModel?.schema;
+
+const getTenantModel = (connection, name, schemaOrModel) => {
+  if (connection.models[name]) {
+    return connection.models[name];
+  }
+
+  const schema = schemaOrModel?.schema || schemaOrModel;
+  if (!schema) {
+    throw new Error(`Schema not provided for tenant model ${name}`);
+  }
+
+  return connection.model(name, schema);
+};
+
+const registerTenantModels = (connection) => {
+  const ShiftTemplate = getTenantModel(connection, 'ShiftTemplate', ShiftTemplateSchema);
+  const WorkSchedule = getTenantModel(connection, 'WorkSchedule', WorkScheduleSchema);
+  const RosterAssignment = getTenantModel(connection, 'RosterAssignment', RosterAssignmentSchema);
+  const RosterChangeRequest = getTenantModel(connection, 'RosterChangeRequest', RosterChangeRequestSchema);
+  const TenantUser = getTenantModel(connection, 'User', TenantUserSchema);
+  const Department = DepartmentSchema ? getTenantModel(connection, 'Department', DepartmentSchema) : null;
+
+  return {
+    ShiftTemplate,
+    WorkSchedule,
+    RosterAssignment,
+    RosterChangeRequest,
+    TenantUser,
+    Department
+  };
+};
 
 /**
  * Work Schedule Controller
@@ -33,7 +67,7 @@ exports.getShiftTemplates = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const ShiftTemplate = tenantConnection.model('ShiftTemplate', ShiftTemplateSchema);
+    const { ShiftTemplate, Department } = registerTenantModels(tenantConnection);
 
     const query = {};
     if (isActive !== undefined) query.isActive = isActive === 'true';
@@ -80,7 +114,7 @@ exports.getShiftTemplate = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const ShiftTemplate = tenantConnection.model('ShiftTemplate', ShiftTemplateSchema);
+    const { ShiftTemplate } = registerTenantModels(tenantConnection);
 
     const template = await ShiftTemplate.findById(id)
       .populate('department', 'name')
@@ -148,7 +182,7 @@ exports.createShiftTemplate = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const ShiftTemplate = tenantConnection.model('ShiftTemplate', ShiftTemplateSchema);
+    const { ShiftTemplate } = registerTenantModels(tenantConnection);
 
     // Check if code already exists
     const existing = await ShiftTemplate.findOne({ code: code.toUpperCase() });
@@ -213,7 +247,7 @@ exports.updateShiftTemplate = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const ShiftTemplate = tenantConnection.model('ShiftTemplate', ShiftTemplateSchema);
+    const { ShiftTemplate } = registerTenantModels(tenantConnection);
 
     // If code is being updated, check for duplicates
     if (updateData.code) {
@@ -280,8 +314,7 @@ exports.deleteShiftTemplate = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const ShiftTemplate = tenantConnection.model('ShiftTemplate', ShiftTemplateSchema);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
+    const { ShiftTemplate, RosterAssignment } = registerTenantModels(tenantConnection);
 
     // Check if template is being used
     const inUse = await RosterAssignment.findOne({ shiftTemplateId: id, status: 'active' });
@@ -338,7 +371,7 @@ exports.getWorkSchedules = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const WorkSchedule = tenantConnection.model('WorkSchedule', WorkScheduleSchema);
+    const { WorkSchedule } = registerTenantModels(tenantConnection);
 
     const query = {};
     if (startDate || endDate) {
@@ -397,7 +430,7 @@ exports.createWorkSchedule = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const WorkSchedule = tenantConnection.model('WorkSchedule', WorkScheduleSchema);
+    const { WorkSchedule } = registerTenantModels(tenantConnection);
 
     const scheduleDate = new Date(date);
     const dayOfWeek = scheduleDate.getDay();
@@ -455,7 +488,7 @@ exports.getRosterAssignments = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
+    const { RosterAssignment } = registerTenantModels(tenantConnection);
 
     const query = {};
     
@@ -541,8 +574,7 @@ exports.createRosterAssignment = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const { RosterAssignment, TenantUser, WorkSchedule, ShiftTemplate } = registerTenantModels(tenantConnection);
 
     // Get employee details
     const employee = await TenantUser.findById(employeeId);
@@ -631,10 +663,7 @@ exports.bulkUploadRoster = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    const ShiftTemplate = tenantConnection.model('ShiftTemplate', ShiftTemplateSchema);
-    const WorkSchedule = tenantConnection.model('WorkSchedule', WorkScheduleSchema);
+    const { RosterAssignment, TenantUser, ShiftTemplate, WorkSchedule } = registerTenantModels(tenantConnection);
 
     // Read Excel file
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -761,7 +790,7 @@ exports.getRosterChangeRequests = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterChangeRequest = tenantConnection.model('RosterChangeRequest', RosterChangeRequestSchema);
+    const { RosterChangeRequest } = registerTenantModels(tenantConnection);
 
     const query = {};
     
@@ -832,9 +861,7 @@ exports.createRosterChangeRequest = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterChangeRequest = tenantConnection.model('RosterChangeRequest', RosterChangeRequestSchema);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const { RosterChangeRequest, RosterAssignment, TenantUser, ShiftTemplate } = registerTenantModels(tenantConnection);
 
     // Get employee details
     const employee = await TenantUser.findById(user._id);
@@ -909,9 +936,7 @@ exports.approveRosterChangeRequest = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterChangeRequest = tenantConnection.model('RosterChangeRequest', RosterChangeRequestSchema);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
-    const WorkSchedule = tenantConnection.model('WorkSchedule', WorkScheduleSchema);
+    const { RosterChangeRequest, RosterAssignment, WorkSchedule, ShiftTemplate } = registerTenantModels(tenantConnection);
 
     const request = await RosterChangeRequest.findById(id);
     if (!request) {
@@ -1023,7 +1048,7 @@ exports.rejectRosterChangeRequest = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterChangeRequest = tenantConnection.model('RosterChangeRequest', RosterChangeRequestSchema);
+    const { RosterChangeRequest } = registerTenantModels(tenantConnection);
 
     const request = await RosterChangeRequest.findById(id);
     if (!request) {
@@ -1088,7 +1113,7 @@ exports.getRosterCalendar = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    const RosterAssignment = tenantConnection.model('RosterAssignment', RosterAssignmentSchema);
+    const { RosterAssignment } = registerTenantModels(tenantConnection);
 
     const query = { status: 'active' };
     

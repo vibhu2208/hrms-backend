@@ -2,6 +2,7 @@ const { verifyToken } = require('../utils/jwt');
 const TenantUserSchema = require('../models/tenant/TenantUser');
 const { getTenantConnection } = require('../config/database.config');
 const { getSuperAdmin } = require('../models/global');
+const tokenBlacklistService = require('../services/tokenBlacklistService');
 
 const protect = async (req, res, next) => {
   let tenantConnection = null;
@@ -26,6 +27,16 @@ const protect = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid or expired token'
+      });
+    }
+
+    // SECURITY: Check if token is blacklisted
+    const isBlacklisted = await tokenBlacklistService.isBlacklisted(token);
+    if (isBlacklisted) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token has been revoked. Please login again.',
+        code: 'TOKEN_REVOKED'
       });
     }
 
@@ -74,6 +85,16 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // SECURITY: Check if all user tokens are blacklisted (for exited employees)
+    const isUserBlacklisted = await tokenBlacklistService.isUserBlacklisted(userId);
+    if (isUserBlacklisted) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access has been revoked. Please contact HR.',
+        code: 'ACCESS_REVOKED'
+      });
+    }
+
     if (!user.isActive) {
       return res.status(403).json({
         success: false,
@@ -104,16 +125,25 @@ const authorize = (...roles) => {
   return (req, res, next) => {
     const userRole = req.user.role;
     
+    console.log('🔐 Authorization check:');
+    console.log('   User role:', userRole);
+    console.log('   Allowed roles:', roles);
+    
     // Map company_admin to admin for authorization checks
     const normalizedRole = userRole === 'company_admin' ? 'admin' : userRole;
     
+    console.log('   Normalized role:', normalizedRole);
+    
     // Check if user's role (or normalized role) is in allowed roles
     if (!roles.includes(userRole) && !roles.includes(normalizedRole)) {
+      console.log('❌ Authorization failed');
       return res.status(403).json({
         success: false,
         message: `User role '${userRole}' is not authorized to access this route`
       });
     }
+    
+    console.log('✅ Authorization passed');
     next();
   };
 };

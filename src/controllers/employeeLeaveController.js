@@ -255,12 +255,41 @@ exports.applyLeave = async (req, res) => {
 
     console.log(`✅ Leave request created: ${leaveRequest._id}`);
 
+    // Create approval instance using the approval engine
+    try {
+      const approvalEngine = require('../services/approvalEngine');
+      
+      const approvalInstance = await approvalEngine.createApprovalInstance({
+        requestType: 'leave',
+        requestId: leaveRequest._id,
+        requestedBy: employee._id,
+        metadata: {
+          duration: numberOfDays,
+          leaveType: leaveType,
+          startDate: start,
+          endDate: end,
+          priority: 'medium'
+        }
+      }, tenantConnection);
+
+      // Update leave request with approval instance ID
+      leaveRequest.approvalInstanceId = approvalInstance._id;
+      await leaveRequest.save();
+
+      console.log(`✅ Approval workflow initiated: ${approvalInstance._id}`);
+      console.log(`   Workflow: ${approvalInstance.totalLevels} level(s)`);
+    } catch (approvalError) {
+      console.error('⚠️  Error creating approval instance:', approvalError.message);
+      // Don't fail the leave request if approval creation fails
+      // The leave can still be approved manually
+    }
+
     // Close connection
     if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
-      message: 'Leave application submitted successfully',
+      message: 'Leave application submitted successfully and sent for approval',
       data: leaveRequest
     });
   } catch (error) {

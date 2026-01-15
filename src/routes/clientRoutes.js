@@ -9,8 +9,10 @@ const {
   getClientDeploymentSummary
 } = require('../controllers/clientController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 router.get('/deployment-summary', authorize('admin', 'hr'), getClientDeploymentSummary);
 

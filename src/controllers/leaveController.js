@@ -78,6 +78,15 @@ exports.approveLeave = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Leave not found' });
     }
 
+    // SECURITY: Prevent self-approval
+    if (req.user.employeeId && leave.employee.toString() === req.user.employeeId.toString()) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'You cannot approve your own leave request',
+        code: 'SELF_APPROVAL_FORBIDDEN'
+      });
+    }
+
     leave.status = 'approved';
     leave.approvedBy = req.user.employeeId;
     leave.approvedAt = Date.now();
@@ -95,6 +104,15 @@ exports.rejectLeave = async (req, res) => {
     const leave = await Leave.findById(req.params.id);
     if (!leave) {
       return res.status(404).json({ success: false, message: 'Leave not found' });
+    }
+
+    // SECURITY: Prevent self-approval/rejection
+    if (req.user.employeeId && leave.employee.toString() === req.user.employeeId.toString()) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'You cannot reject your own leave request',
+        code: 'SELF_APPROVAL_FORBIDDEN'
+      });
     }
 
     leave.status = 'rejected';

@@ -5,6 +5,7 @@ const {
   getEmployee,
   createEmployee,
   updateEmployee,
+  resetEmployeePassword,
   deleteEmployee,
   getEmployeeStats
 } = require('../controllers/employeeController');
@@ -38,6 +39,8 @@ router.get('/stats', authorize('admin', 'hr'), getEmployeeStats);
 router.route('/')
   .get(getEmployees)
   .post(authorize('admin', 'hr'), createEmployee);
+
+router.put('/:id/reset-password', authorize('admin', 'hr'), resetEmployeePassword);
 
 router.route('/:id')
   .get(getEmployee)
