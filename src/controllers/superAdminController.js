@@ -1,5 +1,5 @@
-const Client = require('../models/Client');
-const Company = require('../models/Company');
+const mongoose = require('mongoose');
+const { connectGlobalDB } = require('../config/database.config');
 const User = require('../models/User');
 const Package = require('../models/Package');
 const SystemConfig = require('../models/SystemConfig');
@@ -16,20 +16,24 @@ const { sendCompanyAdminCredentials } = require('../services/emailService');
 // Dashboard Overview
 const getDashboardStats = async (req, res) => {
   try {
-    const totalClients = await Client.countDocuments();
-    const activeClients = await Client.countDocuments({ status: 'active' });
+    // Connect to global database
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
+    const totalClients = await CompanyRegistry.countDocuments();
+    const activeClients = await CompanyRegistry.countDocuments({ status: 'active' });
     const totalUsers = await User.countDocuments();
     const totalPackages = await Package.countDocuments({ isActive: true });
 
     // Recent activities
     const recentActivities = await AuditLog.find()
       .populate('userId', 'email role')
-      .populate('clientId', 'name companyName')
       .sort({ createdAt: -1 })
       .limit(10);
 
     // Client status distribution
-    const clientStats = await Client.aggregate([
+    const clientStats = await CompanyRegistry.aggregate([
       {
         $group: {
           _id: '$status',
@@ -39,7 +43,7 @@ const getDashboardStats = async (req, res) => {
     ]);
 
     // Subscription status distribution
-    const subscriptionStats = await Client.aggregate([
+    const subscriptionStats = await CompanyRegistry.aggregate([
       {
         $group: {
           _id: '$subscription.status',
@@ -78,13 +82,18 @@ const getSystemHealth = async (req, res) => {
     const uptime = process.uptime();
     const memoryUsage = process.memoryUsage();
 
+    // Connect to global database
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
     // Check for expiring subscriptions
-    const expiringSubscriptions = await Client.find({
+    const expiringSubscriptions = await CompanyRegistry.find({
       'subscription.endDate': {
         $lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
       },
       'subscription.status': 'active'
-    }).select('name companyName subscription.endDate');
+    }).select('companyName subscription.endDate');
 
     res.json({
       success: true,
@@ -113,6 +122,11 @@ const getSystemHealth = async (req, res) => {
 // Client Management
 const getClients = async (req, res) => {
   try {
+    // Connect to global database
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
     const {
       page = 1,
       limit = 10,
@@ -127,9 +141,8 @@ const getClients = async (req, res) => {
     if (search) {
       query.$or = [
         { companyName: { $regex: search, $options: 'i' } },
-        { clientCode: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { 'contactPerson.name': { $regex: search, $options: 'i' } }
+        { companyCode: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -144,33 +157,24 @@ const getClients = async (req, res) => {
     }
 
     const skip = (page - 1) * limit;
-    const clients = await Client.find(query)
-      .populate('subscription.packageId', 'name type pricing')
+    const clients = await CompanyRegistry.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
-    const total = await Client.countDocuments(query);
+    const total = await CompanyRegistry.countDocuments(query);
     const pages = Math.ceil(total / limit);
     
-    // Get ClientPackage data for each client to show current active packages
-    const ClientPackage = require('../models/ClientPackage');
-    const clientsWithPackages = await Promise.all(
-      clients.map(async (client) => {
-        const clientObj = client.toObject();
-        
-        // Get active ClientPackages for this client
-        const activePackages = await ClientPackage.find({
-          clientId: client._id,
-          status: { $in: ['active', 'trial'] }
-        }).populate('packageId', 'name type pricing');
-        
-        clientObj.activePackages = activePackages;
-        clientObj.hasActivePackage = activePackages.length > 0;
-        
-        return clientObj;
-      })
-    );
+    // Format clients for frontend (map companyCode to clientCode for compatibility)
+    const clientsWithPackages = clients.map((client) => ({
+      ...client,
+      _id: client._id,
+      clientCode: client.companyCode,
+      name: client.companyName,
+      activePackages: [],
+      hasActivePackage: client.subscription?.status === 'active'
+    }));
 
     res.json({
       success: true,
@@ -196,11 +200,16 @@ const getClients = async (req, res) => {
 
 const getClient = async (req, res) => {
   try {
-    const client = await Client.findById(req.params.id);
+    // Connect to global database
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
+    const client = await CompanyRegistry.findById(req.params.id);
     if (!client) {
       return res.status(404).json({
         success: false,
-        message: 'Client not found'
+        message: 'Company not found'
       });
     }
 
@@ -211,7 +220,7 @@ const getClient = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching client',
+      message: 'Error fetching company',
       error: error.message
     });
   }
@@ -223,42 +232,98 @@ const createClient = async (req, res) => {
   const defaultPassword = 'password123';
   
   try {
-    const { adminEmail, adminFirstName, ...clientData } = req.body;
+    // Connect to global database
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
+    const { adminEmail, adminFirstName, contactPerson, ...clientData } = req.body;
     
-    console.log('🎯 Creating client with data:', clientData);
+    console.log('🎯 Creating company with data:', clientData);
     console.log('👤 Admin email provided:', adminEmail);
     
-    // Create the client
-    client = new Client(clientData);
-    await client.save();
-    console.log('✅ Client created:', client.companyName);
+    // Generate unique IDs
+    const companyObjectId = new mongoose.Types.ObjectId();
+    const companyId = companyObjectId.toString();
+    
+    // Prepare company data for CompanyRegistry
+    const companyRegistryData = {
+      companyCode: clientData.clientCode || clientData.companyCode,
+      companyName: clientData.companyName || clientData.name,
+      companyId: companyId,
+      tenantDatabaseName: `tenant_${companyId}`,
+      email: clientData.email,
+      phone: clientData.phone,
+      website: clientData.website || '',
+      address: typeof clientData.address === 'string' ? {
+        street: clientData.address,
+        city: '',
+        state: '',
+        zipCode: '',
+        country: ''
+      } : clientData.address,
+      companyAdmin: {
+        email: adminEmail || contactPerson?.email || clientData.email,
+        createdAt: new Date()
+      },
+      subscription: {
+        plan: clientData.subscription?.plan || 'trial',
+        startDate: clientData.subscription?.startDate || new Date(),
+        endDate: clientData.subscription?.endDate || null,
+        status: clientData.subscription?.status || 'active',
+        maxEmployees: clientData.subscription?.maxUsers || 50,
+        maxAdmins: 2,
+        billingCycle: 'monthly'
+      },
+      status: clientData.status || 'active',
+      databaseStatus: 'active'
+    };
+    
+    // Create the company in CompanyRegistry
+    client = await CompanyRegistry.create(companyRegistryData);
+    console.log('✅ Company created:', client.companyName);
 
-    // Create admin user if adminEmail is provided
-    if (adminEmail) {
+    // Create admin user in tenant database
+    const adminEmailToUse = adminEmail || contactPerson?.email || client.email;
+    if (adminEmailToUse) {
       try {
-        const User = require('../models/User');
+        // Connect to the newly created tenant database
+        const { getTenantConnection } = require('../config/database.config');
+        const tenantConnection = await getTenantConnection(client.companyId);
         
-        // Check if user already exists
-        const existingUser = await User.findOne({ email: adminEmail });
+        const TenantUserSchema = require('../models/tenant/TenantUser');
+        const TenantUser = tenantConnection.model('User', TenantUserSchema);
+        
+        // Check if user already exists in tenant database
+        const existingUser = await TenantUser.findOne({ email: adminEmailToUse });
         if (existingUser) {
-          console.log('⚠️ Admin user already exists:', adminEmail);
+          console.log('⚠️ Admin user already exists in tenant database:', adminEmailToUse);
           adminUser = existingUser;
         } else {
-          // Create admin user
-          adminUser = new User({
-            email: adminEmail,
-            password: defaultPassword,
+          // Create admin user in tenant database
+          adminUser = await TenantUser.create({
+            email: adminEmailToUse,
+            password: defaultPassword, // Will be hashed by pre-save hook
             authProvider: 'local',
-            role: 'admin',
-            clientId: client._id,
-            isActive: true
+            firstName: adminFirstName || contactPerson?.name?.split(' ')[0] || 'Admin',
+            lastName: contactPerson?.name?.split(' ').slice(1).join(' ') || 'User',
+            role: 'company_admin',
+            isActive: true,
+            isFirstLogin: true,
+            mustChangePassword: true
           });
           
-          await adminUser.save();
-          console.log('✅ Admin user created:', adminEmail);
+          console.log('✅ Admin user created in tenant database:', adminEmailToUse);
+          
+          // Update CompanyRegistry with admin userId
+          await CompanyRegistry.findByIdAndUpdate(client._id, {
+            'companyAdmin.userId': adminUser._id.toString(),
+            'companyAdmin.createdAt': new Date()
+          });
+          console.log('✅ CompanyRegistry updated with admin user ID');
         }
       } catch (userError) {
-        console.error('❌ Error creating admin user:', userError);
+        console.error('❌ Error creating admin user in tenant database:', userError);
         // Don't fail the client creation if user creation fails
       }
     }
@@ -273,31 +338,37 @@ const createClient = async (req, res) => {
     console.log(`✅ Company creation completed successfully: ${client.companyName}`);
 
     // Send welcome email with credentials if admin was created
-    if (adminUser && adminEmail) {
+    if (adminUser && adminEmailToUse) {
       try {
         await sendCompanyAdminCredentials({
-          email: adminEmail,
-          firstName: adminFirstName || 'Admin',
+          email: adminEmailToUse,
+          firstName: adminUser.firstName || adminFirstName || 'Admin',
           companyName: client.companyName,
-          loginUrl: `${process.env.CLIENT_URL || 'https://your-app-url.com'}/login`,
+          companyCode: client.companyCode,
+          loginUrl: `${process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173'}/login`,
           password: defaultPassword,
-          supportEmail: process.env.SUPPORT_EMAIL || 'support@yourcompany.com'
+          supportEmail: process.env.SUPPORT_EMAIL || 'support@hrms.com'
         });
-        console.log(`📧 Welcome email sent to: ${adminEmail}`);
+        console.log(`📧 Welcome email sent to: ${adminEmailToUse}`);
       } catch (emailError) {
-        console.error('❌ Error sending welcome email:', emailError);
+        console.error('❌ Error sending welcome email:', emailError.message);
         // Don't fail the client creation if email fails
       }
     }
 
-    // Return success response (without password for security)
-    const response = {
+    // Return success response
+    res.status(201).json({
       success: true,
-      message: adminEmail ? 'Client and admin user created successfully' : 'Client created successfully',
-      data: client,
-      adminCreated: !!adminUser
-    };
-    res.status(201).json(response);
+      message: adminUser ? 'Company and admin user created successfully' : 'Company created successfully',
+      data: {
+        company: client,
+        adminCreated: !!adminUser,
+        adminEmail: adminEmailToUse,
+        emailSent: !!adminUser,
+        loginUrl: `${process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173'}/login`,
+        note: adminUser ? 'Welcome email sent with login credentials. Admin must change password on first login.' : null
+      }
+    });
   } catch (error) {
     console.error('❌ Error creating client:', error);
     
@@ -323,7 +394,11 @@ const createClient = async (req, res) => {
 
 const updateClient = async (req, res) => {
   try {
-    const client = await Client.findByIdAndUpdate(
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
+    const client = await CompanyRegistry.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
@@ -332,25 +407,25 @@ const updateClient = async (req, res) => {
     if (!client) {
       return res.status(404).json({
         success: false,
-        message: 'Client not found'
+        message: 'Company not found'
       });
     }
 
     // Log the action
-    await logAction(req.user._id, null, 'UPDATE_CLIENT', 'Client', client._id, {
+    await logAction(req.user._id, null, 'UPDATE_CLIENT', 'CompanyRegistry', client._id, {
       companyName: client.companyName,
       changes: req.body
     }, req);
 
     res.json({
       success: true,
-      message: 'Client updated successfully',
+      message: 'Company updated successfully',
       data: client
     });
   } catch (error) {
     res.status(400).json({
       success: false,
-      message: 'Error updating client',
+      message: 'Error updating company',
       error: error.message
     });
   }
@@ -358,8 +433,12 @@ const updateClient = async (req, res) => {
 
 const updateClientStatus = async (req, res) => {
   try {
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
     const { status } = req.body;
-    const client = await Client.findByIdAndUpdate(
+    const client = await CompanyRegistry.findByIdAndUpdate(
       req.params.id,
       { status },
       { new: true }
@@ -368,12 +447,12 @@ const updateClientStatus = async (req, res) => {
     if (!client) {
       return res.status(404).json({
         success: false,
-        message: 'Client not found'
+        message: 'Company not found'
       });
     }
 
     // Log the action
-    await logAction(req.user._id, null, 'UPDATE_CLIENT_STATUS', 'Client', client._id, {
+    await logAction(req.user._id, null, 'UPDATE_CLIENT_STATUS', 'CompanyRegistry', client._id, {
       companyName: client.companyName,
       oldStatus: client.status,
       newStatus: status
@@ -381,13 +460,13 @@ const updateClientStatus = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Client status updated successfully',
+      message: 'Company status updated successfully',
       data: client
     });
   } catch (error) {
     res.status(400).json({
       success: false,
-      message: 'Error updating client status',
+      message: 'Error updating company status',
       error: error.message
     });
   }
@@ -395,7 +474,11 @@ const updateClientStatus = async (req, res) => {
 
 const updateClientSubscription = async (req, res) => {
   try {
-    const client = await Client.findByIdAndUpdate(
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
+    const client = await CompanyRegistry.findByIdAndUpdate(
       req.params.id,
       { subscription: req.body },
       { new: true }
@@ -404,25 +487,25 @@ const updateClientSubscription = async (req, res) => {
     if (!client) {
       return res.status(404).json({
         success: false,
-        message: 'Client not found'
+        message: 'Company not found'
       });
     }
 
     // Log the action
-    await logAction(req.user._id, null, 'UPDATE_CLIENT_SUBSCRIPTION', 'Client', client._id, {
+    await logAction(req.user._id, null, 'UPDATE_CLIENT_SUBSCRIPTION', 'CompanyRegistry', client._id, {
       companyName: client.companyName,
       subscriptionChanges: req.body
     }, req);
 
     res.json({
       success: true,
-      message: 'Client subscription updated successfully',
+      message: 'Company subscription updated successfully',
       data: client
     });
   } catch (error) {
     res.status(400).json({
       success: false,
-      message: 'Error updating client subscription',
+      message: 'Error updating company subscription',
       error: error.message
     });
   }
@@ -430,7 +513,11 @@ const updateClientSubscription = async (req, res) => {
 
 const deleteClient = async (req, res) => {
   try {
-    const client = await Client.findById(req.params.id);
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+
+    const client = await CompanyRegistry.findById(req.params.id);
     if (!client) {
       return res.status(404).json({
         success: false,

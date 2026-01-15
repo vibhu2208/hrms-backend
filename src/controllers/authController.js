@@ -118,7 +118,7 @@ exports.login = async (req, res) => {
       if (company) {
         try {
           console.log(`🏢 Authenticating against: ${company.companyName} (${company.tenantDatabaseName})`);
-          tenantConnection = await getTenantConnection(company.companyId);
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
           const TenantUser = tenantConnection.model('User', TenantUserSchema);
           
           const tenantUser = await TenantUser.findOne({ email }).select('+password');
@@ -169,7 +169,7 @@ exports.login = async (req, res) => {
       for (const company of companies) {
         try {
           console.log(`🔍 Checking company: ${company.companyName}`);
-          tenantConnection = await getTenantConnection(company.companyId);
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
           const TenantUser = tenantConnection.model('User', TenantUserSchema);
           
           const tenantUser = await TenantUser.findOne({ email }).select('+password');
@@ -364,6 +364,8 @@ exports.adminResetPassword = async (req, res) => {
     const { userId } = req.params;
     const { newPassword, mustChangePassword } = req.body;
 
+    console.log('🔄 Admin reset password request for user ID:', userId);
+
     // Validate new password
     if (!newPassword || newPassword.length < 8) {
       return res.status(400).json({
@@ -372,21 +374,43 @@ exports.adminResetPassword = async (req, res) => {
       });
     }
 
-    // Find the user to reset password
-    const user = await User.findById(userId);
+    // Check if tenant connection exists
+    if (!req.tenant || !req.tenant.connection) {
+      console.error('❌ No tenant connection found');
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant connection not found'
+      });
+    }
+
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    console.log('✅ Tenant connection established');
+
+    // Find the user to reset password (must select password field)
+    const user = await TenantUser.findById(userId).select('+password');
 
     if (!user) {
+      console.error('❌ User not found with ID:', userId);
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
+    console.log('✅ User found:', user.email);
+
     // Update password
     user.password = newPassword;
     user.mustChangePassword = mustChangePassword !== undefined ? mustChangePassword : true;
     user.passwordChangedAt = Date.now();
+    user.isFirstLogin = true;
+    
+    console.log('💾 Saving user with new password...');
     await user.save();
+    console.log('✅ Password reset successful');
 
     res.status(200).json({
       success: true,
@@ -398,9 +422,11 @@ exports.adminResetPassword = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ Error resetting password:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: `Failed to reset password: ${error.message}`
     });
   }
 };
@@ -506,59 +532,25 @@ exports.googleLogin = async (req, res) => {
 // @access  Public
 exports.getActiveCompanies = async (req, res) => {
   try {
-    // Import models
-    const { getCompanyRegistry } = require('../models/global');
-    const CompanyRegistry = await getCompanyRegistry();
-    const Client = require('../models/Client');
+    // Connect to global database
+    const { connectGlobalDB } = require('../config/database.config');
+    const globalConnection = await connectGlobalDB();
+    
+    // Get CompanyRegistry model
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
     
     // Fetch companies from CompanyRegistry
     const registryCompanies = await CompanyRegistry.find({
-      status: 'active',
-      databaseStatus: 'active'
+      status: 'active'
     })
-    .select('companyId companyName companyCode tenantDatabaseName status subscription.plan subscription.status')
+    .select('companyId companyName companyCode tenantDatabaseName status subscription')
     .sort({ companyName: 1 })
     .lean();
-    
-    // Fetch active clients and format them to match the expected structure
-    const clients = await Client.find({
-      status: 'active',
-      isActive: true
-    })
-    .select('_id companyName clientCode email phone status subscription')
-    .sort({ companyName: 1 })
-    .lean();
-    
-    // Map clients to match the expected format
-    const formattedClients = clients.map(client => ({
-      companyId: client._id.toString(),
-      companyName: client.companyName,
-      companyCode: client.clientCode,
-      tenantDatabaseName: `tenant_${client._id.toString()}`,
-      databaseName: `tenant_${client._id.toString()}`,
-      status: client.status,
-      subscription: {
-        plan: client.subscription?.plan || 'trial',
-        status: client.subscription?.status || 'trial'
-      },
-      email: client.email,
-      phone: client.phone
-    }));
-    
-    // Merge and combine both lists
-    const allCompanies = [...registryCompanies, ...formattedClients];
-    
-    // Remove duplicates based on companyName (in case a client was also added to CompanyRegistry)
-    const uniqueCompanies = Array.from(
-      new Map(allCompanies.map(company => [company.companyName, company])).values()
-    );
-    
-    // Sort by company name
-    uniqueCompanies.sort((a, b) => a.companyName.localeCompare(b.companyName));
 
     res.status(200).json({
       success: true,
-      data: uniqueCompanies
+      data: registryCompanies
     });
   } catch (error) {
     console.error('Error fetching companies:', error);

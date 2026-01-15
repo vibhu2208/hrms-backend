@@ -6,16 +6,20 @@ const {
   createPayroll,
   updatePayroll,
   processPayment,
-  deletePayroll
+  deletePayroll,
+  bulkGeneratePayroll
 } = require('../controllers/payrollController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 router.route('/')
   .get(getPayrolls)
   .post(authorize('admin', 'hr'), createPayroll);
 
+router.post('/bulk-generate', authorize('admin', 'hr'), bulkGeneratePayroll);
 router.put('/:id/process', authorize('admin', 'hr'), processPayment);
 
 router.route('/:id')

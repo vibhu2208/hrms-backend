@@ -78,6 +78,16 @@ const leaveRequestSchema = new mongoose.Schema({
   rejectionReason: {
     type: String
   },
+  // Link to approval workflow instance
+  approvalInstanceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ApprovalInstance'
+  },
+  // Link to approval workflow instance
+  approvalInstanceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ApprovalInstance'
+  },
   // Cancellation
   cancelledOn: {
     type: Date

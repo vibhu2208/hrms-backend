@@ -79,7 +79,37 @@ const tenantUserSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
-  // Permissions
+  // New RBAC System
+  roleId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Role'
+  },
+  customPermissions: [{
+    permissionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Permission'
+    },
+    scope: {
+      type: String,
+      enum: ['own', 'team', 'department', 'all'],
+      default: 'own'
+    },
+    grantedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    grantedAt: {
+      type: Date,
+      default: Date.now
+    },
+    expiresAt: {
+      type: Date
+    },
+    reason: {
+      type: String
+    }
+  }],
+  // Legacy Permissions (deprecated - kept for backward compatibility)
   permissions: {
     canManageEmployees: {
       type: Boolean,

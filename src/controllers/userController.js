@@ -7,7 +7,12 @@ const User = require('../models/User');
  */
 exports.getThemePreference = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('themePreference');
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const user = await TenantUser.findById(req.user.id).select('themePreference');
     
     if (!user) {
       return res.status(404).json({
@@ -55,7 +60,12 @@ exports.updateThemePreference = async (req, res) => {
       });
     }
 
-    const user = await User.findByIdAndUpdate(
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const user = await TenantUser.findByIdAndUpdate(
       req.user.id,
       { themePreference },
       { new: true, runValidators: true }
@@ -91,9 +101,14 @@ exports.updateThemePreference = async (req, res) => {
  */
 exports.getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    
+    const user = await TenantUser.findById(req.user.id)
       .select('-password')
-      .populate('employeeId');
+      .populate('departmentId');
 
     if (!user) {
       return res.status(404).json({
@@ -116,19 +131,27 @@ exports.getUserProfile = async (req, res) => {
 };
 
 /**
- * Get all users (Admin only)
+ * @desc Get all users for current tenant (Admin only)
  * @route GET /api/user/all
  * @access Private/Admin
  */
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find()
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    // Query users from tenant database
+    const users = await TenantUser.find()
       .select('-password')
       .populate({
-        path: 'employeeId',
-        select: 'firstName lastName employeeCode email phone department position'
+        path: 'departmentId',
+        select: 'name code'
       })
       .sort({ createdAt: -1 });
+
+    console.log(`📋 Found ${users.length} users for company ${req.tenant.companyId}`);
 
     res.status(200).json({
       success: true,

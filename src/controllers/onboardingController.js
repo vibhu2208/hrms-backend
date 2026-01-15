@@ -3,6 +3,7 @@ const User = require('../models/User'); // User model stays global
 const OfferTemplate = require('../models/OfferTemplate'); // Global model
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
+const employeeCreationService = require('../services/employeeCreationService');
 
 // Configure email transporter using existing email config
 const createTransporter = () => {
@@ -1265,267 +1266,53 @@ exports.completeOnboardingProcess = async (req, res) => {
   try {
     const { id } = req.params;
     const { companyName } = req.body;
-    const hrUserId = req.user.id;
+    const tenantConnection = req.tenant.connection;
 
-    // Find onboarding record with all related data
-    const onboarding = await Onboarding.findById(id)
-      .populate('department')
-      .populate('applicationId');
+    console.log(`🔄 Completing onboarding for ID: ${id}`);
 
-    if (!onboarding) {
-      return res.status(404).json({
-        success: false,
-        message: 'Onboarding record not found'
-      });
-    }
-
-    // Validate onboarding is ready for completion
-    if (onboarding.status !== 'ready_for_joining') {
+    // Validate onboarding completion readiness
+    const validation = await employeeCreationService.validateOnboardingCompletion(id, tenantConnection);
+    
+    if (!validation.valid) {
       return res.status(400).json({
         success: false,
-        message: `Cannot complete onboarding. Current status: ${onboarding.status}. Required: ready_for_joining`
+        message: 'Onboarding validation failed',
+        errors: validation.errors,
+        warnings: validation.warnings
       });
     }
 
-    // Check if already completed
-    if (onboarding.status === 'completed' || onboarding.candidateId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Onboarding has already been completed',
-        data: {
-          employeeId: onboarding.candidateId,
-          completedAt: onboarding.completedAt
-        }
-      });
-    }
-
-    // Validate all required documents are verified
-    const allRequiredVerified = onboarding.requiredDocuments
-      .filter(doc => doc.isRequired)
-      .every(doc => doc.verified);
-
-    if (!allRequiredVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'All required documents must be verified before completing onboarding'
-      });
-    }
-
-    // Validate required fields
-    if (!onboarding.candidateEmail || !onboarding.candidateName) {
-      return res.status(400).json({
-        success: false,
-        message: 'Candidate email and name are required'
-      });
-    }
-
-    if (!onboarding.department || !onboarding.joiningDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'Department and joining date are required'
-      });
-    }
-
-    // Check if user already exists with this email
-    const existingUser = await User.findOne({ email: onboarding.candidateEmail });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'A user account already exists with this email address'
-      });
-    }
-
-    // Check if employee already exists with this email
-    const existingEmployee = await Employee.findOne({ email: onboarding.candidateEmail });
-    if (existingEmployee) {
-      return res.status(400).json({
-        success: false,
-        message: 'An employee record already exists with this email address'
-      });
-    }
-
-    // Split candidate name into first and last name
-    const nameParts = onboarding.candidateName.trim().split(' ');
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(' ') || firstName;
-
-    // Generate secure random password
-    const tempPassword = generatePassword(12, {
-      includeUppercase: true,
-      includeLowercase: true,
-      includeNumbers: true,
-      includeSymbols: true
-    });
-
-    // Prepare employee data from onboarding and offer details
-    const employeeData = {
-      firstName,
-      lastName,
-      email: onboarding.candidateEmail,
-      phone: onboarding.candidatePhone || 'N/A',
-      department: onboarding.department._id,
-      designation: onboarding.offer?.offeredDesignation || onboarding.position,
-      joiningDate: onboarding.joiningDate,
-      employmentType: 'full-time',
-      status: 'active'
-    };
-
-    // Add salary information if available from offer
-    if (onboarding.offer?.salary) {
-      employeeData.salary = onboarding.offer.salary;
-    }
-
-    // Create employee record
-    const employee = await Employee.create(employeeData);
-
-    console.log(`✅ Employee created: ${employee.employeeCode} - ${employee.firstName} ${employee.lastName}`);
-
-    // Create user account with temporary password
-    const user = await User.create({
-      email: onboarding.candidateEmail,
-      password: tempPassword, // Will be hashed by pre-save hook
-      role: 'employee',
-      employeeId: employee._id,
-      isActive: true,
-      isFirstLogin: true,
-      mustChangePassword: true
-    });
-
-    console.log(`✅ User account created for: ${user.email}`);
-
-    // Send onboarding completion email with credentials
-    let emailSent = false;
-    let emailError = null;
-
-    try {
-      const emailResult = await sendOnboardingEmail({
-        employeeName: `${firstName} ${lastName}`,
-        employeeEmail: onboarding.candidateEmail,
-        employeeId: employee.employeeCode,
-        tempPassword: tempPassword,
-        companyName: companyName || 'Our Company',
-        joiningDate: onboarding.joiningDate,
-        designation: employee.designation,
-        department: onboarding.department.name
-      });
-
-      emailSent = emailResult.success;
-      console.log(`✅ Welcome email sent to: ${onboarding.candidateEmail}`);
-
-      // Send HR notification (non-blocking)
-      sendHRNotification({
-        employeeName: `${firstName} ${lastName}`,
-        employeeId: employee.employeeCode,
-        department: onboarding.department.name,
-        designation: employee.designation,
-        joiningDate: onboarding.joiningDate
-      }).catch(err => {
-        console.error('HR notification failed:', err.message);
-      });
-
-    } catch (error) {
-      console.error('❌ Failed to send welcome email:', error.message);
-      emailError = error.message;
-      // Don't fail the entire process if email fails
-    }
-
-    // Update onboarding record
-    onboarding.candidateId = employee._id;
-    onboarding.status = 'completed';
-    onboarding.completedAt = new Date();
-    onboarding.completedBy = hrUserId;
-    onboarding.actualJoiningDate = new Date(); // Assuming they join on completion
-
-    // Update SLA completion
-    onboarding.sla.actualCompletionDate = new Date();
-
-    // Add completion audit trail
-    onboarding.auditTrail.push({
-      action: 'onboarding_completed',
-      description: 'Onboarding process completed and employee account created',
-      performedBy: hrUserId,
-      previousStatus: 'ready_for_joining',
-      newStatus: 'completed',
-      metadata: { 
-        employeeId: employee._id,
-        employeeCode: employee.employeeCode,
-        emailSent
-      },
-      timestamp: new Date()
-    });
-
-    await onboarding.save();
-
-    // Update candidate status if linked
-    if (onboarding.applicationId) {
-      try {
-        await Candidate.findByIdAndUpdate(onboarding.applicationId, {
-          status: 'hired',
-          stage: 'joined',
-          $push: {
-            timeline: {
-              action: 'joined_company',
-              description: 'Successfully completed onboarding and joined as employee',
-              performedBy: hrUserId,
-              metadata: { 
-                employeeId: employee._id,
-                employeeCode: employee.employeeCode,
-                onboardingId: onboarding._id
-              }
-            }
-          }
-        });
-        console.log(`✅ Candidate status updated to 'joined'`);
-      } catch (error) {
-        console.error('Failed to update candidate status:', error.message);
+    // Use the employee creation service to complete onboarding
+    const result = await employeeCreationService.completeOnboardingAndCreateEmployee(
+      id,
+      tenantConnection,
+      {
+        // Any additional employee data from request
+        createdBy: req.user._id
       }
-    }
+    );
 
-    // Prepare response
-    const response = {
+    console.log(`✅ Onboarding completed successfully for ${result.employee.email}`);
+
+    return res.status(200).json({
       success: true,
-      message: 'Onboarding completed successfully! Employee account created and welcome email sent.',
+      message: 'Onboarding completed successfully. Employee account created.',
       data: {
-        onboarding: {
-          id: onboarding._id,
-          onboardingId: onboarding.onboardingId,
-          status: onboarding.status,
-          completedAt: onboarding.completedAt
-        },
-        employee: {
-          id: employee._id,
-          employeeCode: employee.employeeCode,
-          name: `${employee.firstName} ${employee.lastName}`,
-          email: employee.email,
-          department: onboarding.department.name,
-          designation: employee.designation,
-          joiningDate: employee.joiningDate
-        },
-        user: {
-          id: user._id,
-          email: user.email,
-          role: user.role,
-          mustChangePassword: user.mustChangePassword
-        },
-        credentials: {
-          sent: emailSent,
-          sentAt: emailSent ? new Date() : null
-        }
+        employeeCode: result.employeeCode,
+        employeeId: result.employee._id,
+        email: result.employee.email,
+        name: `${result.employee.firstName} ${result.employee.lastName}`,
+        joiningDate: result.employee.joiningDate,
+        designation: result.employee.designation,
+        tempPassword: result.tempPassword, // Only shown once for admin
+        onboardingId: result.onboarding._id,
+        completedAt: result.onboarding.completedAt
       }
-    };
-
-    // Add warning if email failed
-    if (!emailSent && emailError) {
-      response.warning = `Employee account created successfully, but failed to send welcome email: ${emailError}`;
-      response.data.tempPassword = tempPassword; // Include in response if email failed
-    }
-
-    res.status(201).json(response);
-
+    });
   } catch (error) {
     console.error('❌ Error completing onboarding:', error);
     
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to complete onboarding process',
       error: error.message

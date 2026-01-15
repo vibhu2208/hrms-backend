@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // Import controllers
 const employeeDashboardController = require('../controllers/employeeDashboardController');
@@ -14,8 +15,9 @@ const employeeRequestController = require('../controllers/employeeRequestControl
  * @module routes/employeeDashboard
  */
 
-// Apply authentication and authorization middleware to all routes
+// Apply authentication, authorization, and tenant middleware to all routes
 router.use(protect);
+router.use(tenantMiddleware);
 router.use(authorize('employee', 'hr', 'manager', 'company_admin'));
 
 // ==================== Dashboard Routes ====================
