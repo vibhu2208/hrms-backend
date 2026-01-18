@@ -19,8 +19,8 @@ const getCurrentEnvironment = () => {
 // Backend URLs for different environments
 const BACKEND_URLS = {
   [ENV.DEVELOPMENT]: `http://localhost:${process.env.PORT || 5001}`,
-  [ENV.PRODUCTION]: process.env.BACKEND_URL || 'https://hrms-backend-xbz8.onrender.com',
-  [ENV.STAGING]: process.env.BACKEND_URL || 'https://hrms-backend-xbz8.onrender.com',
+  [ENV.PRODUCTION]: process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5001}`,
+  [ENV.STAGING]: process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5001}`,
   [ENV.TEST]: `http://localhost:${process.env.PORT || 5001}`
 };
 
@@ -34,13 +34,20 @@ const FRONTEND_URLS = {
     'http://127.0.0.1:5174',
     'http://127.0.0.1:3000'
   ],
-  [ENV.PRODUCTION]: [
-    process.env.FRONTEND_URL || 'https://hrms-frontend-blush.vercel.app',
-    'https://hrms-frontend-blush.vercel.app'
-  ],
-  [ENV.STAGING]: [
-    process.env.FRONTEND_URL || 'https://hrms-frontend-blush.vercel.app'
-  ],
+  [ENV.PRODUCTION]: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+    : (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [
+        'http://localhost:5173',
+        'http://localhost',      // For Docker deployment on port 80
+        'http://localhost:80'    // For Docker deployment on port 80
+      ]),
+  [ENV.STAGING]: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+    : (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [
+        'http://localhost:5173',
+        'http://localhost',      // For Docker deployment on port 80
+        'http://localhost:80'    // For Docker deployment on port 80
+      ]),
   [ENV.TEST]: [
     'http://localhost:5173'
   ]
@@ -92,6 +99,11 @@ const config = {
       
       // Allow Vercel preview URLs (*.vercel.app)
       if (origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+      }
+
+      // Allow localhost origins (for Docker deployments)
+      if (origin.startsWith('http://localhost')) {
         return callback(null, true);
       }
       

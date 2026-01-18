@@ -103,6 +103,9 @@ function getTenantModels(tenantConnection) {
       let schema;
       if (originalModel instanceof mongoose.Schema) {
         schema = originalModel;
+      } else if (originalModel.jobPostingSchema) {
+        // Special case for JobPosting which exports schema separately
+        schema = originalModel.jobPostingSchema;
       } else if (originalModel.schema) {
         schema = originalModel.schema;
       } else if (originalModel.prototype && originalModel.prototype.schema) {
@@ -110,12 +113,20 @@ function getTenantModels(tenantConnection) {
       }
       
       if (schema) {
+        // Check if model already exists to avoid "Cannot overwrite model" error
+        if (tenantConnection.models[modelName]) {
+          return tenantConnection.models[modelName];
+        }
         return tenantConnection.model(modelName, schema);
       } else {
         console.warn(`⚠️ No schema found for ${modelName}, skipping tenant model creation`);
         return null;
       }
     } catch (error) {
+      // If model already exists, return it
+      if (error.message.includes('Cannot overwrite') && tenantConnection.models[modelName]) {
+        return tenantConnection.models[modelName];
+      }
       console.warn(`⚠️ Failed to create tenant model for ${modelName}:`, error.message);
       return null;
     }
