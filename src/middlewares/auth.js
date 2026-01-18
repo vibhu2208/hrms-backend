@@ -55,33 +55,66 @@ const protect = async (req, res, next) => {
     if (decoded.companyId) {
       // User is from a tenant database
       try {
-        console.log(`🔍 Auth middleware: Fetching user from tenant DB for company: ${decoded.companyId}`);
+        console.log(`🔍 Auth middleware: Fetching user from tenant DB for company: ${decoded.companyId}, userId: ${userId}`);
         tenantConnection = await getTenantConnection(decoded.companyId);
         const TenantUser = tenantConnection.model('User', TenantUserSchema);
         user = await TenantUser.findById(userId).select('-password');
         
-        console.log(`✅ User found in tenant DB: ${user?.email}`);
+        if (user) {
+          console.log(`✅ User found in tenant DB: ${user.email}`);
+        } else {
+          console.error(`❌ User not found in tenant DB. userId: ${userId}, companyId: ${decoded.companyId}`);
+          // Try to find user by email if available in token
+          if (decoded.email) {
+            console.log(`🔍 Trying to find user by email: ${decoded.email}`);
+            user = await TenantUser.findOne({ email: decoded.email }).select('-password');
+            if (user) {
+              console.log(`✅ User found by email: ${user.email}`);
+            }
+          }
+        }
         
         // Don't close the connection - it's cached and reused by getTenantConnection
       } catch (tenantError) {
-        console.error('Error accessing tenant database:', tenantError);
+        console.error('❌ Error accessing tenant database:', tenantError);
+        console.error('Error details:', {
+          message: tenantError.message,
+          stack: tenantError.stack,
+          companyId: decoded.companyId,
+          userId: userId
+        });
         return res.status(500).json({
           success: false,
-          message: 'Error accessing company database'
+          message: 'Error accessing company database',
+          error: tenantError.message
         });
       }
     } else {
       // User is from main database (super admin, etc.)
-      console.log('🔍 Auth middleware: Fetching super admin from global DB');
+      console.log('🔍 Auth middleware: Fetching super admin from global DB, userId:', userId);
       const SuperAdmin = await getSuperAdmin();
       user = await SuperAdmin.findById(userId).select('-password');
-      console.log(`✅ Super admin found: ${user?.email}`);
+      if (user) {
+        console.log(`✅ Super admin found: ${user.email}`);
+      } else {
+        console.error(`❌ Super admin not found. userId: ${userId}`);
+      }
     }
 
     if (!user) {
+      console.error('❌ User not found. Token details:', {
+        userId: userId,
+        companyId: decoded.companyId || 'none',
+        email: decoded.email || 'none',
+        tokenIssuedAt: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : 'unknown'
+      });
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found. Please login again.',
+        code: 'USER_NOT_FOUND',
+        details: decoded.companyId 
+          ? `User ${userId} not found in company ${decoded.companyId}` 
+          : `User ${userId} not found in system`
       });
     }
 

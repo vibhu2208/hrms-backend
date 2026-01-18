@@ -12,7 +12,9 @@ process.on('uncaughtException', (err) => {
   console.error('Stack:', err.stack);
   // Only exit for critical errors
   if (err.code === 'EADDRINUSE') {
-    console.error('Port already in use. Exiting...');
+    console.error(`\n⚠️  Port ${apiConfig.port} is already in use.`);
+    console.error(`Please ensure no other process is using port ${apiConfig.port}`);
+    console.error(`Or set a different PORT environment variable.\n`);
     process.exit(1);
   }
 });
@@ -106,7 +108,48 @@ app.get('/health', (req, res) => {
 });
 
 // Static file serving for uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const uploadsPath = path.join(__dirname, '../uploads');
+const resumesPath = path.join(uploadsPath, 'resumes');
+console.log('📁 Uploads directory path:', uploadsPath);
+console.log('📁 Resumes directory path:', resumesPath);
+
+// Serve resume files with proper headers and CORS
+app.use('/uploads/resumes', (req, res, next) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+}, express.static(resumesPath, {
+  setHeaders: (res, filePath) => {
+    // Set appropriate content type
+    if (filePath.endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline'); // Display in browser instead of download
+    }
+    // Cache control
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+  },
+  dotfiles: 'allow',
+  index: false
+}));
+
+// Serve other uploads
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (filePath.endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
+  },
+  dotfiles: 'allow',
+  index: false
+}));
 
 // Public API Routes (no authentication required)
 app.use('/api/public/jobs', publicJobRoutes);
@@ -168,7 +211,7 @@ app.use((req, res) => {
   });
 });
 
-app.listen(apiConfig.port, () => {
+app.listen(apiConfig.port, '0.0.0.0', () => {
   console.log(`🚀 Server running in ${apiConfig.env} mode on port ${apiConfig.port}`);
   console.log(`📡 API Base URL: ${apiConfig.backendUrl}`);
   console.log(`🌐 Allowed Origins: ${apiConfig.allowedOrigins.join(', ')}`);

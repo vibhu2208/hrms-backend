@@ -37,6 +37,65 @@ const { generatePassword, generateEmployeeId } = require('../utils/passwordGener
 const { sendOnboardingEmail, sendHRNotification, sendOfferEmail, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink } = require('../services/emailService');
 
 /**
+ * Helper function to update candidate's applicationHistory when onboarding is created/updated
+ */
+const updateCandidateApplicationHistory = async (candidate, onboarding, Candidate) => {
+  try {
+    if (!candidate || !onboarding) {
+      console.warn('⚠️ Cannot update applicationHistory: missing candidate or onboarding');
+      return;
+    }
+
+    // Reload candidate to ensure we have the latest data
+    const updatedCandidate = await Candidate.findById(candidate._id);
+    if (!updatedCandidate) {
+      console.warn('⚠️ Candidate not found for applicationHistory update');
+      return;
+    }
+
+    // Initialize applicationHistory if it doesn't exist
+    updatedCandidate.applicationHistory = updatedCandidate.applicationHistory || [];
+    
+    // Find the application entry for this job
+    const jobId = onboarding.jobId || candidate.appliedFor?._id || candidate.appliedFor;
+    const applicationEntry = updatedCandidate.applicationHistory.find(
+      entry => entry.jobId && entry.jobId.toString() === jobId?.toString()
+    );
+
+    if (applicationEntry) {
+      // Update existing entry
+      applicationEntry.onboardingRecord = onboarding._id;
+      applicationEntry.stage = 'sent-to-onboarding';
+      applicationEntry.status = 'active';
+      applicationEntry.outcome = 'onboarding';
+    } else {
+      // Add new entry
+      updatedCandidate.applicationHistory.push({
+        jobId: jobId,
+        jobTitle: onboarding.position || candidate.appliedFor?.title || 'Position',
+        appliedDate: candidate.createdAt || new Date(),
+        stage: 'sent-to-onboarding',
+        status: 'active',
+        outcome: 'onboarding',
+        onboardingRecord: onboarding._id
+      });
+    }
+
+    // Also update the stage
+    if (updatedCandidate.stage !== 'sent-to-onboarding') {
+      updatedCandidate.stage = 'sent-to-onboarding';
+    }
+
+    await updatedCandidate.save();
+    console.log('✅ Updated candidate applicationHistory');
+  } catch (error) {
+    console.error('⚠️ Error updating applicationHistory:', error.message);
+    console.error('Error stack:', error.stack);
+    // Don't throw - this is a non-critical update
+  }
+};
+
+/**
  * Send candidate to onboarding - Phase 2 Implementation
  * @route POST /api/applications/:id/send-to-onboarding
  * @access Private (HR/Admin only)
@@ -123,6 +182,9 @@ exports.sendToOnboarding = async (req, res) => {
       
       await existingOnboarding.save();
       onboarding = existingOnboarding;
+      
+      // Update candidate's applicationHistory
+      await updateCandidateApplicationHistory(candidate, onboarding, Candidate);
     } else {
       // Create new onboarding record
       const onboardingData = {
@@ -166,6 +228,9 @@ exports.sendToOnboarding = async (req, res) => {
 
       onboarding = await Onboarding.create(onboardingData);
       console.log(`✅ Created new onboarding record for ${candidate.email}: ${onboarding.onboardingId}`);
+      
+      // Update candidate's applicationHistory
+      await updateCandidateApplicationHistory(candidate, onboarding, Candidate);
     }
 
     // Auto-generate document upload token
