@@ -39,14 +39,16 @@ const FRONTEND_URLS = {
     : (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [
         'http://localhost:5173',
         'http://localhost',      // For Docker deployment on port 80
-        'http://localhost:80'    // For Docker deployment on port 80
+        'http://localhost:80',   // For Docker deployment on port 80
+        'http://65.0.107.177'    // EC2 instance IP
       ]),
   [ENV.STAGING]: process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
     : (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [
         'http://localhost:5173',
         'http://localhost',      // For Docker deployment on port 80
-        'http://localhost:80'    // For Docker deployment on port 80
+        'http://localhost:80',   // For Docker deployment on port 80
+        'http://65.0.107.177'    // EC2 instance IP
       ]),
   [ENV.TEST]: [
     'http://localhost:5173'
@@ -104,6 +106,14 @@ const config = {
 
       // Allow localhost origins (for Docker deployments)
       if (origin.startsWith('http://localhost')) {
+        return callback(null, true);
+      }
+      
+      // Allow IP address origins (for EC2 and other IP-based deployments)
+      // Matches http://xxx.xxx.xxx.xxx or http://xxx.xxx.xxx.xxx:port
+      const ipPattern = /^https?:\/\/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/;
+      if (ipPattern.test(origin)) {
+        console.log(`✅ Allowing IP-based origin: ${origin}`);
         return callback(null, true);
       }
       
