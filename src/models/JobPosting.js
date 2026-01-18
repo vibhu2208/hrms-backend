@@ -71,4 +71,7 @@ const jobPostingSchema = new mongoose.Schema({
   timestamps: true
 });
 
-module.exports = mongoose.model('JobPosting', jobPostingSchema);
+// Export both the schema and the model for flexibility
+const JobPostingModel = mongoose.model('JobPosting', jobPostingSchema);
+module.exports = JobPostingModel;
+module.exports.jobPostingSchema = jobPostingSchema;
