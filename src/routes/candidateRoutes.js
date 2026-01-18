@@ -6,6 +6,7 @@ const {
   createCandidate,
   updateCandidate,
   updateStage,
+  moveToStage,
   scheduleInterview,
   convertToEmployee,
   moveToOnboarding,
@@ -14,8 +15,17 @@ const {
   sendNotification,
   updateHRCall,
   getCandidateTimeline,
-  sendInterviewEmail
+  sendInterviewEmail,
+  checkDuplicate,
+  getCandidateHistory,
+  getCandidateByEmail
 } = require('../controllers/candidateController');
+const {
+  validateBulkUpload,
+  importBulkCandidates,
+  downloadTemplate
+} = require('../controllers/candidateBulkUploadController');
+const { uploadBulk } = require('../middlewares/fileUpload');
 const { sendToOnboarding } = require('../controllers/onboardingController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
@@ -28,7 +38,17 @@ router.route('/')
   .get(getCandidates)
   .post(createCandidate);
 
+// Check for duplicate candidate
+router.get('/check-duplicate', checkDuplicate);
+
+// Get candidate history
+router.get('/:id/history', getCandidateHistory);
+
+// Get all applications by email
+router.get('/by-email/:email', getCandidateByEmail);
+
 router.put('/:id/stage', updateStage);
+router.post('/:id/move-to-stage', moveToStage);
 router.post('/:id/interview', scheduleInterview);
 router.post('/:id/convert', convertToEmployee);
 router.post('/:id/onboarding', moveToOnboarding);
@@ -49,5 +69,10 @@ router.route('/:id')
   .get(getCandidate)
   .put(updateCandidate)
   .delete(deleteCandidate);
+
+// Bulk upload routes
+router.post('/bulk/validate', uploadBulk.single('file'), validateBulkUpload);
+router.post('/bulk/import', importBulkCandidates);
+router.get('/bulk/template', downloadTemplate);
 
 module.exports = router;

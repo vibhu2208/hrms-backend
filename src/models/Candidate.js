@@ -216,6 +216,69 @@ const candidateSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Duplicate Detection Fields
+  isDuplicate: {
+    type: Boolean,
+    default: false
+  },
+  duplicateOf: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Candidate'
+  },
+  // Flexible Workflow Fields
+  canSkipStages: {
+    type: Boolean,
+    default: true
+  },
+  workflowHistory: [{
+    fromStage: String,
+    toStage: String,
+    skippedStages: [String],
+    movedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    reason: String,
+    timestamp: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  // Cross-Application History Fields
+  masterCandidateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Candidate'
+  },
+  applicationHistory: [{
+    jobId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'JobPosting'
+    },
+    jobTitle: String,
+    appliedDate: {
+      type: Date,
+      default: Date.now
+    },
+    stage: String,
+    status: String,
+    outcome: {
+      type: String,
+      enum: ['hired', 'rejected', 'withdrawn', 'ongoing', null],
+      default: null
+    },
+    interviews: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Interview'
+    }],
+    onboardingRecord: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Onboarding'
+    },
+    offboardingRecord: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Offboarding'
+    }
+  }],
   // AI Analysis Fields
   aiAnalysis: {
     matchScore: {
@@ -261,12 +324,60 @@ const candidateSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate candidate code
+// Indexes for duplicate detection
+candidateSchema.index({ email: 1 });
+candidateSchema.index({ phone: 1 });
+candidateSchema.index({ email: 1, phone: 1 });
+candidateSchema.index({ isDuplicate: 1 });
+candidateSchema.index({ duplicateOf: 1 });
+
+// Helper function to normalize phone number
+const normalizePhone = (phone) => {
+  if (!phone) return null;
+  // Remove all non-digit characters
+  return phone.replace(/\D/g, '');
+};
+
+// Pre-save hook to check for duplicates (non-blocking, just flag)
 candidateSchema.pre('save', async function(next) {
+  // Generate candidate code if not present
   if (!this.candidateCode) {
     const count = await mongoose.model('Candidate').countDocuments();
     this.candidateCode = `CAN${String(count + 1).padStart(5, '0')}`;
   }
+
+  // Check for duplicates only if this is a new document and not already marked as duplicate
+  if (this.isNew && !this.isDuplicate) {
+    const Candidate = mongoose.model('Candidate');
+    const normalizedPhone = normalizePhone(this.phone);
+    const normalizedEmail = this.email?.toLowerCase().trim();
+
+    // Check for existing candidate by email OR phone
+    const duplicateQuery = {
+      _id: { $ne: this._id },
+      $or: []
+    };
+
+    if (normalizedEmail) {
+      duplicateQuery.$or.push({ email: normalizedEmail });
+    }
+
+    if (normalizedPhone) {
+      duplicateQuery.$or.push({ phone: normalizedPhone });
+      // Also check alternatePhone
+      duplicateQuery.$or.push({ alternatePhone: normalizedPhone });
+    }
+
+    if (duplicateQuery.$or.length > 0) {
+      const duplicate = await Candidate.findOne(duplicateQuery);
+      if (duplicate) {
+        // Flag as duplicate but don't block save (non-blocking)
+        this.isDuplicate = true;
+        this.duplicateOf = duplicate._id;
+      }
+    }
+  }
+
   next();
 });
 

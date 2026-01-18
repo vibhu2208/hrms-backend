@@ -436,45 +436,148 @@ exports.getProcessingStats = async (req, res) => {
 };
 
 /**
- * Search resumes in pool
+ * Search resumes in pool - AI-powered intelligent search
  */
 exports.searchResumes = async (req, res) => {
   try {
     const TenantResumePool = getTenantModel(req.tenant.connection, 'ResumePool');
+    const intelligentSearch = require('../services/intelligentSearchService').intelligentSearch;
     
     const {
       query,
       page = 1,
       limit = 20,
-      filters = {}
+      filters = {},
+      // CTC filters
+      currentCTCMin,
+      currentCTCMax,
+      expectedCTCMin,
+      expectedCTCMax,
+      // Geolocation filters
+      currentLocation,
+      preferredLocation
     } = req.body;
 
-    if (!query) {
-      return res.status(400).json({
-        success: false,
-        message: 'Search query is required'
+    // Build base query filters
+    const baseQuery = {
+      status: 'active',
+      processingStatus: 'completed', // Only search completed resumes
+      ...filters
+    };
+
+    // Add CTC filters
+    if (currentCTCMin !== undefined || currentCTCMax !== undefined) {
+      baseQuery.currentCTC = {};
+      if (currentCTCMin !== undefined) baseQuery.currentCTC.$gte = Number(currentCTCMin);
+      if (currentCTCMax !== undefined) baseQuery.currentCTC.$lte = Number(currentCTCMax);
+    }
+
+    if (expectedCTCMin !== undefined || expectedCTCMax !== undefined) {
+      baseQuery.expectedCTC = {};
+      if (expectedCTCMin !== undefined) baseQuery.expectedCTC.$gte = Number(expectedCTCMin);
+      if (expectedCTCMax !== undefined) baseQuery.expectedCTC.$lte = Number(expectedCTCMax);
+    }
+
+    // Add geolocation filters
+    if (currentLocation) {
+      if (Array.isArray(currentLocation)) {
+        baseQuery.currentLocation = { $in: currentLocation.map(loc => new RegExp(loc, 'i')) };
+      } else {
+        baseQuery.currentLocation = { $regex: currentLocation, $options: 'i' };
+      }
+    }
+
+    if (preferredLocation) {
+      if (Array.isArray(preferredLocation)) {
+        const locationQueries = preferredLocation.map(loc => ({
+          preferredLocation: { $regex: loc, $options: 'i' }
+        }));
+        if (baseQuery.$or) {
+          baseQuery.$or = [...baseQuery.$or, ...locationQueries];
+        } else {
+          baseQuery.$or = locationQueries;
+        }
+      } else {
+        baseQuery.preferredLocation = { $regex: preferredLocation, $options: 'i' };
+      }
+    }
+
+    // Fetch all matching resumes (we'll apply intelligent search on the full set)
+    // Limit to reasonable number to avoid memory issues (e.g., 500)
+    const maxFetch = Math.max(limit * 5, 500);
+    const allResumes = await TenantResumePool.find(baseQuery)
+      .limit(maxFetch)
+      .select('name email phone parsedData aiAnalysis tags createdAt currentCTC expectedCTC currentLocation preferredLocation rawText searchableText');
+
+    // Apply intelligent search if query provided
+    let searchResults;
+    if (query && query.trim()) {
+      searchResults = intelligentSearch(allResumes, query.trim());
+    } else {
+      // No query - return all with default scores, sorted by relevance (newest first)
+      searchResults = allResumes.map(resume => ({
+        candidateId: resume._id.toString(),
+        name: resume.name || 'Unnamed Candidate',
+        email: resume.email || '',
+        phone: resume.phone || '',
+        relevanceScore: 50,
+        matchedSkills: [],
+        experienceYears: resume.parsedData?.experience?.years || 0,
+        experienceMonths: resume.parsedData?.experience?.months || 0,
+        reason: 'No search query - showing all candidates',
+        resume: resume
+      }));
+      
+      // Sort by date if no query
+      searchResults.sort((a, b) => {
+        const dateA = new Date(a.resume.createdAt || 0).getTime();
+        const dateB = new Date(b.resume.createdAt || 0).getTime();
+        return dateB - dateA;
       });
     }
 
-    const resumes = await TenantResumePool.searchResumes(query, filters)
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .select('name email phone parsedData aiAnalysis tags createdAt');
+    // Apply pagination
+    const total = searchResults.length;
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedResults = searchResults.slice(startIndex, endIndex);
 
-    const total = await TenantResumePool.countDocuments({
-      $text: { $search: query },
-      status: 'active',
-      ...filters
-    });
+    // Format results - extract resume data and add scoring info
+    const formattedResults = paginatedResults.map(result => ({
+      _id: result.candidateId,
+      name: result.name,
+      email: result.email,
+      phone: result.phone,
+      parsedData: result.resume?.parsedData || result.resume?.parsedData || {},
+      aiAnalysis: result.resume?.aiAnalysis || null,
+      tags: result.resume?.tags || [],
+      createdAt: result.resume?.createdAt || new Date(),
+      currentCTC: result.resume?.currentCTC || null,
+      expectedCTC: result.resume?.expectedCTC || null,
+      currentLocation: result.resume?.currentLocation || null,
+      preferredLocation: result.resume?.preferredLocation || null,
+      // Add intelligent search metadata
+      relevanceScore: result.relevanceScore,
+      matchedSkills: result.matchedSkills,
+      matchReason: result.reason,
+      experienceYears: result.experienceYears,
+      experienceMonths: result.experienceMonths || 0
+    }));
 
     res.status(200).json({
       success: true,
-      data: resumes,
+      query: query || '',
+      data: formattedResults,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
         pages: Math.ceil(total / limit)
+      },
+      searchMetadata: {
+        totalResults: total,
+        searchType: query ? 'intelligent' : 'all',
+        hasResults: total > 0
       }
     });
 

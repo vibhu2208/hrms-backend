@@ -59,6 +59,26 @@ const resumePoolSchema = new mongoose.Schema({
     languages: [String]
   },
   
+  // CTC Information
+  currentCTC: {
+    type: Number,
+    default: null
+  },
+  expectedCTC: {
+    type: Number,
+    default: null
+  },
+  
+  // Location Information
+  currentLocation: {
+    type: String,
+    trim: true
+  },
+  preferredLocation: [{
+    type: String,
+    trim: true
+  }],
+  
   // Processing Status
   processingStatus: {
     type: String,
@@ -122,6 +142,10 @@ resumePoolSchema.index({ processingStatus: 1 });
 resumePoolSchema.index({ status: 1 });
 resumePoolSchema.index({ createdAt: -1 });
 resumePoolSchema.index({ tags: 1 });
+resumePoolSchema.index({ currentCTC: 1 });
+resumePoolSchema.index({ expectedCTC: 1 });
+resumePoolSchema.index({ currentLocation: 1 });
+resumePoolSchema.index({ preferredLocation: 1 });
 
 // Pre-save middleware to update searchableText
 resumePoolSchema.pre('save', function(next) {

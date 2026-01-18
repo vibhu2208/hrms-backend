@@ -2,8 +2,20 @@ const { getTenantModel } = require('../utils/tenantModels');
 
 exports.getJobPostings = async (req, res) => {
   try {
+    console.log('📋 Fetching job postings...');
+    console.log('   Tenant DB:', req.tenant?.dbName);
+    console.log('   Company ID:', req.tenant?.companyId);
+    
     // Get tenant-specific models
     const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+    
+    if (!JobPosting) {
+      console.error('❌ JobPosting model not found');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'JobPosting model not available' 
+      });
+    }
     
     const { status, department } = req.query;
     let query = {};
@@ -11,13 +23,32 @@ exports.getJobPostings = async (req, res) => {
     if (status) query.status = status;
     if (department) query.department = department;
 
+    console.log('   Query:', JSON.stringify(query));
+    
+    // First check total count
+    const totalCount = await JobPosting.countDocuments({});
+    console.log(`   Total jobs in DB: ${totalCount}`);
+    
     const jobs = await JobPosting.find(query)
       .populate('department', 'name code')
       .populate('postedBy', 'firstName lastName')
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ success: true, count: jobs.length, data: jobs });
+    console.log(`   Found ${jobs.length} jobs matching query`);
+    
+    // Add cache-control headers to prevent caching
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    res.status(200).json({ 
+      success: true, 
+      count: jobs.length, 
+      data: jobs,
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
+    console.error('❌ Error fetching job postings:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -55,8 +55,37 @@ const upload = multer({
   storage: storage,
   fileFilter: resumeFileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: 10 * 1024 * 1024, // 10MB limit (increased for bulk uploads)
     files: 1 // Only one file at a time
+  }
+});
+
+// File filter for bulk uploads (Excel/CSV)
+const bulkUploadFileFilter = (req, file, cb) => {
+  const allowedMimes = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+    'application/vnd.ms-excel', // .xls
+    'text/csv', // .csv
+    'application/csv' // .csv
+  ];
+  
+  const allowedExts = ['.xlsx', '.xls', '.csv'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  
+  if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only Excel (.xlsx, .xls) and CSV files are allowed'), false);
+  }
+};
+
+// Multer instance for bulk uploads
+const uploadBulk = multer({
+  storage: storage,
+  fileFilter: bulkUploadFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 1
   }
 });
 
@@ -111,7 +140,9 @@ const handleUploadError = (error, req, res, next) => {
 
 // Helper function to get file URL
 const getFileUrl = (filename, type = 'resume') => {
-  const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+  // Use apiConfig to get the correct backend URL and port
+  const apiConfig = require('../config/api.config');
+  const baseUrl = process.env.BACKEND_URL || apiConfig.backendUrl || `http://localhost:${apiConfig.port || 5001}`;
   return `${baseUrl}/uploads/${type}s/${filename}`;
 };
 
@@ -134,5 +165,7 @@ module.exports = {
   handleUploadError,
   getFileUrl,
   deleteFile,
-  resumesDir
+  resumesDir,
+  upload,
+  uploadBulk
 };

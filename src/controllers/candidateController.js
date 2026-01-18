@@ -12,28 +12,112 @@ const onboardingAutomationService = require('../services/onboardingAutomationSer
 exports.getCandidates = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const intelligentSearch = require('../services/intelligentSearchService').intelligentSearch;
     const { stage, status, source, search } = req.query;
     let query = {};
 
     if (stage) query.stage = stage;
     if (status) query.status = status;
     if (source) query.source = source;
-    if (search) {
-      query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { candidateCode: { $regex: search, $options: 'i' } }
-      ];
+
+    // If no search query, use basic filters
+    if (!search || !search.trim()) {
+      const candidates = await Candidate.find(query)
+        .populate('appliedFor', 'title department')
+        .populate('referredBy', 'firstName lastName')
+        .sort({ createdAt: -1 });
+
+      return res.status(200).json({ success: true, count: candidates.length, data: candidates });
     }
 
-    const candidates = await Candidate.find(query)
+    // With search query - fetch all candidates and apply intelligent search
+    // First, do a basic filter without search
+    const allCandidates = await Candidate.find(query)
       .populate('appliedFor', 'title department')
       .populate('referredBy', 'firstName lastName')
-      .sort({ createdAt: -1 });
+      .select('firstName lastName email phone skills experience currentDesignation currentCompany appliedFor candidateCode createdAt');
 
-    res.status(200).json({ success: true, count: candidates.length, data: candidates });
+    // Convert candidates to format expected by intelligentSearch
+    const candidateResumes = allCandidates.map(candidate => ({
+      _id: candidate._id,
+      name: `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Unnamed Candidate',
+      email: candidate.email || '',
+      phone: candidate.phone || '',
+      parsedData: {
+        skills: candidate.skills || [],
+        experience: {
+          years: candidate.experience?.years || 0,
+          months: candidate.experience?.months || 0
+        },
+        currentDesignation: candidate.currentDesignation || '',
+        currentCompany: candidate.currentCompany || '',
+        previousRoles: []
+      },
+      searchableText: [
+        candidate.firstName || '',
+        candidate.lastName || '',
+        candidate.email || '',
+        (candidate.skills || []).join(' '),
+        candidate.currentDesignation || '',
+        candidate.currentCompany || ''
+      ].join(' ').toLowerCase(),
+      rawText: '',
+      createdAt: candidate.createdAt || new Date(),
+      candidate: candidate // Keep original for reference
+    }));
+
+    // Apply intelligent search
+    const searchResults = intelligentSearch(candidateResumes, search.trim());
+
+    // Convert back to candidate format with search metadata
+    const resultsWithMetadata = searchResults.map(result => {
+      const originalCandidate = result.resume?.candidate || result.candidate;
+      if (!originalCandidate) {
+        // Fallback if candidate not found
+        return {
+          _id: result.candidateId,
+          firstName: result.name.split(' ')[0] || '',
+          lastName: result.name.split(' ').slice(1).join(' ') || '',
+          email: result.email,
+          phone: result.phone,
+          skills: result.matchedSkills,
+          experience: {
+            years: result.experienceYears || 0,
+            months: result.experienceMonths || 0
+          },
+          relevanceScore: result.relevanceScore,
+          matchedSkills: result.matchedSkills,
+          matchReason: result.reason
+        };
+      }
+
+      // Re-populate if needed (original candidate may not have populated fields)
+      const candidateData = originalCandidate.toObject ? originalCandidate.toObject() : originalCandidate;
+      
+      return {
+        ...candidateData,
+        // Add intelligent search metadata
+        relevanceScore: result.relevanceScore,
+        matchedSkills: result.matchedSkills,
+        matchReason: result.reason
+      };
+    });
+
+    // Sort by relevance score (already sorted by intelligentSearch, but ensure it)
+    resultsWithMetadata.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+
+    res.status(200).json({ 
+      success: true, 
+      count: resultsWithMetadata.length, 
+      data: resultsWithMetadata,
+      searchMetadata: {
+        query: search,
+        searchType: 'intelligent',
+        totalResults: resultsWithMetadata.length
+      }
+    });
   } catch (error) {
+    console.error('Error in getCandidates:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -56,10 +140,126 @@ exports.getCandidate = async (req, res) => {
   }
 };
 
+// Helper function to normalize phone number
+const normalizePhone = (phone) => {
+  if (!phone) return null;
+  return phone.replace(/\D/g, '');
+};
+
 exports.createCandidate = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const { email, phone, forceCreate } = req.body;
+
+    // Check for duplicate candidate (non-blocking, but warn)
+    let existingCandidate = null;
+    if (email || phone) {
+      const normalizedEmail = email?.toLowerCase().trim();
+      const normalizedPhone = normalizePhone(phone);
+      
+      const duplicateQuery = {
+        $or: []
+      };
+
+      if (normalizedEmail) {
+        duplicateQuery.$or.push({ email: normalizedEmail });
+      }
+
+      if (normalizedPhone) {
+        duplicateQuery.$or.push({ phone: normalizedPhone });
+        duplicateQuery.$or.push({ alternatePhone: normalizedPhone });
+      }
+
+      if (duplicateQuery.$or.length > 0) {
+        existingCandidate = await Candidate.findOne(duplicateQuery)
+          .select('candidateCode firstName lastName email phone appliedFor stage status timeline')
+          .populate('appliedFor', 'title');
+      }
+    }
+
+    // If duplicate found and not forcing creation, return warning
+    if (existingCandidate && !forceCreate) {
+      return res.status(200).json({
+        success: true,
+        message: 'Potential duplicate candidate found',
+        isDuplicate: true,
+        existingCandidate: {
+          id: existingCandidate._id,
+          candidateCode: existingCandidate.candidateCode,
+          name: `${existingCandidate.firstName} ${existingCandidate.lastName}`,
+          email: existingCandidate.email,
+          phone: existingCandidate.phone,
+          currentJob: existingCandidate.appliedFor?.title,
+          stage: existingCandidate.stage,
+          status: existingCandidate.status,
+          applicationCount: existingCandidate.timeline?.length || 0
+        },
+        data: null
+      });
+    }
+
+    // Create candidate (will be flagged as duplicate by pre-save hook if needed)
     const candidate = await Candidate.create(req.body);
+    
+    // If existing candidate found, link them and update application history
+    if (existingCandidate) {
+      // Determine master candidate (the first one created)
+      const masterId = existingCandidate.masterCandidateId || existingCandidate._id;
+      candidate.masterCandidateId = masterId;
+      
+      // If existing candidate is not the master, update it too
+      if (existingCandidate.masterCandidateId) {
+        const masterCandidate = await Candidate.findById(existingCandidate.masterCandidateId);
+        if (masterCandidate) {
+          masterCandidate.applicationHistory = masterCandidate.applicationHistory || [];
+          masterCandidate.applicationHistory.push({
+            jobId: candidate.appliedFor,
+            jobTitle: candidate.appliedFor?.title || req.body.jobTitle,
+            appliedDate: candidate.createdAt,
+            stage: candidate.stage,
+            status: candidate.status,
+            outcome: null
+          });
+          await masterCandidate.save();
+        }
+      } else {
+        // Existing candidate is the master, update its history
+        existingCandidate.applicationHistory = existingCandidate.applicationHistory || [];
+        existingCandidate.applicationHistory.push({
+          jobId: candidate.appliedFor,
+          jobTitle: candidate.appliedFor?.title || req.body.jobTitle,
+          appliedDate: candidate.createdAt,
+          stage: candidate.stage,
+          status: candidate.status,
+          outcome: null
+        });
+        await existingCandidate.save();
+      }
+      
+      // Also add to new candidate's history
+      candidate.applicationHistory = candidate.applicationHistory || [];
+      candidate.applicationHistory.push({
+        jobId: candidate.appliedFor,
+        jobTitle: candidate.appliedFor?.title || req.body.jobTitle,
+        appliedDate: candidate.createdAt,
+        stage: candidate.stage,
+        status: candidate.status,
+        outcome: null
+      });
+      await candidate.save();
+    } else {
+      // First application - this candidate is the master
+      candidate.applicationHistory = candidate.applicationHistory || [];
+      candidate.applicationHistory.push({
+        jobId: candidate.appliedFor,
+        jobTitle: candidate.appliedFor?.title || req.body.jobTitle,
+        appliedDate: candidate.createdAt,
+        stage: candidate.stage,
+        status: candidate.status,
+        outcome: null
+      });
+      await candidate.save();
+    }
     
     // Send application received email
     if (candidate.email) {
@@ -73,7 +273,13 @@ exports.createCandidate = async (req, res) => {
       }).catch(err => console.error('Failed to send application email:', err.message));
     }
     
-    res.status(201).json({ success: true, message: 'Candidate created successfully', data: candidate });
+    res.status(201).json({
+      success: true,
+      message: existingCandidate ? 'Candidate created (linked to existing profile)' : 'Candidate created successfully',
+      isDuplicate: candidate.isDuplicate || false,
+      linkedToMaster: existingCandidate ? true : false,
+      data: candidate
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -96,7 +302,7 @@ exports.updateStage = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
-    const { stage } = req.body;
+    const { stage, skipValidation = false, reason } = req.body;
     const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
 
     if (!candidate) {
@@ -104,7 +310,34 @@ exports.updateStage = async (req, res) => {
     }
 
     const previousStage = candidate.stage;
+    
+    // Track workflow history
+    const workflowEntry = {
+      fromStage: previousStage,
+      toStage: stage,
+      skippedStages: [],
+      movedBy: req.user?._id || req.user?.id,
+      reason: reason || `Stage changed from ${previousStage} to ${stage}`,
+      timestamp: new Date()
+    };
+
+    // If skipping stages, identify which stages were skipped
+    const allStages = ['applied', 'screening', 'shortlisted', 'interview-scheduled', 
+                       'interview-completed', 'offer-extended', 'offer-accepted', 
+                       'offer-rejected', 'sent-to-onboarding', 'joined', 'rejected'];
+    const fromIndex = allStages.indexOf(previousStage);
+    const toIndex = allStages.indexOf(stage);
+    
+    if (fromIndex >= 0 && toIndex >= 0 && Math.abs(toIndex - fromIndex) > 1) {
+      // Stages were skipped
+      const start = Math.min(fromIndex, toIndex);
+      const end = Math.max(fromIndex, toIndex);
+      workflowEntry.skippedStages = allStages.slice(start + 1, end);
+    }
+
     candidate.stage = stage;
+    candidate.workflowHistory = candidate.workflowHistory || [];
+    candidate.workflowHistory.push(workflowEntry);
     await candidate.save();
 
     // Send emails based on stage change
@@ -170,6 +403,134 @@ exports.updateStage = async (req, res) => {
     res.status(200).json({ success: true, message: 'Stage updated successfully', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Move candidate to any stage (flexible workflow)
+exports.moveToStage = async (req, res) => {
+  try {
+    console.log('📋 moveToStage called');
+    console.log('   Candidate ID:', req.params.id);
+    console.log('   Request body:', req.body);
+    console.log('   Tenant DB:', req.tenant?.dbName);
+    
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    
+    if (!Candidate) {
+      console.error('❌ Candidate model not found');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Candidate model not available' 
+      });
+    }
+    
+    const { targetStage, skipIntermediate = true, reason, directToOnboarding = false } = req.body;
+    
+    if (!targetStage) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'targetStage is required' 
+      });
+    }
+    
+    const candidate = await Candidate.findById(req.params.id).populate('appliedFor');
+
+    if (!candidate) {
+      console.error('❌ Candidate not found:', req.params.id);
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+    
+    console.log('✅ Candidate found:', candidate.candidateCode);
+
+    const previousStage = candidate.stage;
+    let finalStage = targetStage;
+
+    // If direct to onboarding, handle specially
+    if (directToOnboarding || targetStage === 'sent-to-onboarding') {
+      console.log('🔄 Handling onboarding...');
+      
+      if (!Onboarding) {
+        console.warn('⚠️ Onboarding model not available, skipping onboarding creation');
+      } else {
+        try {
+          // Check if onboarding already exists
+          const existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+          
+          if (!existingOnboarding) {
+            console.log('📝 Creating onboarding record...');
+            // Create onboarding record
+            const onboardingData = {
+              candidateName: `${candidate.firstName} ${candidate.lastName}`,
+              candidateEmail: candidate.email,
+              candidatePhone: candidate.phone || '',
+              position: candidate.appliedFor?.title || candidate.currentDesignation || 'Position',
+              department: candidate.appliedFor?.department || null,
+              joiningDate: candidate.offerDetails?.joiningDate || null,
+              stages: ['preboarding'],
+              currentStage: 'preboarding',
+              status: 'preboarding',
+              notes: reason || 'Directly moved to onboarding',
+              applicationId: candidate._id,
+              jobId: candidate.appliedFor?._id || null
+            };
+            
+            await Onboarding.create(onboardingData);
+            console.log('✅ Onboarding record created');
+          } else {
+            console.log('ℹ️ Onboarding record already exists');
+          }
+        } catch (onboardingError) {
+          console.error('⚠️ Error creating onboarding record:', onboardingError.message);
+          // Don't fail the whole operation if onboarding creation fails
+        }
+      }
+
+      finalStage = 'sent-to-onboarding';
+    }
+
+    candidate.stage = finalStage;
+
+    // Track workflow history
+    const workflowEntry = {
+      fromStage: previousStage,
+      toStage: finalStage,
+      skippedStages: skipIntermediate ? ['intermediate stages skipped'] : [],
+      movedBy: req.user?._id || req.user?.id,
+      reason: reason || `Directly moved to ${finalStage}`,
+      timestamp: new Date()
+    };
+
+    candidate.workflowHistory = candidate.workflowHistory || [];
+    candidate.workflowHistory.push(workflowEntry);
+
+    // Update timeline
+    candidate.timeline = candidate.timeline || [];
+    candidate.timeline.push({
+      action: 'Stage Changed',
+      description: `Moved directly to ${finalStage}${skipIntermediate ? ' (stages skipped)' : ''}`,
+      performedBy: req.user?._id || req.user?.id,
+      timestamp: new Date()
+    });
+    
+    await candidate.save();
+    
+    console.log('✅ Candidate stage updated successfully');
+
+    res.status(200).json({
+      success: true,
+      message: `Candidate moved to ${finalStage} successfully`,
+      data: candidate
+    });
+  } catch (error) {
+    console.error('❌ Error in moveToStage:', error);
+    console.error('   Error message:', error.message);
+    console.error('   Error stack:', error.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to move candidate to stage',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
@@ -998,6 +1359,218 @@ exports.getCandidateTimeline = async (req, res) => {
         hrCall: candidate.hrCall,
         stage: candidate.stage,
         status: candidate.status
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Check for duplicate candidate
+exports.checkDuplicate = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const { email, phone } = req.query;
+
+    if (!email && !phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email or phone is required'
+      });
+    }
+
+    const normalizedEmail = email?.toLowerCase().trim();
+    const normalizedPhone = normalizePhone(phone);
+    
+    const duplicateQuery = {
+      $or: []
+    };
+
+    if (normalizedEmail) {
+      duplicateQuery.$or.push({ email: normalizedEmail });
+    }
+
+    if (normalizedPhone) {
+      duplicateQuery.$or.push({ phone: normalizedPhone });
+      duplicateQuery.$or.push({ alternatePhone: normalizedPhone });
+    }
+
+    const existingCandidate = await Candidate.findOne(duplicateQuery)
+      .select('candidateCode firstName lastName email phone appliedFor stage status timeline createdAt')
+      .populate('appliedFor', 'title')
+      .sort({ createdAt: -1 }); // Get most recent
+
+    if (existingCandidate) {
+      return res.status(200).json({
+        success: true,
+        isDuplicate: true,
+        data: {
+          id: existingCandidate._id,
+          candidateCode: existingCandidate.candidateCode,
+          name: `${existingCandidate.firstName} ${existingCandidate.lastName}`,
+          email: existingCandidate.email,
+          phone: existingCandidate.phone,
+          currentJob: existingCandidate.appliedFor?.title,
+          stage: existingCandidate.stage,
+          status: existingCandidate.status,
+          applicationCount: existingCandidate.timeline?.length || 0,
+          firstApplied: existingCandidate.createdAt
+        }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      isDuplicate: false,
+      data: null
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get complete candidate history across all applications
+exports.getCandidateHistory = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
+    
+    const candidate = await Candidate.findById(req.params.id)
+      .populate('appliedFor', 'title department')
+      .populate('applicationHistory.jobId', 'title department')
+      .populate('applicationHistory.onboardingRecord')
+      .populate('applicationHistory.offboardingRecord')
+      .populate('interviews.interviewer', 'firstName lastName')
+      .populate('masterCandidateId');
+
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    // Get master candidate if this is not the master
+    let masterCandidate = candidate;
+    if (candidate.masterCandidateId) {
+      masterCandidate = await Candidate.findById(candidate.masterCandidateId)
+        .populate('appliedFor', 'title department')
+        .populate('applicationHistory.jobId', 'title department')
+        .populate('interviews.interviewer', 'firstName lastName');
+    }
+
+    // Get all linked candidates (all applications)
+    const allCandidates = await Candidate.find({
+      $or: [
+        { _id: masterCandidate._id },
+        { masterCandidateId: masterCandidate._id }
+      ]
+    })
+      .populate('appliedFor', 'title department')
+      .populate('interviews.interviewer', 'firstName lastName')
+      .sort({ createdAt: 1 });
+
+    // Build comprehensive history
+    const history = {
+      candidate: {
+        id: masterCandidate._id,
+        candidateCode: masterCandidate.candidateCode,
+        name: `${masterCandidate.firstName} ${masterCandidate.lastName}`,
+        email: masterCandidate.email,
+        phone: masterCandidate.phone
+      },
+      applications: allCandidates.map(c => ({
+        id: c._id,
+        jobId: c.appliedFor?._id,
+        jobTitle: c.appliedFor?.title,
+        appliedDate: c.createdAt,
+        stage: c.stage,
+        status: c.status,
+        interviews: c.interviews || [],
+        timeline: c.timeline || []
+      })),
+      applicationHistory: masterCandidate.applicationHistory || [],
+      totalApplications: allCandidates.length,
+      onboardingRecords: [],
+      offboardingRecords: []
+    };
+
+    // Get onboarding records
+    const onboardingRecords = await Onboarding.find({
+      candidateEmail: masterCandidate.email
+    }).sort({ createdAt: -1 });
+    history.onboardingRecords = onboardingRecords;
+
+    // Get offboarding records (if employee exists)
+    // Note: This would require Employee model lookup first
+    // For now, we'll include what we can from applicationHistory
+
+    res.status(200).json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get all applications for a candidate by email
+exports.getCandidateByEmail = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const { email } = req.params;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find master candidate (first application)
+    const masterCandidate = await Candidate.findOne({ email: normalizedEmail })
+      .sort({ createdAt: 1 })
+      .populate('appliedFor', 'title department');
+
+    if (!masterCandidate) {
+      return res.status(404).json({
+        success: false,
+        message: 'No candidate found with this email'
+      });
+    }
+
+    // Get all applications
+    const allApplications = await Candidate.find({
+      $or: [
+        { _id: masterCandidate._id },
+        { masterCandidateId: masterCandidate._id },
+        { email: normalizedEmail }
+      ]
+    })
+      .populate('appliedFor', 'title department')
+      .populate('interviews.interviewer', 'firstName lastName')
+      .sort({ createdAt: 1 });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        masterCandidate: {
+          id: masterCandidate._id,
+          candidateCode: masterCandidate.candidateCode,
+          name: `${masterCandidate.firstName} ${masterCandidate.lastName}`,
+          email: masterCandidate.email,
+          phone: masterCandidate.phone
+        },
+        applications: allApplications.map(c => ({
+          id: c._id,
+          candidateCode: c.candidateCode,
+          jobTitle: c.appliedFor?.title,
+          appliedDate: c.createdAt,
+          stage: c.stage,
+          status: c.status,
+          interviews: c.interviews || []
+        })),
+        totalApplications: allApplications.length
       }
     });
   } catch (error) {
