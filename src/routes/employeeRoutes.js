@@ -26,8 +26,8 @@ router.use(protect);
 router.use(tenantMiddleware);
 
 // Bulk upload routes
-router.post('/bulk/validate', authorize('admin', 'hr'), validateBulkEmployees);
-router.post('/bulk/create', authorize('admin', 'hr'), bulkCreateEmployees);
+router.post('/bulk/validate', authorize('admin', 'hr', 'company_admin'), validateBulkEmployees);
+router.post('/bulk/create', authorize('admin', 'hr', 'company_admin'), bulkCreateEmployees);
 router.get('/bulk/template', getTemplate);
 
 // Google Sheets integration routes

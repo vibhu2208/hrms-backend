@@ -1,5 +1,5 @@
 const { getTenantModel } = require('../utils/tenantModels');
-const { 
+const {
   sendInterviewNotification,
   sendApplicationReceivedEmail,
   sendShortlistedEmail,
@@ -8,6 +8,7 @@ const {
   sendRejectionEmail
 } = require('../services/emailService');
 const onboardingAutomationService = require('../services/onboardingAutomationService');
+const reductoService = require('../services/reductoService');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -198,8 +199,68 @@ exports.createCandidate = async (req, res) => {
       });
     }
 
-    // Create candidate (will be flagged as duplicate by pre-save hook if needed)
-    const candidate = await Candidate.create(req.body);
+    // Generate candidate code before creating (to avoid pre-save hook issues)
+    if (!req.body.candidateCode) {
+      try {
+        console.log('Generating candidate code for new candidate...');
+
+        // Find the highest existing candidate code and increment it
+        const lastCandidate = await Candidate.findOne({})
+          .sort({ candidateCode: -1 })
+          .select('candidateCode')
+          .lean();
+
+        let nextNumber = 1; // Default for first candidate
+
+        if (lastCandidate && lastCandidate.candidateCode) {
+          // Extract number from last code (e.g., "CAN00008" -> 8)
+          const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
+          nextNumber = lastNumber + 1;
+        }
+
+        // Generate unique code with retry logic for race conditions
+        let candidateCode;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        while (attempts < maxAttempts) {
+          candidateCode = `CAN${String(nextNumber + attempts).padStart(5, '0')}`;
+
+          // Check if this code already exists
+          const existing = await Candidate.findOne({ candidateCode });
+          if (!existing) {
+            // Code is unique, use it
+            break;
+          }
+
+          attempts++;
+        }
+
+        // If we couldn't find a unique code after max attempts, use timestamp fallback
+        if (attempts >= maxAttempts) {
+          candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+        }
+
+        req.body.candidateCode = candidateCode;
+        console.log(`Generated candidate code: ${candidateCode} for ${req.body.email || 'new candidate'}`);
+
+      } catch (codeGenError) {
+        console.error('Error generating candidate code:', codeGenError);
+        // Fallback to timestamp-based code
+        req.body.candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+      }
+    }
+
+    // Create candidate
+    console.log('Creating candidate with data:', req.body);
+    try {
+      const candidate = await Candidate.create(req.body);
+      console.log('Candidate created successfully:', candidate._id, candidate.candidateCode);
+    } catch (createError) {
+      console.error('Candidate creation failed:', createError.message);
+      console.error('Validation errors:', createError.errors);
+      throw createError;
+    }
     
     // If existing candidate found, link them and update application history
     if (existingCandidate) {
@@ -409,11 +470,6 @@ exports.updateStage = async (req, res) => {
 // Move candidate to any stage (flexible workflow)
 exports.moveToStage = async (req, res) => {
   try {
-    console.log('📋 moveToStage called');
-    console.log('   Candidate ID:', req.params.id);
-    console.log('   Request body:', req.body);
-    console.log('   Tenant DB:', req.tenant?.dbName);
-    
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     
@@ -425,12 +481,12 @@ exports.moveToStage = async (req, res) => {
       });
     }
     
-    const { targetStage, skipIntermediate = true, reason, directToOnboarding = false } = req.body;
-    
-    if (!targetStage) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'targetStage is required' 
+    const { targetStage, skipIntermediate = true, reason, directToOnboarding = false, skippedStage } = req.body;
+
+    if (!targetStage && !directToOnboarding) {
+      return res.status(400).json({
+        success: false,
+        message: 'targetStage is required'
       });
     }
     
@@ -506,11 +562,21 @@ exports.moveToStage = async (req, res) => {
 
     // Update timeline
     candidate.timeline = candidate.timeline || [];
+    let description = `Moved directly to ${finalStage}`;
+    if (skipIntermediate) {
+      if (skippedStage) {
+        description += ` (skipped ${skippedStage})`;
+      } else {
+        description += ' (stages skipped)';
+      }
+    }
+
     candidate.timeline.push({
       action: 'Stage Changed',
-      description: `Moved directly to ${finalStage}${skipIntermediate ? ' (stages skipped)' : ''}`,
+      description: description,
       performedBy: req.user?._id || req.user?.id,
-      timestamp: new Date()
+      timestamp: new Date(),
+      ...(skippedStage && { skippedStage: skippedStage })
     });
     
     await candidate.save();
@@ -1049,24 +1115,35 @@ exports.updateHRCall = async (req, res) => {
     const { id } = req.params;
     const { status, scheduledDate, completedDate, summary, decision } = req.body;
 
-    console.log(`📞 updateHRCall called for candidate ${id}`);
-    console.log(`   Status: ${status}, Decision: ${decision}`);
-    console.log(`   Request body:`, req.body);
 
     const candidate = await Candidate.findById(id).populate('appliedFor', 'title department');
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
+    // Check if interview scheduling was skipped
+    const interviewSchedulingSkipped = candidate.timeline?.some(activity => {
+      const action = (activity.action || '').toLowerCase();
+      const description = (activity.description || '').toLowerCase();
+      const reason = (activity.reason || '').toLowerCase();
+
+      const hasSkipIndicator = action.includes('skip') || description.includes('skip') || reason.includes('skip');
+      const hasStageMatch = description.includes('interview') || description.includes('scheduling');
+
+      return hasSkipIndicator && hasStageMatch;
+    });
+
     // Validation: At least one interview must be completed with feedback before HR call
+    // (unless interview scheduling was skipped)
     const hasCompletedInterview = candidate.interviews?.some(
       interview => interview.status === 'completed' && interview.feedback && interview.rating
     );
-    
-    if (!hasCompletedInterview && status !== 'pending') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'At least one interview must be completed with feedback before conducting HR call' 
+
+
+    if (!hasCompletedInterview && !interviewSchedulingSkipped && status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one interview must be completed with feedback before conducting HR call, or skip interview scheduling first'
       });
     }
 
@@ -1086,8 +1163,14 @@ exports.updateHRCall = async (req, res) => {
     let timelineDesc = 'HR call updated';
     if (status === 'completed') {
       timelineDesc = `HR call completed - Decision: ${decision || 'Pending'}`;
-    } else if (status === 'scheduled') {
-      timelineDesc = `HR call scheduled for ${new Date(scheduledDate).toLocaleDateString()}`;
+    } else if (status === 'scheduled' && scheduledDate) {
+      try {
+        const scheduleDate = new Date(scheduledDate);
+        timelineDesc = `HR call scheduled for ${scheduleDate.toLocaleDateString()}`;
+      } catch (dateError) {
+        console.warn('Invalid scheduledDate provided:', scheduledDate);
+        timelineDesc = 'HR call scheduled';
+      }
     }
 
     candidate.timeline.push({
@@ -1114,6 +1197,7 @@ exports.updateHRCall = async (req, res) => {
 
     // Automatically move to onboarding when HR call is completed with a final positive decision
     if (normalizedStatus === 'completed' && onboardingDecisionTriggers.includes(normalizedDecision)) {
+      try {
       console.log(`🎯 HR call completed with 'selected' decision for ${candidateName}`);
       console.log(`   Candidate ID: ${candidate._id}`);
       console.log(`   Applied For: ${candidate.appliedFor?._id}`);
@@ -1287,7 +1371,13 @@ exports.updateHRCall = async (req, res) => {
           // Don't fail the HR call update if onboarding creation fails
         }
       }
-    } else if (normalizedDecision === 'move-to-onboarding') {
+      } catch (autoOnboardingError) {
+        console.error('❌ Error in automatic onboarding process:', autoOnboardingError.message);
+        // Continue with HR call update even if auto-onboarding fails
+      }
+    }
+
+    if (normalizedDecision === 'move-to-onboarding') {
       // Legacy support for manual move-to-onboarding decision
       candidate.stage = 'sent-to-onboarding';
       
@@ -1332,9 +1422,37 @@ exports.updateHRCall = async (req, res) => {
     }
 
     await candidate.save();
-    res.status(200).json({ success: true, message: 'HR call updated successfully', data: candidate });
+
+    res.status(200).json({
+      success: true,
+      message: 'HR call updated successfully',
+      data: {
+        stage: candidate.stage,
+        hrCall: candidate.hrCall,
+        timeline: candidate.timeline.slice(-1) // Return the latest timeline entry
+      }
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('❌ Error in updateHRCall:', error);
+    console.error('   Error message:', error.message);
+    console.error('   Error stack:', error.stack);
+    console.error('   Request body that caused error:', req.body);
+
+    // Provide more specific error messages
+    let errorMessage = 'Failed to update HR call';
+    if (error.message?.includes('email')) {
+      errorMessage = 'HR call updated but email sending failed';
+    } else if (error.message?.includes('validation')) {
+      errorMessage = 'Invalid data provided for HR call update';
+    } else if (error.message?.includes('onboarding')) {
+      errorMessage = 'HR call updated but onboarding creation failed';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
@@ -1695,6 +1813,97 @@ exports.sendInterviewEmail = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to process interview email request',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Upload and parse resume using Reducto API
+ * @route POST /api/candidates/upload-resume
+ */
+exports.uploadResume = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Resume file is required'
+      });
+    }
+
+    const file = req.file;
+    const allowedTypes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword'
+    ];
+
+    // Validate file type
+    if (!allowedTypes.includes(file.mimetype)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.'
+      });
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      return res.status(400).json({
+        success: false,
+        message: 'File too large. Maximum size is 10MB.'
+      });
+    }
+
+    console.log(`Processing resume upload: ${file.originalname} (${file.size} bytes)`);
+
+    // Extract candidate data using Reducto
+    const extractionResult = await reductoService.extractCandidateData(file.path);
+
+    if (!extractionResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to extract data from resume',
+        error: extractionResult.error
+      });
+    }
+
+    // Clean up uploaded file
+    try {
+      const fs = require('fs').promises;
+      await fs.unlink(file.path);
+      console.log('Temporary file cleaned up');
+    } catch (cleanupError) {
+      console.warn('Failed to clean up temporary file:', cleanupError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Resume parsed successfully',
+      data: {
+        extractedData: extractionResult.data,
+        rawText: extractionResult.rawText,
+        confidence: extractionResult.confidence,
+        metadata: extractionResult.metadata
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in resume upload:', error);
+
+    // Clean up file on error
+    if (req.file && req.file.path) {
+      try {
+        const fs = require('fs').promises;
+        await fs.unlink(req.file.path);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up file on error:', cleanupError);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during resume processing',
       error: error.message
     });
   }
