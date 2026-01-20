@@ -23,7 +23,7 @@ router.use(tenantMiddleware);
  * @access  Private (HR, Admin)
  */
 router.post('/candidates/:candidateId/analyze', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'), 
   analyzeSingleCandidate
 );
 
@@ -33,7 +33,7 @@ router.post('/candidates/:candidateId/analyze',
  * @access  Private (HR, Admin)
  */
 router.post('/jobs/:jobId/analyze', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'), 
   analyzeJobCandidates
 );
 
@@ -70,7 +70,7 @@ router.get('/jobs/:jobId/stats',
  * @access  Private (HR, Admin)
  */
 router.post('/candidates/:candidateId/parse-resume', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'), 
   parseResume
 );
 
@@ -80,7 +80,7 @@ router.post('/candidates/:candidateId/parse-resume',
  * @access  Private (Admin only)
  */
 router.delete('/jobs/:jobId/clear', 
-  authorize('admin'), 
+  authorize('admin', 'company_admin'), 
   clearAnalysis
 );
 
@@ -90,7 +90,7 @@ router.delete('/jobs/:jobId/clear',
  * @access  Private (HR, Admin)
  */
 router.post('/resume-search', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'), 
   resumeSearchAndShortlist
 );
 

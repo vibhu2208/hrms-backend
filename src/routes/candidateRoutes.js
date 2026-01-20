@@ -18,21 +18,22 @@ const {
   sendInterviewEmail,
   checkDuplicate,
   getCandidateHistory,
-  getCandidateByEmail
+  getCandidateByEmail,
+  uploadResume: uploadResumeController
 } = require('../controllers/candidateController');
 const {
   validateBulkUpload,
   importBulkCandidates,
   downloadTemplate
 } = require('../controllers/candidateBulkUploadController');
-const { uploadBulk } = require('../middlewares/fileUpload');
+const { uploadBulk, uploadResume } = require('../middlewares/fileUpload');
 const { sendToOnboarding } = require('../controllers/onboardingController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
 router.use(tenantMiddleware);
-router.use(authorize('admin', 'hr'));
+router.use(authorize('admin', 'hr', 'company_admin'));
 
 router.route('/')
   .get(getCandidates)
@@ -74,5 +75,8 @@ router.route('/:id')
 router.post('/bulk/validate', uploadBulk.single('file'), validateBulkUpload);
 router.post('/bulk/import', importBulkCandidates);
 router.get('/bulk/template', downloadTemplate);
+
+// Resume upload and parsing route
+router.post('/upload-resume', uploadResume, uploadResumeController);
 
 module.exports = router;

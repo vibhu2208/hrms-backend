@@ -6,6 +6,39 @@ const nodemailer = require('nodemailer');
  * Uses Gmail SMTP with app password for secure authentication
  */
 
+/**
+ * Generic email sending function
+ * @param {Object} options - Email options
+ * @param {string} options.to - Recipient email
+ * @param {string} options.subject - Email subject
+ * @param {string} options.html - HTML content
+ * @param {string} options.text - Plain text content (optional)
+ */
+const sendEmail = async (options) => {
+  try {
+    const transporter = createTransporter();
+
+    if (!transporter) {
+      throw new Error('Email transporter not configured');
+    }
+
+    const mailOptions = {
+      from: `"${process.env.EMAIL_FROM_NAME || 'HRMS System'}" <${process.env.EMAIL_USER}>`,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text || ''
+    };
+
+    const result = await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`✅ Email sent successfully to ${options.to}`);
+    return result;
+  } catch (error) {
+    console.error('❌ Failed to send email:', error);
+    throw error;
+  }
+};
+
 // Create reusable transporter with timeout and retry configuration
 const createTransporter = () => {
   // Check for Gmail configuration first
@@ -2134,6 +2167,7 @@ const sendOfferLetterWithDocumentLink = async ({
 };
 
 module.exports = {
+  sendEmail, // Generic email function
   sendOnboardingEmail,
   sendHRNotification,
   sendInterviewScheduledEmail,

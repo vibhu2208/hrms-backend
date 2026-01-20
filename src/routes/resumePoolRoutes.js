@@ -55,27 +55,27 @@ router.use(tenantMiddleware);
  * @access  Private (HR, Admin)
  */
 router.post('/text', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   uploadResumeText
 );
 
 /**
  * @route   POST /api/resume-pool/batch
  * @desc    Upload multiple resume texts
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.post('/batch', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   uploadBatchResumes
 );
 
 /**
  * @route   POST /api/resume-pool/file
  * @desc    Upload resume file (PDF/DOCX)
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.post('/file', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   upload.single('resume'), 
   uploadResumeFile
 );
@@ -83,60 +83,60 @@ router.post('/file',
 /**
  * @route   GET /api/resume-pool
  * @desc    Get all resumes in pool
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.get('/', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   getResumePool
 );
 
 /**
  * @route   GET /api/resume-pool/search
  * @desc    Search resumes in pool
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.post('/search', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   searchResumes
 );
 
 /**
  * @route   GET /api/resume-pool/stats
  * @desc    Get processing statistics
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.get('/stats', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   getProcessingStats
 );
 
 /**
  * @route   GET /api/resume-pool/:id
  * @desc    Get single resume by ID
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.get('/:id', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   getResumeById
 );
 
 /**
  * @route   PUT /api/resume-pool/:id
  * @desc    Update resume
- * @access  Private (HR, Admin)
+ * @access  Private (HR, Admin, Company Admin)
  */
 router.put('/:id', 
-  authorize('admin', 'hr'), 
+  authorize('admin', 'hr', 'company_admin'),
   updateResume
 );
 
 /**
  * @route   DELETE /api/resume-pool/:id
  * @desc    Delete resume
- * @access  Private (Admin only)
+ * @access  Private (Admin, Company Admin)
  */
 router.delete('/:id', 
-  authorize('admin'), 
+  authorize('admin', 'company_admin'),
   deleteResume
 );
 

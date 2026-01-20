@@ -36,14 +36,22 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter for resumes (PDF only)
+// File filter for resumes (PDF, DOC, DOCX)
 const resumeFileFilter = (req, file, cb) => {
   if (file.fieldname === 'resume') {
-    // Accept only PDF files
-    if (file.mimetype === 'application/pdf') {
+    const allowedMimes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+      'application/msword' // .doc
+    ];
+
+    const allowedExts = ['.pdf', '.doc', '.docx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF files are allowed for resume uploads'), false);
+      cb(new Error('Only PDF, DOC, and DOCX files are allowed for resume uploads'), false);
     }
   } else {
     cb(null, true);

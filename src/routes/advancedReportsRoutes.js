@@ -19,22 +19,22 @@ router.use(protect);
 router.use(tenantMiddleware);
 
 // Leave Reports
-router.get('/leave/entitlement', authorize('admin', 'hr', 'manager'), getLeaveEntitlementReport);
-router.get('/leave/balance', authorize('admin', 'hr', 'manager'), getLeaveBalanceReport);
-router.get('/leave/utilization', authorize('admin', 'hr', 'manager'), getLeaveUtilizationReport);
+router.get('/leave/entitlement', authorize('admin', 'hr', 'manager', 'company_admin'), getLeaveEntitlementReport);
+router.get('/leave/balance', authorize('admin', 'hr', 'manager', 'company_admin'), getLeaveBalanceReport);
+router.get('/leave/utilization', authorize('admin', 'hr', 'manager', 'company_admin'), getLeaveUtilizationReport);
 
 // Attendance Reports
-router.get('/attendance/summary', authorize('admin', 'hr', 'manager'), getAttendanceSummaryReport);
-router.get('/attendance/exceptions', authorize('admin', 'hr', 'manager'), getAttendanceExceptionReport);
+router.get('/attendance/summary', authorize('admin', 'hr', 'manager', 'company_admin'), getAttendanceSummaryReport);
+router.get('/attendance/exceptions', authorize('admin', 'hr', 'manager', 'company_admin'), getAttendanceExceptionReport);
 
 // Compliance Reports
-router.get('/compliance/status', authorize('admin', 'hr'), getComplianceStatusReport);
+router.get('/compliance/status', authorize('admin', 'hr', 'company_admin'), getComplianceStatusReport);
 
 // Analytics
-router.get('/analytics/attendance', authorize('admin', 'hr', 'manager'), getAttendanceAnalytics);
-router.get('/analytics/leave', authorize('admin', 'hr', 'manager'), getLeaveAnalytics);
-router.get('/analytics/compliance', authorize('admin', 'hr'), getComplianceAnalytics);
-router.get('/analytics/performance', authorize('admin', 'hr'), getPerformanceIndicators);
+router.get('/analytics/attendance', authorize('admin', 'hr', 'manager', 'company_admin'), getAttendanceAnalytics);
+router.get('/analytics/leave', authorize('admin', 'hr', 'manager', 'company_admin'), getLeaveAnalytics);
+router.get('/analytics/compliance', authorize('admin', 'hr', 'company_admin'), getComplianceAnalytics);
+router.get('/analytics/performance', authorize('admin', 'hr', 'company_admin'), getPerformanceIndicators);
 
 module.exports = router;
 

@@ -40,7 +40,11 @@ const candidateSchema = new mongoose.Schema({
   appliedFor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'JobPosting',
-    required: true
+    required: false
+  },
+  appliedForTitle: {
+    type: String,
+    trim: true
   },
   experience: {
     years: Number,
@@ -319,6 +323,30 @@ const candidateSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     }
+  },
+  // Resume Parsing Fields (Reducto Integration)
+  resumeParsing: {
+    rawText: String, // Full extracted text from resume
+    confidence: {
+      type: Map,
+      of: Number
+    }, // Confidence scores per field
+    parsedAt: Date, // When parsing was done
+    parserVersion: String, // Version of parser used
+    parsingSource: {
+      type: String,
+      enum: ['reducto', 'manual', 'other'],
+      default: 'manual'
+    },
+    parsingMetadata: {
+      fileName: String,
+      fileSize: Number,
+      mimeType: String,
+      uploadedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      }
+    }
   }
 }, {
   timestamps: true
@@ -340,10 +368,62 @@ const normalizePhone = (phone) => {
 
 // Pre-save hook to check for duplicates (non-blocking, just flag)
 candidateSchema.pre('save', async function(next) {
-  // Generate candidate code if not present
+  // Skip candidate code generation if already set (done in controller)
+  console.log(`Pre-save hook triggered for candidate: ${this.email || 'unknown'}, candidateCode: ${this.candidateCode || 'not set'}`);
   if (!this.candidateCode) {
-    const count = await mongoose.model('Candidate').countDocuments();
-    this.candidateCode = `CAN${String(count + 1).padStart(5, '0')}`;
+    try {
+      // Find the highest existing candidate code and increment it
+      const lastCandidate = await mongoose.model('Candidate').findOne({})
+        .sort({ candidateCode: -1 })
+        .select('candidateCode')
+        .lean();
+
+      let nextNumber = 1; // Default for first candidate
+
+      if (lastCandidate && lastCandidate.candidateCode) {
+        // Extract number from last code (e.g., "CAN00008" -> 8)
+        const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
+        nextNumber = lastNumber + 1;
+      }
+
+      // Generate unique code with retry logic for race conditions
+      let candidateCode;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      console.log(`Starting candidate code generation for ${this.email || 'new candidate'}. Next number should be: ${nextNumber}`);
+
+      while (attempts < maxAttempts) {
+        candidateCode = `CAN${String(nextNumber + attempts).padStart(5, '0')}`;
+        console.log(`Attempting candidate code: ${candidateCode} (attempt ${attempts + 1})`);
+
+        // Check if this code already exists
+        const existing = await mongoose.model('Candidate').findOne({ candidateCode });
+        if (!existing) {
+          console.log(`✅ Candidate code ${candidateCode} is unique, using it`);
+          // Code is unique, use it
+          break;
+        } else {
+          console.log(`❌ Candidate code ${candidateCode} already exists, trying next`);
+        }
+
+        attempts++;
+      }
+
+      // If we couldn't find a unique code after max attempts, use timestamp fallback
+      if (attempts >= maxAttempts) {
+        candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+        console.log(`⚠️ Max attempts reached, using timestamp fallback: ${candidateCode}`);
+      }
+
+      this.candidateCode = candidateCode;
+      console.log(`🎯 Final candidate code: ${this.candidateCode} for ${this.email || 'new candidate'}`);
+
+    } catch (error) {
+      console.error('Error generating candidate code:', error);
+      // Fallback to timestamp-based code
+      this.candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+    }
   }
 
   // Check for duplicates only if this is a new document and not already marked as duplicate
