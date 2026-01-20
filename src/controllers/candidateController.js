@@ -370,6 +370,33 @@ exports.updateStage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
+    // BLOCK STATUS CHANGES FOR CANDIDATES ALREADY IN ONBOARDING
+    const onboardingStages = ['sent-to-onboarding', 'joined', 'completed'];
+    if (onboardingStages.includes(candidate.stage) && !skipValidation) {
+      return res.status(403).json({
+        success: false,
+        message: `Cannot change status: Candidate is already in onboarding process (${candidate.stage}). All hiring activities are blocked for this candidate.`,
+        blocked: true,
+        currentStage: candidate.stage
+      });
+    }
+
+    // Also check if candidate has an active onboarding record
+    const existingOnboarding = await Onboarding.findOne({
+      candidateId: candidate._id,
+      status: { $nin: ['rejected', 'cancelled'] }
+    });
+
+    if (existingOnboarding && !skipValidation) {
+      return res.status(403).json({
+        success: false,
+        message: `Cannot change status: Candidate has an active onboarding record. All hiring activities are blocked.`,
+        blocked: true,
+        onboardingId: existingOnboarding._id,
+        onboardingStatus: existingOnboarding.status
+      });
+    }
+
     const previousStage = candidate.stage;
     
     // Track workflow history
@@ -1858,13 +1885,27 @@ exports.uploadResume = async (req, res) => {
     console.log(`Processing resume upload: ${file.originalname} (${file.size} bytes)`);
 
     // Extract candidate data using Reducto
-    const extractionResult = await reductoService.extractCandidateData(file.path);
-
-    if (!extractionResult.success) {
+    let extractionResult;
+    try {
+      extractionResult = await reductoService.extractCandidateData(file.path);
+    } catch (extractError) {
+      console.error('Error calling Reducto service:', extractError);
       return res.status(500).json({
         success: false,
         message: 'Failed to extract data from resume',
-        error: extractionResult.error
+        error: extractError.message || 'Unknown error during extraction'
+      });
+    }
+
+    if (!extractionResult.success) {
+      console.error('Reducto extraction failed:', extractionResult.error);
+      console.error('Reducto metadata:', extractionResult.metadata);
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to extract data from resume',
+        error: extractionResult.error || 'Reducto API extraction failed',
+        details: extractionResult.metadata?.responseData || extractionResult.metadata
       });
     }
 

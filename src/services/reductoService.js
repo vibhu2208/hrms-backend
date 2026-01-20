@@ -924,17 +924,8 @@ class LocalResumeParser {
 class ReductoService {
   constructor() {
     this.apiKey = process.env.REDUCTO_API_KEY;
-    // Reducto API endpoints based on documentation
-    this.baseUrl = process.env.REDUCTO_API_URL || 'https://api.reducto.ai';
-    this.endpoints = [
-      'https://api.reducto.ai',      // Primary API endpoint
-      'https://studio.reducto.ai/api', // Studio API
-      'https://reducto.ai/api',      // Alternative
-      'https://app.reducto.ai/api'   // App API
-    ];
-
-    // Initialize local parsing capability
-    this.localParser = new LocalResumeParser();
+    // Reducto API endpoint - using platform.reducto.ai/extract
+    this.baseUrl = process.env.REDUCTO_API_URL || 'https://platform.reducto.ai/extract';
   }
 
   /**
@@ -995,7 +986,7 @@ FIELD-SPECIFIC RULES:
   }
 
   /**
-   * Parse resume using Reducto API
+   * Parse resume using Reducto API extract endpoint
    * @param {string} filePath - Path to the resume file
    * @returns {Promise<Object>} - Parsed candidate data
    */
@@ -1010,98 +1001,220 @@ FIELD-SPECIFIC RULES:
         throw new Error('Resume file not found');
       }
 
-      let lastError = null;
+      console.log(`Calling Reducto API at: ${this.baseUrl}`);
 
-      // Try different endpoints for the two-step process
-      for (const baseUrl of [this.baseUrl, ...this.endpoints]) {
+      // Method 1: Try simple file upload (just the file)
+      try {
+        const extractFormData = new FormData();
+        const fileStream = fs.createReadStream(filePath);
+        const fileName = path.basename(filePath);
+        const fileExt = path.extname(filePath).toLowerCase();
+        
+        // Determine content type based on file extension
+        let contentType = 'application/pdf';
+        if (fileExt === '.docx' || fileExt === '.doc') {
+          contentType = fileExt === '.docx' 
+            ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            : 'application/msword';
+        }
+        
+        extractFormData.append('file', fileStream, {
+          filename: fileName,
+          contentType: contentType
+        });
+
+        const extractResponse = await axios.post(this.baseUrl, extractFormData, {
+          headers: {
+            ...extractFormData.getHeaders(),
+            'Authorization': `Bearer ${this.apiKey}`,
+          },
+          timeout: 120000,
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+
+        console.log('✅ Reducto API extraction completed (simple file upload)');
+        console.log('📦 Full Reducto Response:', JSON.stringify(extractResponse.data, null, 2));
+
+        if (!extractResponse.data) {
+          throw new Error('Invalid response from Reducto API');
+        }
+
+        // Transform Reducto response to our expected format
+        const transformedData = this.transformReductoResponse(extractResponse.data);
+
+        console.log('📊 Transformed Data:', JSON.stringify(transformedData, null, 2));
+
+        // Normalize the data before returning
+        const normalizedData = this.normalizeData(transformedData);
+
+        return {
+          success: true,
+          data: normalizedData,
+          rawText: transformedData.rawText || '',
+          confidence: extractResponse.data.confidence || {},
+          metadata: {
+            parsedAt: new Date(),
+            version: '1.0',
+            source: 'reducto',
+            endpoint: this.baseUrl,
+            jobId: extractResponse.data.job_id || extractResponse.data.id,
+            usage: extractResponse.data.usage,
+            rawResponse: extractResponse.data // Store for debugging
+          }
+        };
+      } catch (simpleError) {
+        console.log('Simple file upload failed, trying with schema:', simpleError.message);
+        
+        // Method 2: Try with schema and system prompt as form fields
         try {
-          console.log(`Trying Reducto API at: ${baseUrl}`);
+          const extractFormData2 = new FormData();
+          const fileStream2 = fs.createReadStream(filePath);
+          const fileName2 = path.basename(filePath);
+          const fileExt2 = path.extname(filePath).toLowerCase();
+          
+          let contentType2 = 'application/pdf';
+          if (fileExt2 === '.docx' || fileExt2 === '.doc') {
+            contentType2 = fileExt2 === '.docx' 
+              ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+              : 'application/msword';
+          }
+          
+          extractFormData2.append('file', fileStream2, {
+            filename: fileName2,
+            contentType: contentType2
+          });
+          extractFormData2.append('system_prompt', this.getSystemPrompt());
+          extractFormData2.append('schema', JSON.stringify(this.getSchema()));
 
-          // Step 1: Upload the file
-          console.log('Step 1: Uploading file...');
+          const extractResponse2 = await axios.post(this.baseUrl, extractFormData2, {
+            headers: {
+              ...extractFormData2.getHeaders(),
+              'Authorization': `Bearer ${this.apiKey}`,
+            },
+            timeout: 120000,
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+          });
+
+          console.log('✅ Reducto API extraction completed (with schema)');
+          console.log('📦 Full Reducto Response (with schema):', JSON.stringify(extractResponse2.data, null, 2));
+
+          if (!extractResponse2.data) {
+            throw new Error('Invalid response from Reducto API');
+          }
+
+          // Transform Reducto response to our expected format
+          const transformedData2 = this.transformReductoResponse(extractResponse2.data);
+
+          console.log('📊 Transformed Data (with schema):', JSON.stringify(transformedData2, null, 2));
+
+          // Normalize the data before returning
+          const normalizedData2 = this.normalizeData(transformedData2);
+
+          return {
+            success: true,
+            data: normalizedData2,
+            rawText: transformedData2.rawText || '',
+            confidence: extractResponse2.data.confidence || {},
+            metadata: {
+              parsedAt: new Date(),
+              version: '1.0',
+              source: 'reducto',
+              endpoint: this.baseUrl,
+              jobId: extractResponse2.data.job_id || extractResponse2.data.id,
+              usage: extractResponse2.data.usage,
+              rawResponse: extractResponse2.data
+            }
+          };
+        } catch (schemaError) {
+          console.log('Schema method failed, trying JSON with file reference:', schemaError.message);
+          
+          // Method 3: Upload file first, then extract with JSON payload
+          const uploadUrl = this.baseUrl.replace('/extract', '/upload');
           const uploadFormData = new FormData();
           uploadFormData.append('file', fs.createReadStream(filePath));
 
-          const uploadResponse = await axios.post(`${baseUrl}/upload`, uploadFormData, {
+          const uploadResponse = await axios.post(uploadUrl, uploadFormData, {
             headers: {
               ...uploadFormData.getHeaders(),
               'Authorization': `Bearer ${this.apiKey}`,
             },
-            timeout: 30000,
+            timeout: 60000, // 60 seconds for file upload
           });
 
-          if (!uploadResponse.data) {
-            throw new Error('Upload failed - no response data');
-          }
+          const fileReference = uploadResponse.data.file_id || uploadResponse.data.id || uploadResponse.data;
 
-          console.log('✅ File uploaded successfully');
-          const fileReference = uploadResponse.data;
-
-          // Step 2: Parse the uploaded file
-          console.log('Step 2: Parsing file...');
-          const parseData = {
+          // Extract using file reference
+          const extractPayload = {
             input: fileReference,
             system_prompt: this.getSystemPrompt(),
             schema: this.getSchema()
           };
 
-          const parseResponse = await axios.post(`${baseUrl}/parse`, parseData, {
+          const extractResponse3 = await axios.post(this.baseUrl, extractPayload, {
             headers: {
               'Authorization': `Bearer ${this.apiKey}`,
               'Content-Type': 'application/json',
             },
-            timeout: 60000, // 60 seconds for parsing
+            timeout: 120000,
           });
 
-          console.log('✅ Reducto API parsing completed');
+          console.log('✅ Reducto API extraction completed (two-step method)');
+          console.log('📦 Full Reducto Response (two-step):', JSON.stringify(extractResponse3.data, null, 2));
 
-          if (!parseResponse.data || !parseResponse.data.result) {
-            throw new Error('Invalid parse response format from Reducto API');
+          if (!extractResponse3.data) {
+            throw new Error('Invalid response from Reducto API');
           }
 
-          // Extract data from Reducto response format
-          const result = parseResponse.data.result;
+          // Transform Reducto response to our expected format
+          const transformedData3 = this.transformReductoResponse(extractResponse3.data);
+
+          console.log('📊 Transformed Data (two-step):', JSON.stringify(transformedData3, null, 2));
+
+          // Normalize the data before returning
+          const normalizedData3 = this.normalizeData(transformedData3);
 
           return {
             success: true,
-            data: result.data || result, // Handle different response formats
-            rawText: result.raw_text || result.content || '',
-            confidence: result.confidence || {},
+            data: normalizedData3,
+            rawText: transformedData3.rawText || '',
+            confidence: extractResponse3.data.confidence || {},
             metadata: {
               parsedAt: new Date(),
               version: '1.0',
               source: 'reducto',
-              endpoint: baseUrl,
-              jobId: parseResponse.data.job_id,
-              usage: parseResponse.data.usage
+              endpoint: this.baseUrl,
+              jobId: extractResponse3.data.job_id || extractResponse3.data.id,
+              usage: extractResponse3.data.usage,
+              rawResponse: extractResponse3.data
             }
           };
-
-        } catch (endpointError) {
-          console.log(`❌ Endpoint ${baseUrl} failed:`, endpointError.message);
-          lastError = endpointError;
-          continue; // Try next endpoint
         }
       }
 
-      // If all endpoints failed
-      console.error('❌ All Reducto API endpoints failed');
-      throw lastError || new Error('All Reducto API endpoints failed');
-
     } catch (error) {
       console.error('❌ Reducto API error:', error.message);
+      console.error('❌ Full error:', error);
 
       if (error.response) {
-        console.error('❌ API Response:', error.response.status, error.response.data);
+        console.error('❌ API Response Status:', error.response.status);
+        console.error('❌ API Response Data:', JSON.stringify(error.response.data, null, 2));
+        console.error('❌ API Response Headers:', error.response.headers);
       } else if (error.code === 'ENOTFOUND') {
         console.error('❌ DNS/Network Error: Cannot reach Reducto API. Check your internet connection.');
       } else if (error.code === 'ECONNREFUSED') {
         console.error('❌ Connection Refused: Reducto API server is not responding.');
       }
 
+      const errorMessage = error.response?.data?.error?.message || 
+                          error.response?.data?.message || 
+                          error.message || 
+                          'Unknown error from Reducto API';
+
       return {
         success: false,
-        error: error.message,
+        error: errorMessage,
         data: null,
         rawText: '',
         confidence: {},
@@ -1109,11 +1222,244 @@ FIELD-SPECIFIC RULES:
           parsedAt: new Date(),
           version: '1.0',
           source: 'reducto',
-          error: error.message,
-          errorCode: error.code
+          error: errorMessage,
+          errorCode: error.code,
+          statusCode: error.response?.status,
+          responseData: error.response?.data
         }
       };
     }
+  }
+
+  /**
+   * Transform Reducto API response to our expected format
+   * @param {Object} reductoResponse - Raw response from Reducto API
+   * @returns {Object} - Transformed candidate data
+   */
+  transformReductoResponse(reductoResponse) {
+    try {
+      // Extract the first result from the array (Reducto returns result as array)
+      let reductoData = null;
+      if (Array.isArray(reductoResponse.result) && reductoResponse.result.length > 0) {
+        reductoData = reductoResponse.result[0];
+      } else if (reductoResponse.result && !Array.isArray(reductoResponse.result)) {
+        reductoData = reductoResponse.result;
+      } else if (reductoResponse.data) {
+        reductoData = reductoResponse.data;
+      } else {
+        reductoData = reductoResponse;
+      }
+
+      if (!reductoData) {
+        return {};
+      }
+
+      // Split name into firstName and lastName
+      let firstName = null;
+      let lastName = null;
+      if (reductoData.name) {
+        const nameParts = reductoData.name.trim().split(/\s+/);
+        if (nameParts.length >= 2) {
+          firstName = nameParts[0];
+          lastName = nameParts.slice(1).join(' ');
+        } else if (nameParts.length === 1) {
+          firstName = nameParts[0];
+        }
+      }
+
+      // Extract contact info - handle both old and new formats
+      const contactInfo = reductoData.contact_info || reductoData.contact_information || {};
+      const email = contactInfo.email || null;
+      let phone = contactInfo.phone || contactInfo.phone_number || null;
+      if (phone) {
+        // Clean phone number - remove +91, spaces, dashes
+        phone = phone.replace(/\+91[- ]?/g, '').replace(/[^\d]/g, '');
+      }
+
+      // Flatten skills from nested structure - handle both old and new formats
+      const skills = [];
+      if (reductoData.skills) {
+        Object.values(reductoData.skills).forEach(skillCategory => {
+          if (Array.isArray(skillCategory)) {
+            skillCategory.forEach(item => {
+              // Handle both formats: skill_name (new) or skill (old)
+              if (item.skill_name) {
+                skills.push(item.skill_name);
+              } else if (item.skill) {
+                skills.push(item.skill);
+              } else if (typeof item === 'string') {
+                skills.push(item);
+              }
+            });
+          }
+        });
+      }
+
+      // Extract current company and designation from work experience - handle both formats
+      let currentCompany = null;
+      let currentDesignation = null;
+      let experienceYears = null;
+      let experienceMonths = null;
+
+      if (reductoData.work_experience && Array.isArray(reductoData.work_experience) && reductoData.work_experience.length > 0) {
+        const latestJob = reductoData.work_experience[0];
+        // Handle both formats: company_name/job_title (new) or company/title (old)
+        currentCompany = latestJob.company_name || latestJob.company || null;
+        currentDesignation = latestJob.job_title || latestJob.title || null;
+
+        // Calculate total experience from all work experiences
+        let totalMonths = 0;
+        reductoData.work_experience.forEach(job => {
+          if (job.start_date && job.end_date) {
+            const startDate = this.parseDate(job.start_date);
+            const endDate = job.end_date.toLowerCase() === 'present' || 
+                          job.end_date.toLowerCase() === 'current' ||
+                          job.end_date.toLowerCase() === 'till date'
+              ? new Date() 
+              : this.parseDate(job.end_date);
+            
+            if (startDate && endDate) {
+              const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + 
+                           (endDate.getMonth() - startDate.getMonth());
+              if (months > 0 && months < 600) { // Reasonable limit
+                totalMonths += months;
+              }
+            }
+          }
+        });
+
+        if (totalMonths > 0) {
+          experienceYears = Math.floor(totalMonths / 12);
+          experienceMonths = totalMonths % 12;
+        }
+      }
+
+      // Extract location (if available in contact_info or elsewhere)
+      let currentLocation = null;
+      if (contactInfo.location) {
+        currentLocation = contactInfo.location;
+      } else if (reductoData.location) {
+        currentLocation = reductoData.location;
+      }
+
+      // Extract education info for notes - handle both formats
+      let educationNotes = [];
+      if (reductoData.education && Array.isArray(reductoData.education)) {
+        educationNotes = reductoData.education.map(edu => {
+          // Handle both formats: degree_or_standard + major (new) or degree (old)
+          const degree = edu.degree_or_standard 
+            ? `${edu.degree_or_standard}${edu.major ? ` - ${edu.major}` : ''}`
+            : edu.degree || 'Degree';
+          const score = edu.score || edu.grade_score || '';
+          return `${degree} from ${edu.institution || 'Unknown'}${score ? ` (${score})` : ''}`;
+        });
+      }
+
+      // Build notes from available information
+      const notesParts = [];
+      if (skills.length > 0) {
+        notesParts.push(`Skills: ${skills.slice(0, 10).join(', ')}`);
+      }
+      if (experienceYears !== null && experienceYears > 0) {
+        notesParts.push(`${experienceYears}y ${experienceMonths || 0}m experience`);
+      } else if (experienceMonths > 0) {
+        notesParts.push(`${experienceMonths}m experience`);
+      }
+      if (educationNotes.length > 0) {
+        notesParts.push(`Education: ${educationNotes.join('; ')}`);
+      }
+      if (reductoData.achievements && Array.isArray(reductoData.achievements) && reductoData.achievements.length > 0) {
+        // Handle both formats: achievement_description (new) or achievement (old)
+        const achievements = reductoData.achievements
+          .map(a => a.achievement_description || a.achievement)
+          .filter(a => a && a.trim() !== '')
+          .join('; ');
+        if (achievements) {
+          notesParts.push(`Achievements: ${achievements}`);
+        }
+      }
+
+      const notes = notesParts.length > 0 ? notesParts.join(' • ') : 'Resume parsed successfully using Reducto AI.';
+
+      return {
+        firstName,
+        lastName,
+        email,
+        phone,
+        alternatePhone: null,
+        appliedFor: null,
+        currentLocation,
+        preferredLocation: [],
+        source: 'other',
+        experienceYears,
+        experienceMonths,
+        currentCompany,
+        currentDesignation,
+        currentCTC: null,
+        expectedCTC: null,
+        noticePeriod: null,
+        skills: [...new Set(skills)], // Remove duplicates
+        stage: null,
+        notes,
+        rawText: '' // Reducto doesn't return raw text in this format
+      };
+    } catch (error) {
+      console.error('Error transforming Reducto response:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Parse date string in various formats (MM/YYYY, YYYY-MM, YYYY-MM-DD, etc.)
+   * @param {string} dateStr - Date string to parse
+   * @returns {Date|null} - Parsed date or null
+   */
+  parseDate(dateStr) {
+    if (!dateStr) return null;
+    
+    try {
+      // Handle YYYY-MM-DD format (e.g., "2025-06-01")
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+      
+      // Handle MM/YYYY format (e.g., "06/2025")
+      if (dateStr.includes('/') && !dateStr.includes('-')) {
+        const parts = dateStr.split('/');
+        if (parts.length === 2) {
+          const month = parseInt(parts[0]) - 1; // Month is 0-indexed
+          const year = parseInt(parts[1]);
+          if (!isNaN(month) && !isNaN(year)) {
+            return new Date(year, month, 1);
+          }
+        }
+      }
+      
+      // Handle YYYY-MM format (e.g., "2025-06")
+      if (/^\d{4}-\d{2}$/.test(dateStr)) {
+        const parts = dateStr.split('-');
+        if (parts.length === 2) {
+          const year = parseInt(parts[0]);
+          const month = parseInt(parts[1]) - 1;
+          if (!isNaN(year) && !isNaN(month)) {
+            return new Date(year, month, 1);
+          }
+        }
+      }
+      
+      // Try standard date parsing
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+    } catch (error) {
+      console.warn('Failed to parse date:', dateStr, error);
+    }
+    
+    return null;
   }
 
   /**
@@ -1247,67 +1593,55 @@ FIELD-SPECIFIC RULES:
    * @returns {Promise<Object>} - Complete extraction result
    */
   async extractCandidateData(filePath) {
-    // First try Reducto API
+    // Use only Reducto API - no local fallback
     const result = await this.parseResume(filePath);
 
     if (result.success && result.data) {
-      result.data = this.normalizeData(result.data);
+      // Data is already normalized in parseResume, but ensure it's still valid
+      if (!result.data || Object.keys(result.data).length === 0) {
+        console.warn('⚠️ Reducto returned empty data object');
+        console.log('Raw result:', JSON.stringify(result, null, 2));
+      }
+      // Don't normalize again - already normalized in parseResume
       return result;
     }
 
-    // If Reducto API fails, try local parsing as fallback
-    console.log('🔄 Reducto API failed, trying local parser fallback...');
+    // If Reducto API fails, return error (no local fallback)
+    console.log('❌ Reducto API failed - no fallback available');
 
-    try {
-      const localResult = await this.localParser.parseResume(filePath);
-
-      if (localResult.success) {
-        console.log('✅ Local parser succeeded as fallback');
-        localResult.data = this.normalizeData(localResult.data);
-        localResult.metadata.fallback = true;
-        localResult.metadata.message = 'Using local parser - limited AI capabilities';
-        return localResult;
+    return {
+      success: false,
+      error: result.error || 'Reducto API extraction failed',
+      data: {
+        firstName: null,
+        lastName: null,
+        email: null,
+        phone: null,
+        appliedFor: null,
+        currentLocation: null,
+        preferredLocation: [],
+        source: 'other',
+        experienceYears: null,
+        experienceMonths: null,
+        currentCompany: null,
+        currentDesignation: null,
+        currentCTC: null,
+        expectedCTC: null,
+        noticePeriod: null,
+        skills: [],
+        stage: null,
+        notes: `Resume uploaded but Reducto API parsing failed: ${result.error}. Please fill in the candidate details manually.`
+      },
+      rawText: 'Resume file received but could not be parsed by Reducto API.',
+      confidence: {},
+      metadata: {
+        parsedAt: new Date(),
+        version: '1.0',
+        source: 'reducto',
+        error: result.error,
+        message: 'Reducto API failed - manual entry required'
       }
-    } catch (localError) {
-      console.error('❌ Local parser also failed:', localError.message);
-    }
-
-    // If both fail, provide manual entry template
-    console.log('🔄 Both parsers failed, providing manual entry template');
-
-      return {
-        success: false,
-        error: result.error || 'All parsing methods failed',
-        data: {
-          firstName: null,
-          lastName: null,
-          email: null,
-          phone: null,
-          appliedFor: null,
-          currentLocation: null,
-          preferredLocation: [],
-          source: 'other',
-          experienceYears: null,
-          experienceMonths: null,
-          currentCompany: null,
-          currentDesignation: null,
-          currentCTC: null,
-          expectedCTC: null,
-          noticePeriod: null,
-          skills: [],
-          stage: null,
-          notes: `Resume uploaded but parsing failed: ${result.error}. Please fill in the candidate details manually.`
-        },
-        rawText: 'Resume file received but could not be parsed.',
-        confidence: {},
-        metadata: {
-          parsedAt: new Date(),
-          version: 'fallback-1.0',
-          source: 'manual-entry',
-          fallback: true,
-          message: 'All parsing failed - manual entry required'
-        }
-      };
+    };
   }
 }
 
