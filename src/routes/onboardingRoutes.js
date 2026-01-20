@@ -31,7 +31,7 @@ router.post('/:id/accept-offer', acceptOffer);
 // Protected routes
 router.use(protect);
 router.use(tenantMiddleware);
-router.use(authorize('admin', 'hr'));
+router.use(authorize('admin', 'hr', 'company_admin'));
 
 router.route('/')
   .get(getOnboardingList)

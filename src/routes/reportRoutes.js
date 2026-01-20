@@ -11,7 +11,7 @@ const { protect, authorize } = require('../middlewares/auth');
 const advancedReportsRoutes = require('./advancedReportsRoutes');
 
 router.use(protect);
-router.use(authorize('admin', 'hr'));
+router.use(authorize('admin', 'hr', 'company_admin'));
 
 // Advanced reports routes
 router.use('/', advancedReportsRoutes);
