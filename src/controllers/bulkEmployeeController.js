@@ -37,94 +37,145 @@ const findDepartment = async (departmentValue) => {
 };
 
 // Validate a single employee record
+// Field name mapping for CSV headers
+const employeeFieldMapping = {
+  'first name': 'firstName',
+  'firstname': 'firstName',
+  'first_name': 'firstName',
+  'last name': 'lastName',
+  'lastname': 'lastName',
+  'last_name': 'lastName',
+  'email address': 'email',
+  'email id': 'email',
+  'phone number': 'phone',
+  'phone no': 'phone',
+  'mobile': 'phone',
+  'mobile number': 'phone',
+  'department name': 'department',
+  'department': 'department',
+  'job title': 'designation',
+  'designation': 'designation',
+  'position': 'designation',
+  'joining date': 'joiningDate',
+  'join date': 'joiningDate',
+  'start date': 'joiningDate',
+  'date of birth': 'dateOfBirth',
+  'dob': 'dateOfBirth',
+  'gender': 'gender',
+  'blood group': 'bloodGroup',
+  'marital status': 'maritalStatus',
+  'employment type': 'employmentType',
+  'status': 'status',
+  'employee code': 'employeeCode',
+  'employee id': 'employeeCode',
+  'salary': 'salary',
+  'basic salary': 'salary',
+  'address': 'address',
+  'emergency contact name': 'emergencyContactName',
+  'emergency contact phone': 'emergencyContactPhone',
+  'emergency contact relation': 'emergencyContactRelation',
+  'pan number': 'panNumber',
+  'aadhar number': 'aadharNumber',
+  'bank name': 'bankName',
+  'account number': 'accountNumber',
+  'ifsc code': 'ifscCode'
+};
+
 const validateEmployeeRecord = async (record, rowIndex) => {
   const errors = [];
   const warnings = [];
 
+  // Normalize field names from CSV headers
+  const normalizedRecord = {};
+  for (const [key, value] of Object.entries(record)) {
+    const normalizedKey = employeeFieldMapping[key.toLowerCase()] || key;
+    normalizedRecord[normalizedKey] = value;
+  }
+
   // Required fields validation
-  if (!record.firstName || record.firstName.trim() === '') {
-    errors.push('First name is required');
+  if (!normalizedRecord.firstName || normalizedRecord.firstName.trim() === '') {
+    errors.push(`First name is required (found: "${record.firstName || 'empty'}")`);
   }
-  if (!record.lastName || record.lastName.trim() === '') {
-    errors.push('Last name is required');
+  if (!normalizedRecord.lastName || normalizedRecord.lastName.trim() === '') {
+    errors.push(`Last name is required (found: "${record.lastName || 'empty'}")`);
   }
-  if (!record.email || record.email.trim() === '') {
-    errors.push('Email is required');
-  } else if (!isValidEmail(record.email)) {
+  if (!normalizedRecord.email || normalizedRecord.email.trim() === '') {
+    errors.push(`Email is required (found: "${record.email || 'empty'}")`);
+  } else if (!isValidEmail(normalizedRecord.email)) {
     errors.push('Invalid email format');
   }
-  if (!record.phone || record.phone.trim() === '') {
-    errors.push('Phone is required');
-  } else if (!isValidPhone(record.phone)) {
+  if (!normalizedRecord.phone || normalizedRecord.phone.trim() === '') {
+    errors.push(`Phone is required (found: "${record.phone || 'empty'}")`);
+  } else if (!isValidPhone(normalizedRecord.phone)) {
     errors.push('Invalid phone format (should be 10-15 digits)');
   }
-  if (!record.department || record.department.trim() === '') {
-    errors.push('Department is required');
+  if (!normalizedRecord.department || normalizedRecord.department.trim() === '') {
+    errors.push(`Department is required (found: "${record.department || 'empty'}")`);
   }
-  if (!record.designation || record.designation.trim() === '') {
-    errors.push('Designation is required');
+  if (!normalizedRecord.designation || normalizedRecord.designation.trim() === '') {
+    errors.push(`Designation is required (found: "${record.designation || 'empty'}")`);
   }
-  if (!record.joiningDate || record.joiningDate.trim() === '') {
-    errors.push('Joining date is required');
-  } else if (!isValidDate(record.joiningDate)) {
+  if (!normalizedRecord.joiningDate || normalizedRecord.joiningDate.trim() === '') {
+    errors.push(`Joining date is required (found: "${record.joiningDate || 'empty'}")`);
+  } else if (!isValidDate(normalizedRecord.joiningDate)) {
     errors.push('Invalid joining date format');
   }
 
   // Optional field validations
-  if (record.dateOfBirth && !isValidDate(record.dateOfBirth)) {
+  if (normalizedRecord.dateOfBirth && !isValidDate(normalizedRecord.dateOfBirth)) {
     warnings.push('Invalid date of birth format, will be skipped');
   }
 
   // Validate gender enum
-  if (record.gender && !['male', 'female', 'other', ''].includes(record.gender.toLowerCase())) {
+  if (normalizedRecord.gender && !['male', 'female', 'other', ''].includes(normalizedRecord.gender.toLowerCase())) {
     warnings.push('Invalid gender value, will be set to empty');
   }
 
   // Validate blood group enum
   const validBloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', ''];
-  if (record.bloodGroup && !validBloodGroups.includes(record.bloodGroup)) {
+  if (normalizedRecord.bloodGroup && !validBloodGroups.includes(normalizedRecord.bloodGroup)) {
     warnings.push('Invalid blood group, will be skipped');
   }
 
   // Validate marital status enum
   const validMaritalStatus = ['single', 'married', 'divorced', 'widowed', ''];
-  if (record.maritalStatus && !validMaritalStatus.includes(record.maritalStatus.toLowerCase())) {
+  if (normalizedRecord.maritalStatus && !validMaritalStatus.includes(normalizedRecord.maritalStatus.toLowerCase())) {
     warnings.push('Invalid marital status, will be set to empty');
   }
 
   // Validate employment type enum
   const validEmploymentTypes = ['full-time', 'part-time', 'contract', 'intern'];
-  if (record.employmentType && !validEmploymentTypes.includes(record.employmentType.toLowerCase())) {
+  if (normalizedRecord.employmentType && !validEmploymentTypes.includes(normalizedRecord.employmentType.toLowerCase())) {
     warnings.push('Invalid employment type, will be set to full-time');
   }
 
   // Validate status enum
   const validStatuses = ['active', 'inactive', 'terminated', 'on-leave'];
-  if (record.status && !validStatuses.includes(record.status.toLowerCase())) {
+  if (normalizedRecord.status && !validStatuses.includes(normalizedRecord.status.toLowerCase())) {
     warnings.push('Invalid status, will be set to active');
   }
 
   // Check for duplicate email
-  if (record.email) {
-    const existingEmployee = await Employee.findOne({ email: record.email.toLowerCase() });
+  if (normalizedRecord.email) {
+    const existingEmployee = await Employee.findOne({ email: normalizedRecord.email.toLowerCase() });
     if (existingEmployee) {
       errors.push(`Email already exists for employee: ${existingEmployee.firstName} ${existingEmployee.lastName}`);
     }
   }
 
   // Check for duplicate employee code if provided
-  if (record.employeeCode) {
-    const existingCode = await Employee.findOne({ employeeCode: record.employeeCode });
+  if (normalizedRecord.employeeCode) {
+    const existingCode = await Employee.findOne({ employeeCode: normalizedRecord.employeeCode });
     if (existingCode) {
-      errors.push(`Employee code already exists: ${record.employeeCode}`);
+      errors.push(`Employee code already exists: ${normalizedRecord.employeeCode}`);
     }
   }
 
   // Validate department exists
-  if (record.department) {
-    const department = await findDepartment(record.department);
+  if (normalizedRecord.department) {
+    const department = await findDepartment(normalizedRecord.department);
     if (!department) {
-      errors.push(`Department not found: ${record.department}`);
+      errors.push(`Department not found: ${normalizedRecord.department}`);
     }
   }
 
@@ -138,77 +189,84 @@ const validateEmployeeRecord = async (record, rowIndex) => {
 
 // Transform CSV/Excel record to employee schema format
 const transformRecord = async (record) => {
-  const department = await findDepartment(record.department);
+  // Normalize field names from CSV headers
+  const normalizedRecord = {};
+  for (const [key, value] of Object.entries(record)) {
+    const normalizedKey = employeeFieldMapping[key.toLowerCase()] || key;
+    normalizedRecord[normalizedKey] = value;
+  }
+
+  const department = await findDepartment(normalizedRecord.department);
   
   const employee = {
-    firstName: record.firstName?.trim(),
-    lastName: record.lastName?.trim(),
-    email: record.email?.trim().toLowerCase(),
-    phone: record.phone?.trim(),
+    firstName: normalizedRecord.firstName?.trim(),
+    lastName: normalizedRecord.lastName?.trim(),
+    email: normalizedRecord.email?.trim().toLowerCase(),
+    phone: normalizedRecord.phone?.trim(),
     department: department?._id,
-    designation: record.designation?.trim(),
-    joiningDate: new Date(record.joiningDate),
-    employmentType: record.employmentType?.toLowerCase() || 'full-time',
-    status: record.status?.toLowerCase() || 'active',
+    designation: normalizedRecord.designation?.trim(),
+    joiningDate: new Date(normalizedRecord.joiningDate),
+    employmentType: normalizedRecord.employmentType?.toLowerCase() || 'full-time',
+    status: normalizedRecord.status?.toLowerCase() || 'active',
   };
 
   // Optional employee code
-  if (record.employeeCode && record.employeeCode.trim()) {
-    employee.employeeCode = record.employeeCode.trim();
+  if (normalizedRecord.employeeCode && normalizedRecord.employeeCode.trim()) {
+    employee.employeeCode = normalizedRecord.employeeCode.trim();
   }
 
   // Optional fields
-  if (record.dateOfBirth && isValidDate(record.dateOfBirth)) {
-    employee.dateOfBirth = new Date(record.dateOfBirth);
+  if (normalizedRecord.dateOfBirth && isValidDate(normalizedRecord.dateOfBirth)) {
+    employee.dateOfBirth = new Date(normalizedRecord.dateOfBirth);
   }
-  if (record.gender) {
-    employee.gender = record.gender.toLowerCase();
+  if (normalizedRecord.gender) {
+    employee.gender = normalizedRecord.gender.toLowerCase();
   }
-  if (record.bloodGroup) {
-    employee.bloodGroup = record.bloodGroup;
+  if (normalizedRecord.bloodGroup) {
+    employee.bloodGroup = normalizedRecord.bloodGroup;
   }
-  if (record.maritalStatus) {
-    employee.maritalStatus = record.maritalStatus.toLowerCase();
+  if (normalizedRecord.maritalStatus) {
+    employee.maritalStatus = normalizedRecord.maritalStatus.toLowerCase();
   }
-  if (record.alternatePhone) {
-    employee.alternatePhone = record.alternatePhone.trim();
+  if (normalizedRecord.alternatePhone) {
+    employee.alternatePhone = normalizedRecord.alternatePhone.trim();
   }
 
   // Address
   employee.address = {
-    street: record.street || '',
-    city: record.city || '',
-    state: record.state || '',
-    zipCode: record.zipCode || '',
-    country: record.country || ''
+    street: normalizedRecord.street || '',
+    city: normalizedRecord.city || '',
+    state: normalizedRecord.state || '',
+    zipCode: normalizedRecord.zipCode || '',
+    country: normalizedRecord.country || ''
   };
 
   // Salary
   employee.salary = {
-    basic: parseFloat(record.basicSalary) || 0,
-    hra: parseFloat(record.hra) || 0,
-    allowances: parseFloat(record.allowances) || 0,
-    deductions: parseFloat(record.deductions) || 0,
-    total: (parseFloat(record.basicSalary) || 0) + 
-           (parseFloat(record.hra) || 0) + 
-           (parseFloat(record.allowances) || 0) - 
-           (parseFloat(record.deductions) || 0)
+    basic: parseFloat(normalizedRecord.basicSalary) || 0,
+    hra: parseFloat(normalizedRecord.hra) || 0,
+    allowances: parseFloat(normalizedRecord.allowances) || 0,
+    deductions: parseFloat(normalizedRecord.deductions) || 0,
+    total: (parseFloat(normalizedRecord.basicSalary) || 0) +
+           (parseFloat(normalizedRecord.hra) || 0) +
+           (parseFloat(normalizedRecord.allowances) || 0) -
+           (parseFloat(normalizedRecord.deductions) || 0)
   };
 
   // Bank Details
   employee.bankDetails = {
-    accountNumber: record.accountNumber || '',
-    bankName: record.bankName || '',
-    ifscCode: record.ifscCode || '',
-    accountHolderName: record.accountHolderName || '',
-    branch: record.branch || ''
+    accountNumber: normalizedRecord.accountNumber || '',
+    bankName: normalizedRecord.bankName || '',
+    ifscCode: normalizedRecord.ifscCode || '',
+    accountHolderName: normalizedRecord.accountHolderName || '',
+    branch: normalizedRecord.branch || ''
   };
 
   // Emergency Contact
   employee.emergencyContact = {
-    name: record.emergencyContactName || '',
-    relationship: record.emergencyContactRelationship || '',
-    phone: record.emergencyContactPhone || ''
+    name: normalizedRecord.emergencyContactName || '',
+    relationship: normalizedRecord.emergencyContactRelation || '',
+    phone: normalizedRecord.emergencyContactPhone || ''
   };
 
   return employee;

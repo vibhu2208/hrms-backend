@@ -45,7 +45,21 @@ exports.validateBulkUpload = async (req, res) => {
     }
 
     // Normalize headers
+    const originalHeaders = rows[0];
+    console.log('Original headers from file:', originalHeaders);
+    console.log('Original headers count:', originalHeaders.length);
+
     const headers = normalizeHeaders(rows[0]);
+    console.log('Normalized headers:', headers);
+    console.log('Normalized headers count:', headers.length);
+
+    // Check required fields mapping
+    console.log('Required fields check:');
+    template.requiredFields.forEach(field => {
+      const headerIndex = headers.indexOf(field);
+      console.log(`  ${field}: ${headerIndex >= 0 ? 'FOUND at index ' + headerIndex : 'NOT FOUND'}`);
+    });
+
     const dataRows = rows.slice(1);
 
     // Validate headers
@@ -72,20 +86,35 @@ exports.validateBulkUpload = async (req, res) => {
 
       // Map row data to normalized field names
       headers.forEach((header, index) => {
-        const normalizedHeader = template.headerMapping[header.toLowerCase()] || header;
-        rowData[normalizedHeader] = row[index] || '';
+        const originalValue = row[index];
+        rowData[header] = originalValue || '';
+        console.log(`  Row ${rowNumber}, Field "${header}": "${originalValue}" (index ${index})`);
       });
 
-      // Validate required fields
+      console.log(`Row ${rowNumber} complete data:`, rowData);
+
+      // Validate required fields (using normalized field names)
+      console.log(`Row ${rowNumber} - Validating required fields:`, template.requiredFields);
       for (const field of template.requiredFields) {
-        if (!rowData[field] || String(rowData[field]).trim() === '') {
-          rowErrors.push(`Row ${rowNumber}: ${field} is required`);
+        // Convert camelCase to lowercase for matching normalized headers
+        const normalizedField = field.toLowerCase();
+        const fieldValue = rowData[normalizedField];
+        const isEmpty = !fieldValue || String(fieldValue).trim() === '';
+
+        console.log(`  Row ${rowNumber} - ${field} (checking ${normalizedField}): "${fieldValue}" (${isEmpty ? 'EMPTY' : 'OK'})`);
+
+        if (isEmpty) {
+          const actualValue = fieldValue || 'empty';
+          const displayValue = actualValue === 'empty' ? 'empty' : `"${actualValue}"`;
+          // Change from error to warning - allow empty fields for flexibility
+          rowWarnings.push(`Row ${rowNumber}: ${field} is empty (${displayValue}) - will be saved as empty`);
         }
       }
 
-      // Validate field formats
+      // Validate field formats (using normalized field names)
       for (const [field, rules] of Object.entries(template.fieldRules)) {
-        const value = rowData[field];
+        const normalizedField = field.toLowerCase();
+        const value = rowData[normalizedField];
         
         if (value === undefined || value === null || value === '') {
           if (rules.required) {
@@ -124,12 +153,12 @@ exports.validateBulkUpload = async (req, res) => {
         }
       }
 
-      // Validate email format
+      // Validate email format (warning instead of error)
       if (rowData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(rowData.email).trim())) {
-        rowErrors.push(`Row ${rowNumber}: Invalid email format`);
+        rowWarnings.push(`Row ${rowNumber}: Email format may be invalid`);
       }
 
-      // Validate phone format
+      // Validate phone format (warning instead of error)
       if (rowData.phone && !/^[\d\s\-\+\(\)]+$/.test(String(rowData.phone).trim())) {
         rowWarnings.push(`Row ${rowNumber}: Phone number format may be invalid`);
       }
@@ -197,6 +226,9 @@ exports.importBulkCandidates = async (req, res) => {
   try {
     const { validatedData, jobMapping } = req.body;
 
+    console.log('Import request received. validatedData length:', validatedData?.length);
+    console.log('First few records sample:', validatedData?.slice(0, 2));
+
     if (!validatedData || !Array.isArray(validatedData) || validatedData.length === 0) {
       return res.status(400).json({
         success: false,
@@ -205,7 +237,34 @@ exports.importBulkCandidates = async (req, res) => {
     }
 
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
-    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+
+    // Test if we can create candidates at all
+    console.log('Testing candidate model...');
+
+    try {
+      const testCandidate = new Candidate({
+        candidateCode: 'TEST001',
+        firstName: 'Test',
+        lastName: 'User',
+        email: 'test@example.com',
+        phone: '1234567890',
+        appliedForTitle: 'Test Job',
+        stage: 'applied',
+        status: 'active'
+      });
+      await testCandidate.save();
+      console.log('✅ Test candidate created successfully');
+      // Clean up test candidate
+      await Candidate.findOneAndDelete({ candidateCode: 'TEST001' });
+      console.log('✅ Test candidate cleaned up');
+    } catch (testError) {
+      console.error('❌ Test candidate creation failed:', testError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection issue - cannot create candidates',
+        error: testError.message
+      });
+    }
 
     const results = {
       success: [],
@@ -213,27 +272,21 @@ exports.importBulkCandidates = async (req, res) => {
       duplicates: []
     };
 
-    // Get all job postings for mapping
-    const jobPostings = await JobPosting.find({ status: 'active' });
-    const jobTitleMap = {};
-    jobPostings.forEach(job => {
-      jobTitleMap[job.title.toLowerCase()] = job._id;
-      if (jobMapping && jobMapping[job.title]) {
-        jobTitleMap[job.title.toLowerCase()] = jobMapping[job.title];
-      }
-    });
+    console.log(`Starting import of ${validatedData.length} candidates...`);
 
     for (const candidateData of validatedData) {
-      try {
+      console.log(`🔄 Processing candidate ${candidateData.email}...`);
+
         // Check for duplicates
         const existingCandidate = await Candidate.findOne({
           $or: [
-            { email: candidateData.email.toLowerCase().trim() },
-            { phone: candidateData.phone.replace(/\D/g, '') }
+            { email: candidateData.email?.toLowerCase().trim() },
+            { phone: String(candidateData.phone)?.replace(/\D/g, '') }
           ]
         });
 
         if (existingCandidate) {
+          console.log(`Duplicate found for ${candidateData.email}: ${existingCandidate.firstName} ${existingCandidate.lastName}`);
           results.duplicates.push({
             email: candidateData.email,
             reason: 'Candidate with this email or phone already exists'
@@ -241,30 +294,22 @@ exports.importBulkCandidates = async (req, res) => {
           continue;
         }
 
-        // Map job title to job ID
-        let jobId = null;
-        if (candidateData.appliedFor) {
-          const jobTitle = String(candidateData.appliedFor).toLowerCase().trim();
-          jobId = jobTitleMap[jobTitle];
-          
-          if (!jobId && jobMapping && jobMapping[candidateData.appliedFor]) {
-            jobId = jobMapping[candidateData.appliedFor];
-          }
-        }
-
-        if (!jobId) {
-          results.failed.push({
-            email: candidateData.email,
-            reason: `Job "${candidateData.appliedFor}" not found. Please ensure the job exists and is active.`
-          });
-          continue;
+        // Skip job validation - just use the job title as-is or set to null if empty
+        let appliedForValue = null;
+        if (candidateData.appliedfor && candidateData.appliedfor.trim()) {
+          appliedForValue = candidateData.appliedfor.trim();
+          console.log(`Using job title: "${appliedForValue}" for candidate ${candidateData.email}`);
+        } else {
+          console.log(`No job title provided for candidate ${candidateData.email}`);
         }
 
         // Generate unique candidate code (handle race conditions)
         let candidateCode;
         let attempts = 0;
         const maxAttempts = 20;
-        
+
+        console.log(`Generating candidate code for ${candidateData.email}...`);
+
         while (attempts < maxAttempts) {
           try {
             // Get the highest existing candidate code
@@ -272,7 +317,7 @@ exports.importBulkCandidates = async (req, res) => {
               .sort({ candidateCode: -1 })
               .select('candidateCode')
               .lean();
-            
+
             if (lastCandidate && lastCandidate.candidateCode) {
               // Extract number from last code (e.g., "CAN00008" -> 8)
               const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
@@ -281,10 +326,13 @@ exports.importBulkCandidates = async (req, res) => {
               // No candidates exist, start from 1
               candidateCode = `CAN${String(1 + attempts).padStart(5, '0')}`;
             }
-            
+
+            console.log(`Generated candidate code: ${candidateCode} (attempt ${attempts + 1})`);
+
             // Check if this code already exists (race condition check)
             const existing = await Candidate.findOne({ candidateCode });
             if (existing) {
+              console.log(`Candidate code ${candidateCode} already exists, trying next...`);
               attempts++;
               continue;
             }
@@ -302,48 +350,77 @@ exports.importBulkCandidates = async (req, res) => {
           }
         }
 
-        // Create candidate
+        // Create candidate - handle empty fields gracefully
         const candidate = new Candidate({
           candidateCode,
-          firstName: candidateData.firstName.trim(),
-          lastName: candidateData.lastName.trim(),
-          email: candidateData.email.toLowerCase().trim(),
-          phone: candidateData.phone.trim(),
-          alternatePhone: candidateData.alternatePhone?.trim() || null,
-          currentLocation: candidateData.currentLocation?.trim() || null,
-          preferredLocation: candidateData.preferredLocation || [],
-          source: candidateData.source || 'other',
-          appliedFor: jobId,
+          firstName: candidateData.firstname?.trim() || '',
+          lastName: candidateData.lastname?.trim() || '',
+          email: candidateData.email?.toLowerCase().trim() || '',
+          phone: String(candidateData.phone)?.trim() || '',
+          alternatePhone: candidateData.alternatephone ? String(candidateData.alternatephone).trim() : null,
+          currentLocation: candidateData.currentlocation?.trim() || null,
+          preferredLocation: candidateData.preferredlocation || [],
+          source: candidateData.source?.trim().toLowerCase() || 'other',
+          // appliedFor: appliedForValue, // Skip this - model expects ObjectId reference to JobPosting
           experience: {
-            years: candidateData.experienceYears || 0,
-            months: candidateData.experienceMonths || 0
+            years: parseInt(candidateData.experienceyears) || 0,
+            months: parseInt(candidateData.experiencemonths) || 0
           },
-          currentCompany: candidateData.currentCompany?.trim() || null,
-          currentDesignation: candidateData.currentDesignation?.trim() || null,
-          currentCTC: candidateData.currentCTC || null,
-          expectedCTC: candidateData.expectedCTC || null,
-          noticePeriod: candidateData.noticePeriod || null,
+          currentCompany: candidateData.currentcompany?.trim() || null,
+          currentDesignation: candidateData.currentdesignation?.trim() || null,
+          currentCTC: candidateData.currentctc ? parseFloat(candidateData.currentctc) : null,
+          expectedCTC: candidateData.expectedctc ? parseFloat(candidateData.expectedctc) : null,
+          noticePeriod: candidateData.noticeperiod ? parseInt(candidateData.noticeperiod) : null,
           skills: candidateData.skills || [],
-          stage: candidateData.stage || 'applied',
+          stage: candidateData.stage?.trim() || 'applied',
           status: 'active',
-          notes: candidateData.notes?.trim() || null
+          notes: candidateData.notes?.trim() || null,
+          appliedForTitle: appliedForValue // Store job title as string
         });
 
-        await candidate.save();
-
-        results.success.push({
+        console.log(`About to save candidate object for ${candidateData.email}:`, {
+          firstName: candidate.firstName,
+          lastName: candidate.lastName,
           email: candidate.email,
-          candidateId: candidate._id,
+          phone: candidate.phone,
+          appliedFor: candidate.appliedFor,
           candidateCode: candidate.candidateCode
         });
 
-      } catch (error) {
-        results.failed.push({
-          email: candidateData.email,
-          reason: error.message
-        });
-      }
+        console.log(`Attempting to save candidate ${candidateData.email}...`);
+
+        try {
+          const savedCandidate = await candidate.save();
+
+          console.log(`✅ Successfully created candidate: ${savedCandidate.email} (${savedCandidate.candidateCode})`);
+
+          results.success.push({
+            email: savedCandidate.email,
+            candidateId: savedCandidate._id,
+            candidateCode: savedCandidate.candidateCode
+          });
+        } catch (saveError) {
+          console.error(`❌ Failed to save candidate ${candidateData.email}:`, saveError.message);
+          console.error('❌ Full error object:', saveError);
+          console.error('❌ Candidate data that failed:', {
+            firstName: candidate.firstName,
+            lastName: candidate.lastName,
+            email: candidate.email,
+            phone: candidate.phone,
+            appliedFor: candidate.appliedFor,
+            appliedForTitle: candidate.appliedForTitle,
+            candidateCode: candidate.candidateCode
+          });
+
+          results.failed.push({
+            email: candidateData.email,
+            reason: `Database save failed: ${saveError.message}`
+          });
+          continue;
+        }
     }
+
+    console.log(`Import complete: ${results.success.length} imported, ${results.failed.length} failed, ${results.duplicates.length} duplicates`);
 
     res.status(200).json({
       success: true,
@@ -501,9 +578,38 @@ async function parseCSVFile(filePath) {
 }
 
 function normalizeHeaders(headers) {
-  return headers.map(header => {
-    const normalized = String(header).trim().toLowerCase();
-    return template.headerMapping[normalized] || normalized;
+  console.log('🔄 Starting header normalization for', headers.length, 'headers');
+
+  return headers.map((header, index) => {
+    const original = String(header).trim();
+    const normalized = original.toLowerCase();
+
+    console.log(`  Header ${index + 1}: "${original}" -> normalized: "${normalized}"`);
+
+    // First try exact mapping
+    if (template.headerMapping[normalized]) {
+      console.log(`    ✅ Exact match: "${original}" -> "${template.headerMapping[normalized]}"`);
+      return template.headerMapping[normalized];
+    }
+
+    // Try to find partial matches (e.g., "first" should match "firstName")
+    for (const [mappedHeader, fieldName] of Object.entries(template.headerMapping)) {
+      if (normalized.includes(mappedHeader) || mappedHeader.includes(normalized)) {
+        console.log(`    🔄 Partial match: "${original}" contains/similar to "${mappedHeader}" -> "${fieldName}"`);
+        return fieldName;
+      }
+    }
+
+    // Fallback: try to camelCase common patterns
+    const camelCased = normalized
+      .replace(/\s+/g, '') // remove spaces
+      .replace(/_/g, '')   // remove underscores
+      .replace(/-+/g, '')  // remove dashes
+      .replace(/^[a-z]/, c => c.toLowerCase()) // ensure first letter lowercase
+      .replace(/([a-z])([A-Z])/g, '$1$2'); // handle existing camelCase
+
+    console.log(`    ⚠️ Fallback: "${original}" -> "${camelCased}" (no mapping found)`);
+    return camelCased;
   });
 }
 

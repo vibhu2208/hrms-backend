@@ -19,16 +19,16 @@ router.use(tenantMiddleware);
 
 router.route('/')
   .get(getJobPostings)
-  .post(authorize('admin', 'hr'), createJobPosting);
+  .post(authorize('admin', 'hr', 'company_admin'), createJobPosting);
 
-router.put('/:id/publish', authorize('admin', 'hr'), publishJobPosting);
-router.put('/:id/close', authorize('admin', 'hr'), closeJobPosting);
-router.put('/:id/status', authorize('admin', 'hr'), updateJobStatus);
+router.put('/:id/publish', authorize('admin', 'hr', 'company_admin'), publishJobPosting);
+router.put('/:id/close', authorize('admin', 'hr', 'company_admin'), closeJobPosting);
+router.put('/:id/status', authorize('admin', 'hr', 'company_admin'), updateJobStatus);
 router.get('/:id/applicants', getJobApplicants);
 
 router.route('/:id')
   .get(getJobPosting)
-  .put(authorize('admin', 'hr'), updateJobPosting)
-  .delete(authorize('admin'), deleteJobPosting);
+  .put(authorize('admin', 'hr', 'company_admin'), updateJobPosting)
+  .delete(authorize('admin', 'company_admin'), deleteJobPosting);
 
 module.exports = router;

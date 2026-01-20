@@ -6,7 +6,8 @@ const {
   getThemePreference,
   updateThemePreference,
   getUserProfile,
-  getAllUsers
+  getAllUsers,
+  createUser
 } = require('../controllers/userController');
 
 // All routes are protected
@@ -20,7 +21,10 @@ router.put('/theme', updateThemePreference);
 // User profile route
 router.get('/profile', getUserProfile);
 
-// Admin only - Get all users for current tenant
-router.get('/all', authorize('admin', 'hr', 'company_admin'), getAllUsers);
+// Admin and Company Admin - Get all users for current tenant
+router.get('/all', authorize('admin', 'company_admin'), getAllUsers);
+
+// Admin and Company Admin - Create new user
+router.post('/create', authorize('admin', 'company_admin'), createUser);
 
 module.exports = router;
