@@ -3,8 +3,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// Email service (assuming it exists)
-const sendEmail = require('../services/emailService');
+// Email service
+const { sendEmail } = require('../services/emailService');
+
+// Tenant models utility
+const { getTenantModel } = require('../utils/tenantModels');
 
 /**
  * Get user theme preference
@@ -112,9 +115,21 @@ exports.getUserProfile = async (req, res) => {
     const TenantUserSchema = require('../models/tenant/TenantUser');
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
     
-    const user = await TenantUser.findById(req.user.id)
-      .select('-password')
-      .populate('departmentId');
+    // Get Department model for population (if available)
+    const Department = getTenantModel(tenantConnection, 'Department');
+    
+    let user;
+    if (Department) {
+      user = await TenantUser.findById(req.user.id)
+        .select('-password')
+        .populate({
+          path: 'departmentId',
+          model: Department
+        });
+    } else {
+      user = await TenantUser.findById(req.user.id)
+        .select('-password');
+    }
 
     if (!user) {
       return res.status(404).json({
@@ -148,14 +163,25 @@ exports.getAllUsers = async (req, res) => {
     const TenantUserSchema = require('../models/tenant/TenantUser');
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
 
+    // Get Department model for population (if available)
+    const Department = getTenantModel(tenantConnection, 'Department');
+
     // Query users from tenant database
-    const users = await TenantUser.find()
-      .select('-password')
-      .populate({
-        path: 'departmentId',
-        select: 'name code'
-      })
-      .sort({ createdAt: -1 });
+    let users;
+    if (Department) {
+      users = await TenantUser.find()
+        .select('-password')
+        .populate({
+          path: 'departmentId',
+          model: Department,
+          select: 'name code'
+        })
+        .sort({ createdAt: -1 });
+    } else {
+      users = await TenantUser.find()
+        .select('-password')
+        .sort({ createdAt: -1 });
+    }
 
     console.log(`📋 Found ${users.length} users for company ${req.tenant.companyId}`);
 
@@ -253,39 +279,62 @@ exports.createUser = async (req, res) => {
     const savedUser = await newUser.save();
 
     // Send welcome email with credentials
-    try {
+    let emailSent = false;
+    let emailError = null;
+    
+    // Check if email is configured
+    const isEmailConfigured = process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD || 
+                               (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    
+    if (!isEmailConfigured) {
+      console.warn('⚠️ Email not configured - skipping welcome email. Set EMAIL_USER and EMAIL_APP_PASSWORD or SMTP_* environment variables.');
+      emailError = new Error('Email service not configured. Please configure EMAIL_USER and EMAIL_APP_PASSWORD or SMTP settings.');
+    } else {
+      try {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080/login/spc-management';
       const emailData = {
         to: email,
         subject: `Welcome to ${req.tenant.companyName} - Your Account Credentials`,
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2>Welcome to ${req.tenant.companyName}!</h2>
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333;">Welcome to ${req.tenant.companyName}!</h2>
             <p>Your account has been created successfully.</p>
 
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
-              <h3>Your Login Credentials:</h3>
-              <p><strong>Email:</strong> ${email}</p>
-              <p><strong>Temporary Password:</strong> ${tempPassword}</p>
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff;">
+              <h3 style="margin-top: 0; color: #333;">Your Login Credentials:</h3>
+              <p style="margin: 10px 0;"><strong>Email:</strong> ${email}</p>
+              <p style="margin: 10px 0;"><strong>Temporary Password:</strong> <code style="background: #fff; padding: 4px 8px; border-radius: 3px; font-family: monospace;">${tempPassword}</code></p>
             </div>
 
-            <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <p><strong>⚠️ Important:</strong> Please change your password on first login for security.</p>
+            <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
+              <p style="margin: 0;"><strong>⚠️ Important:</strong> Please change your password on first login for security.</p>
             </div>
 
-            <p><strong>Login URL:</strong> <a href="${process.env.FRONTEND_URL || 'http://localhost:8080/login/spc-management'}">${process.env.FRONTEND_URL || 'http://localhost:8080/login/spc-management'}</a></p>
+            <p style="margin: 20px 0;"><strong>Login URL:</strong> <a href="${frontendUrl}" style="color: #007bff; text-decoration: none;">${frontendUrl}</a></p>
 
             <p>If you have any questions, please contact your administrator.</p>
 
-            <p>Best regards,<br>${req.tenant.companyName} Team</p>
+            <p style="margin-top: 30px;">Best regards,<br><strong>${req.tenant.companyName} Team</strong></p>
           </div>
-        `
+        `,
+        text: `Welcome to ${req.tenant.companyName}!\n\nYour account has been created successfully.\n\nYour Login Credentials:\nEmail: ${email}\nTemporary Password: ${tempPassword}\n\n⚠️ Important: Please change your password on first login for security.\n\nLogin URL: ${frontendUrl}\n\nIf you have any questions, please contact your administrator.\n\nBest regards,\n${req.tenant.companyName} Team`
       };
 
-      await sendEmail(emailData);
-      console.log(`📧 Welcome email sent to ${email}`);
-    } catch (emailError) {
-      console.error('Error sending welcome email:', emailError);
-      // Don't fail the user creation if email fails
+        console.log(`📧 Attempting to send welcome email to ${email}...`);
+        await sendEmail(emailData);
+        emailSent = true;
+        console.log(`✅ Welcome email sent successfully to ${email}`);
+      } catch (err) {
+        emailError = err;
+        console.error('❌ Error sending welcome email:', err);
+        console.error('Email error details:', {
+          message: err.message,
+          stack: err.stack,
+          to: email,
+          subject: `Welcome to ${req.tenant.companyName} - Your Account Credentials`
+        });
+        // Don't fail the user creation if email fails, but log it
+      }
     }
 
     // Return user data (without password)
@@ -294,10 +343,20 @@ exports.createUser = async (req, res) => {
 
     console.log(`👤 New user created: ${email} (${role}) by ${req.user.email}`);
 
+    // Build response message based on email status
+    let message = 'User created successfully.';
+    if (emailSent) {
+      message += ' Welcome email sent with credentials.';
+    } else if (emailError) {
+      message += ` Warning: Email could not be sent (${emailError.message}). User can still login with temporary password.`;
+    }
+
     res.status(201).json({
       success: true,
-      message: 'User created successfully. Welcome email sent with credentials.',
+      message: message,
       data: userResponse,
+      emailSent: emailSent,
+      emailError: emailError ? emailError.message : null,
       tempPassword: tempPassword // Only for testing - remove in production
     });
 

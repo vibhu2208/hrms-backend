@@ -370,6 +370,33 @@ exports.updateStage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
+    // BLOCK STATUS CHANGES FOR CANDIDATES ALREADY IN ONBOARDING
+    const onboardingStages = ['sent-to-onboarding', 'joined', 'completed'];
+    if (onboardingStages.includes(candidate.stage) && !skipValidation) {
+      return res.status(403).json({
+        success: false,
+        message: `Cannot change status: Candidate is already in onboarding process (${candidate.stage}). All hiring activities are blocked for this candidate.`,
+        blocked: true,
+        currentStage: candidate.stage
+      });
+    }
+
+    // Also check if candidate has an active onboarding record
+    const existingOnboarding = await Onboarding.findOne({
+      candidateId: candidate._id,
+      status: { $nin: ['rejected', 'cancelled'] }
+    });
+
+    if (existingOnboarding && !skipValidation) {
+      return res.status(403).json({
+        success: false,
+        message: `Cannot change status: Candidate has an active onboarding record. All hiring activities are blocked.`,
+        blocked: true,
+        onboardingId: existingOnboarding._id,
+        onboardingStatus: existingOnboarding.status
+      });
+    }
+
     const previousStage = candidate.stage;
     
     // Track workflow history
