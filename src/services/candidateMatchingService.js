@@ -261,21 +261,54 @@ class CandidateMatchingService {
   async calculateMatchScore(candidate, jobDescription, options = {}) {
     const jdData = jobDescription.parsedData;
 
-    // Calculate individual match components
-    const skillMatch = this.calculateSkillMatch(candidate, jdData);
-    const experienceMatch = this.calculateExperienceMatch(candidate, jdData);
-    const locationMatch = this.calculateLocationMatch(candidate, jdData);
-    const educationMatch = this.calculateEducationMatch(candidate, jdData);
-    const salaryMatch = this.calculateSalaryMatch(candidate, jdData);
+    // Calculate individual match components with error handling
+    let skillMatch, experienceMatch, locationMatch, educationMatch, salaryMatch;
 
-    // Calculate weighted overall score with improved logic
-    const weightedScore = Math.round(
+    try {
+      skillMatch = this.calculateSkillMatch(candidate, jdData);
+    } catch (error) {
+      console.error('Skill matching failed:', error.message);
+      skillMatch = { score: 0, details: [], requiredMatched: 0, preferredMatched: 0, technologyMatched: 0, totalMatched: 0 };
+    }
+
+    try {
+      experienceMatch = this.calculateExperienceMatch(candidate, jdData);
+    } catch (error) {
+      console.error('Experience matching failed:', error.message);
+      experienceMatch = { score: 50, candidateYears: 0, requiredMin: 0, requiredMax: null, matchType: 'error', experienceLevel: 'unknown' };
+    }
+
+    try {
+      locationMatch = this.calculateLocationMatch(candidate, jdData);
+    } catch (error) {
+      console.error('Location matching failed:', error.message);
+      locationMatch = { score: 50, candidateLocation: '', jobLocation: '', matchType: 'error', matchDetails: {} };
+    }
+
+    try {
+      educationMatch = this.calculateEducationMatch(candidate, jdData);
+    } catch (error) {
+      console.error('Education matching failed:', error.message);
+      educationMatch = { score: 100, hasRequiredEducation: true, candidateEducation: [], requiredEducation: [], matchType: 'error' };
+    }
+
+    try {
+      salaryMatch = this.calculateSalaryMatch(candidate, jdData);
+    } catch (error) {
+      console.error('Salary matching failed:', error.message);
+      salaryMatch = { score: 50, candidateCTC: null, jobSalaryRange: null, matchType: 'error' };
+    }
+
+    // Calculate weighted overall score with improved logic and NaN protection
+    const rawWeightedScore =
       skillMatch.score * this.matchWeights.skills +
       experienceMatch.score * this.matchWeights.experience +
       locationMatch.score * this.matchWeights.location +
       educationMatch.score * this.matchWeights.education +
-      salaryMatch.score * this.matchWeights.salary
-    );
+      salaryMatch.score * this.matchWeights.salary;
+
+    // Ensure we don't have NaN from any failed calculations
+    const weightedScore = Math.round(isNaN(rawWeightedScore) ? 0 : rawWeightedScore);
 
     // Apply minimum thresholds - if critical criteria are too low, reduce overall score
     let overallScore = weightedScore;
@@ -293,8 +326,8 @@ class CandidateMatchingService {
       overallScore = Math.round(overallScore * 0.9); // 10% penalty
     }
 
-    // Ensure score stays within bounds
-    overallScore = Math.max(0, Math.min(100, overallScore));
+    // Ensure score stays within bounds and handle NaN values
+    overallScore = isNaN(overallScore) ? 0 : Math.max(0, Math.min(100, overallScore));
 
     // Determine overall fit category with more nuanced thresholds
     let overallFit = 'poor';
@@ -443,20 +476,26 @@ class CandidateMatchingService {
       }
       // 4. Fuzzy string similarity
       else {
-        const similarity = natural.JaroWinklerDistance(requiredSkill, candidateSkill);
-        if (similarity >= this.similarityThreshold) {
-          matchType = 'fuzzy';
-          score = Math.round(similarity * 70); // Max 70 for fuzzy matches
+        try {
+          const similarity = natural.JaroWinklerDistance(requiredSkill, candidateSkill);
+          if (similarity >= this.similarityThreshold) {
+            matchType = 'fuzzy';
+            score = Math.round(similarity * 70); // Max 70 for fuzzy matches
+          }
+        } catch (error) {
+          console.warn(`Natural library fuzzy matching failed for skills "${requiredSkill}" and "${candidateSkill}":`, error.message);
+          // Continue to fallback matching methods below
         }
-        // 5. Partial word match
-        else if (requiredSkill.includes(candidateSkill) || candidateSkill.includes(requiredSkill)) {
+
+        // 5. Partial word match (fallback when fuzzy matching fails or doesn't meet threshold)
+        if (!matchType && requiredSkill.includes(candidateSkill) || candidateSkill.includes(requiredSkill)) {
           if (requiredSkill.length > 3 && candidateSkill.length > 3) {
             matchType = 'partial';
             score = 40;
           }
         }
         // 6. Technology family match (e.g., Java and Spring are both JVM technologies)
-        else if (this.isTechnologyFamilyMatch(requiredSkill, candidateSkill)) {
+        else if (!matchType && this.isTechnologyFamilyMatch(requiredSkill, candidateSkill)) {
           matchType = 'family';
           score = 30;
         }
