@@ -3,9 +3,7 @@ FROM node:18-alpine
 WORKDIR /app
 
 COPY package*.json ./
-# Install only production dependencies (--production flag works with npm 7+)
-RUN npm ci --production
-RUN npm cache clean --force
+RUN npm ci --only=production && npm cache clean --force
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
