@@ -4,7 +4,7 @@ const approvalInstanceSchema = new mongoose.Schema({
   requestType: {
     type: String,
     required: true,
-    enum: ['leave', 'attendance', 'expense', 'payroll', 'asset', 'document', 'offboarding', 'other']
+    enum: ['leave', 'attendance', 'expense', 'payroll', 'asset', 'document', 'offboarding', 'onboarding_approval', 'other']
   },
   requestId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -39,7 +39,7 @@ const approvalInstanceSchema = new mongoose.Schema({
     },
     approverType: {
       type: String,
-      enum: ['manager', 'hr', 'department_head', 'finance', 'ceo', 'custom'],
+      enum: ['manager', 'hr', 'department_head', 'finance', 'ceo', 'company_admin', 'custom'],
       required: true
     },
     approverId: {
