@@ -93,6 +93,67 @@ class AWSS3Service {
   }
 
   /**
+   * Generic file upload to S3 (supports any file type)
+   * @param {Object} file - Multer file object
+   * @param {String} folder - S3 folder path (e.g., 'jd-documents', 'resumes')
+   * @returns {Promise<Object>} Upload result with URL
+   */
+  async uploadFile(file, folder = 'documents') {
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+      throw new Error('AWS credentials not configured. Check environment variables.');
+    }
+
+    try {
+      // Read file from path or buffer
+      const fileBuffer = file.buffer || await promisify(fs.readFile)(file.path);
+
+      // Create unique file key
+      const timestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+      const fileExtension = path.extname(file.originalname).toLowerCase();
+
+      // Organize by date for better management
+      const dateFolder = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const s3Key = `${folder}/${dateFolder}/${timestamp}-${randomSuffix}${fileExtension}`;
+
+      // Upload parameters
+      const uploadParams = {
+        Bucket: this.bucketName,
+        Key: s3Key,
+        Body: fileBuffer,
+        ContentType: file.mimetype,
+        ACL: 'private',
+        Metadata: {
+          originalName: file.originalname,
+          uploadedAt: new Date().toISOString(),
+          mimeType: file.mimetype,
+          fileSize: fileBuffer.length.toString()
+        }
+      };
+
+      // Upload to S3
+      const uploadResult = await this.s3.upload(uploadParams).promise();
+
+      console.log(`✅ File uploaded to S3: ${uploadResult.Key}`);
+
+      return {
+        success: true,
+        url: uploadResult.Location,
+        key: uploadResult.Key,
+        bucket: uploadResult.Bucket,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        size: fileBuffer.length,
+        uploadedAt: new Date()
+      };
+
+    } catch (error) {
+      console.error('❌ AWS S3 upload error:', error);
+      throw new Error(`S3 upload failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Generate signed URL for accessing private S3 file
    * @param {String} s3Key - S3 object key
    * @param {Number} expiresIn - URL expiration time in seconds (default: 1 hour)
