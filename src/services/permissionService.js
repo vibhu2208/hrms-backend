@@ -1,11 +1,14 @@
 const Permission = require('../models/Permission');
 const Role = require('../models/Role');
 const { getTenantConnection } = require('../config/database.config');
+const { getTenantModel } = require('../utils/tenantModels');
 
 class PermissionService {
   async checkPermission(userId, permissionCode, scope = 'own', resourceOwnerId = null, tenantConnection = null) {
     try {
-      const TenantUser = tenantConnection ? tenantConnection.model('TenantUser') : require('../models/tenant/TenantUser');
+      // Use 'User' model name to match auth middleware
+      const TenantUserSchema = require('../models/tenant/TenantUser');
+      const TenantUser = tenantConnection ? tenantConnection.model('User', TenantUserSchema) : require('../models/tenant/TenantUser');
       
       const user = await TenantUser.findById(userId).populate('roleId');
       
@@ -13,8 +16,21 @@ class PermissionService {
         return false;
       }
 
-      if (user.role === 'superadmin') {
+      // Superadmin has all permissions
+      if (user.role === 'superadmin' || user.role === 'company_admin') {
         return true;
+      }
+
+      // HR users have candidate and recruitment permissions by default
+      if (user.role === 'hr') {
+        const hrPermissions = [
+          'manage_candidates', 'view_candidates', 'create_candidate', 'update_candidate', 'delete_candidate',
+          'create_job_posting', 'view_job_posting', 'update_job_posting', 'delete_job_posting',
+          'manage_recruitment', 'view_recruitment'
+        ];
+        if (hrPermissions.includes(permissionCode)) {
+          return true;
+        }
       }
 
       const userPermissions = await this.getUserPermissions(user);
@@ -108,8 +124,9 @@ class PermissionService {
   }
 
   async grantPermission(userId, permissionCode, scope, grantedBy, expiresAt = null, reason = null, tenantConnection = null) {
-    const TenantUser = tenantConnection ? tenantConnection.model('TenantUser') : require('../models/tenant/TenantUser');
-    const AuditLog = tenantConnection ? tenantConnection.model('AuditLog') : require('../models/AuditLog');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection ? tenantConnection.model('User', TenantUserSchema) : require('../models/tenant/TenantUser');
+    const AuditLog = tenantConnection ? getTenantModel(tenantConnection, 'AuditLog') : require('../models/AuditLog');
 
     const permission = await Permission.findOne({ code: permissionCode });
     if (!permission) {
@@ -167,8 +184,9 @@ class PermissionService {
   }
 
   async revokePermission(userId, permissionCode, revokedBy, reason = null, tenantConnection = null) {
-    const TenantUser = tenantConnection ? tenantConnection.model('TenantUser') : require('../models/tenant/TenantUser');
-    const AuditLog = tenantConnection ? tenantConnection.model('AuditLog') : require('../models/AuditLog');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection ? tenantConnection.model('User', TenantUserSchema) : require('../models/tenant/TenantUser');
+    const AuditLog = tenantConnection ? getTenantModel(tenantConnection, 'AuditLog') : require('../models/AuditLog');
 
     const permission = await Permission.findOne({ code: permissionCode });
     if (!permission) {
