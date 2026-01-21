@@ -3,7 +3,10 @@ FROM node:18-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+# Install production dependencies (using npm install instead of npm ci 
+# because package-lock.json may be out of sync with package.json)
+RUN npm install --production --no-audit --no-fund && \
+    npm cache clean --force
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
