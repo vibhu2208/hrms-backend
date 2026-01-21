@@ -7,7 +7,10 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "build": "echo 'No build step required'",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node test-reducto-service.js",
+    "test:reducto": "node test-reducto-service.js",
+    "test:s3": "node test-s3-service.js",
+    "test:aws": "node test-aws-credentials.js",
     "seed:departments": "node seed-departments.js",
     "seed:employees": "node seed-employees.js",
     "seed:all": "node seed-departments.js && node seed-employees.js",
@@ -50,6 +53,7 @@
     "pdf-parse": "^1.1.1",
     "puppeteer": "^24.34.0",
     "redis": "^5.10.0",
+    "reductoai": "^0.13.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

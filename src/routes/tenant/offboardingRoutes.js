@@ -23,6 +23,7 @@ const {
 const { protect } = require('../../middlewares/auth');
 const { tenantMiddleware } = require('../../middlewares/tenantMiddleware');
 const { offboardingMiddleware } = require('../../middlewares/offboardingRBAC');
+const { getTenantModel } = require('../../middlewares/tenantMiddleware');
 
 // Apply base middleware to all routes
 router.use(protect); // Authentication required
@@ -90,6 +91,129 @@ router.put('/:id/approve',
 router.put('/:id/close',
   offboardingMiddleware.closeOffboarding,
   closeOffboarding
+);
+
+/**
+ * @route   PUT /api/offboarding/:id
+ * @desc    Update offboarding request
+ * @access  HR, Admin
+ */
+router.put('/:id',
+  offboardingMiddleware.manageOffboarding,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updateData = req.body;
+
+      const OffboardingRequest = getTenantModel(
+        req.tenant.connection,
+        'OffboardingRequest',
+        require('../../models/tenant/OffboardingRequest')
+      );
+
+      const request = await OffboardingRequest.findByIdAndUpdate(id, updateData, { new: true });
+      if (!request) {
+        return res.status(404).json({ success: false, message: 'Offboarding request not found' });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Offboarding updated successfully',
+        data: request
+      });
+    } catch (error) {
+      console.error('Error updating offboarding:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+);
+
+/**
+ * @route   PUT /api/offboarding/:id/cancel
+ * @desc    Cancel offboarding request
+ * @access  HR, Admin
+ */
+router.put('/:id/cancel',
+  offboardingMiddleware.manageOffboarding,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+
+      const OffboardingRequest = getTenantModel(
+        req.tenant.connection,
+        'OffboardingRequest',
+        require('../../models/tenant/OffboardingRequest')
+      );
+
+      const request = await OffboardingRequest.findById(id);
+      if (!request) {
+        return res.status(404).json({ success: false, message: 'Offboarding request not found' });
+      }
+
+      if (request.status === 'closed') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot cancel a completed offboarding process'
+        });
+      }
+
+      request.status = 'cancelled';
+      if (reason) {
+        request.notes = (request.notes || []).concat([{
+          addedBy: req.user._id,
+          content: `[Cancelled] ${reason}`,
+          addedAt: new Date()
+        }]);
+      }
+      request.completedAt = new Date();
+      request.isCompleted = true;
+
+      await request.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Offboarding cancelled successfully',
+        data: request
+      });
+    } catch (error) {
+      console.error('Error cancelling offboarding:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+);
+
+/**
+ * @route   DELETE /api/offboarding/:id
+ * @desc    Delete offboarding request
+ * @access  Admin only
+ */
+router.delete('/:id',
+  offboardingMiddleware.manageOffboarding,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const OffboardingRequest = getTenantModel(
+        req.tenant.connection,
+        'OffboardingRequest',
+        require('../../models/tenant/OffboardingRequest')
+      );
+
+      const request = await OffboardingRequest.findByIdAndDelete(id);
+      if (!request) {
+        return res.status(404).json({ success: false, message: 'Offboarding request not found' });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Offboarding deleted successfully'
+      });
+    } catch (error) {
+      console.error('Error deleting offboarding:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
 );
 
 // ==================== TASK MANAGEMENT ROUTES ====================

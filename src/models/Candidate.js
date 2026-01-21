@@ -85,7 +85,10 @@ const candidateSchema = new mongoose.Schema({
     originalName: String,
     size: Number,
     mimetype: String,
-    uploadedAt: Date
+    uploadedAt: Date,
+    s3Key: String,      // S3 object key
+    s3Bucket: String,   // S3 bucket name
+    signedUrl: String   // Temporary signed URL for access
   },
   stage: {
     type: String,
@@ -346,6 +349,14 @@ const candidateSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
       }
+    },
+    // Store complete Reducto JSON response for auditing/debugging
+    reductoResponse: {
+      type: mongoose.Schema.Types.Mixed // Store full JSON from Reducto
+    },
+    // Store the extracted data object from Reducto
+    extractedData: {
+      type: mongoose.Schema.Types.Mixed // Store the extractedData object
     }
   }
 }, {
