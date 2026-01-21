@@ -5,7 +5,7 @@
 
 const { getTenantModel } = require('../utils/tenantModels');
 const { getTenantConnection } = require('../config/database.config');
-const TenantUserSchema = require('../models/tenant/TenantUser');
+const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('./emailService');
 
@@ -19,7 +19,7 @@ class EmployeeCreationService {
   async completeOnboardingAndCreateEmployee(onboardingId, tenantConnection, additionalData = {}) {
     try {
       const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
-      const TenantUser = tenantConnection.model('User', TenantUserSchema);
+      const TenantEmployee = tenantConnection.model('Employee', TenantEmployeeSchema);
       
       // Get onboarding record
       const onboarding = await Onboarding.findById(onboardingId)
@@ -47,17 +47,15 @@ class EmployeeCreationService {
       const tempPassword = this.generateTempPassword();
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-      // Create employee user account
+      // Create employee record
       const employeeData = {
-        email: onboarding.candidateEmail,
-        password: hashedPassword,
         firstName: onboarding.candidateName.split(' ')[0],
         lastName: onboarding.candidateName.split(' ').slice(1).join(' ') || '',
+        email: onboarding.candidateEmail,
         phone: onboarding.candidatePhone,
-        role: 'employee',
         employeeCode: employeeCode,
         designation: onboarding.position,
-        department: onboarding.department?._id || onboarding.department,
+        department: onboarding.department?.name || onboarding.department,
         departmentId: onboarding.department?._id || onboarding.department,
         joiningDate: onboarding.joiningDate || new Date(),
         isActive: true,
@@ -74,8 +72,8 @@ class EmployeeCreationService {
         ...additionalData
       };
 
-      // Create user account
-      const employee = await TenantUser.create(employeeData);
+      // Create employee record
+      const employee = await TenantEmployee.create(employeeData);
 
       console.log(`✅ Employee created: ${employee.email} (${employeeCode})`);
 
@@ -118,22 +116,22 @@ class EmployeeCreationService {
    * Generate unique employee code
    */
   async generateEmployeeCode(tenantConnection) {
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
+    const TenantEmployee = tenantConnection.model('Employee', TenantEmployeeSchema);
+
     // Get count of existing employees
-    const employeeCount = await TenantUser.countDocuments({ role: { $in: ['employee', 'manager'] } });
-    
+    const employeeCount = await TenantEmployee.countDocuments();
+
     // Generate code: EMP + 4-digit number
     const codeNumber = (employeeCount + 1).toString().padStart(4, '0');
     const employeeCode = `EMP${codeNumber}`;
-    
+
     // Check if code already exists
-    const existing = await TenantUser.findOne({ employeeCode });
+    const existing = await TenantEmployee.findOne({ employeeCode });
     if (existing) {
       // If exists, use timestamp to make it unique
       return `EMP${Date.now().toString().slice(-6)}`;
     }
-    
+
     return employeeCode;
   }
 

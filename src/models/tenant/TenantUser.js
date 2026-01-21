@@ -109,6 +109,41 @@ const tenantUserSchema = new mongoose.Schema({
       type: String
     }
   }],
+
+  // Employee-specific fields (for role: 'employee')
+  employeeCode: {
+    type: String,
+    unique: true,
+    sparse: true // Allows multiple null values but unique non-null values
+  },
+  joiningDate: {
+    type: Date
+  },
+  salary: {
+    basic: {
+      type: Number,
+      default: 0
+    },
+    hra: {
+      type: Number,
+      default: 0
+    },
+    allowances: {
+      type: Number,
+      default: 0
+    },
+    total: {
+      type: Number,
+      default: 0
+    }
+  },
+  terminatedAt: {
+    type: Date
+  },
+  terminationReason: {
+    type: String
+  },
+
   // Legacy Permissions (deprecated - kept for backward compatibility)
   permissions: {
     canManageEmployees: {

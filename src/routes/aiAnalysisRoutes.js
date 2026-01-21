@@ -10,6 +10,7 @@ const {
   clearAnalysis,
   resumeSearchAndShortlist
 } = require('../controllers/aiAnalysisController');
+const reductoService = require('../services/reductoService');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
@@ -89,9 +90,177 @@ router.delete('/jobs/:jobId/clear',
  * @desc    AI-powered resume search and shortlisting
  * @access  Private (HR, Admin)
  */
-router.post('/resume-search', 
-  authorize('admin', 'hr', 'company_admin'), 
+router.post('/resume-search',
+  authorize('admin', 'hr', 'company_admin'),
   resumeSearchAndShortlist
+);
+
+/**
+ * @route   GET /api/ai-analysis/reducto/health
+ * @desc    Get Reducto service health status
+ * @access  Private (Admin only)
+ */
+router.get('/reducto/health',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const health = await reductoService.healthCheck();
+      res.status(200).json({
+        success: true,
+        data: health
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Health check failed',
+        error: error.message
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/ai-analysis/reducto/status
+ * @desc    Get detailed Reducto service status and metrics
+ * @access  Private (Admin only)
+ */
+router.get('/reducto/status',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const status = reductoService.getServiceStatus();
+      res.status(200).json({
+        success: true,
+        data: status
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Status check failed',
+        error: error.message
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/ai-analysis/reducto/metrics
+ * @desc    Get Reducto service performance metrics
+ * @access  Private (Admin only)
+ */
+router.get('/reducto/metrics',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const metrics = reductoService.getMetrics();
+      res.status(200).json({
+        success: true,
+        data: metrics
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Metrics retrieval failed',
+        error: error.message
+      });
+    }
+  }
+);
+
+/**
+ * @route   POST /api/ai-analysis/reducto/cache/clear
+ * @desc    Clear Reducto service cache
+ * @access  Private (Admin only)
+ */
+router.post('/reducto/cache/clear',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const result = reductoService.clearCache();
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Cache clear failed',
+        error: error.message
+      });
+    }
+  }
+);
+
+/**
+ * @route   POST /api/ai-analysis/reducto/cache/cleanup
+ * @desc    Force cleanup of expired cache entries
+ * @access  Private (Admin only)
+ */
+router.post('/reducto/cache/cleanup',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const result = reductoService.forceCacheCleanup();
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Cache cleanup failed',
+        error: error.message
+      });
+    }
+  }
+);
+
+/**
+ * @route   POST /api/ai-analysis/reducto/metrics/reset
+ * @desc    Reset Reducto service metrics
+ * @access  Private (Admin only)
+ */
+router.post('/reducto/metrics/reset',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const result = reductoService.resetAllMetrics();
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Metrics reset failed',
+        error: error.message
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/ai-analysis/reducto/monitoring
+ * @desc    Get comprehensive monitoring data
+ * @access  Private (Admin only)
+ */
+router.get('/reducto/monitoring',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const monitoring = reductoService.getMonitoringData();
+      res.status(200).json({
+        success: true,
+        data: monitoring
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Monitoring data retrieval failed',
+        error: error.message
+      });
+    }
+  }
 );
 
 module.exports = router;

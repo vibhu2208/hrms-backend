@@ -27,7 +27,7 @@ exports.getOffboardingRequests = async (req, res) => {
     
     // Get tenant-specific models
     const { getTenantModels } = require('../../utils/tenantModels');
-    const { Employee, Department } = getTenantModels(req.tenant.connection);
+    const { Employee: TenantEmployee, Department: TenantDepartment } = getTenantModels(req.tenant.connection);
     const User = require('../../models/User'); // User stays global
     
     // Build query (no need for clientId filter since we have database isolation)
@@ -49,13 +49,34 @@ exports.getOffboardingRequests = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Manually populate employee data from main database
+    // Manually populate employee data from main database or snapshots
     for (let request of requests) {
       if (request.employeeId) {
-        const employee = await Employee.findById(request.employeeId)
-          .populate('department', 'name')
-          .populate('reportingManager', 'firstName lastName email');
-        request.employeeId = employee;
+        if (request.status === 'closed' && request.employeeSnapshot) {
+          // If offboarding is closed and snapshot exists, use archived employee data
+          let departmentData = null;
+          if (request.employeeSnapshot.department) {
+            // Try to populate department name from snapshot
+            try {
+              const department = await TenantDepartment.findById(request.employeeSnapshot.department).select('name');
+              departmentData = department ? { name: department.name } : null;
+            } catch (error) {
+              departmentData = null;
+            }
+          }
+
+          request.employeeId = {
+            ...request.employeeSnapshot,
+            department: departmentData,
+            reportingManager: request.employeeSnapshot.reportingManager
+          };
+        } else {
+          // Otherwise, fetch live employee data
+          const employee = await TenantEmployee.findById(request.employeeId)
+            .populate('department', 'name')
+            .populate('reportingManager', 'firstName lastName email');
+          request.employeeId = employee;
+        }
       }
       if (request.initiatedBy) {
         const user = await User.findById(request.initiatedBy).select('email firstName lastName');
@@ -65,9 +86,50 @@ exports.getOffboardingRequests = async (req, res) => {
 
     const total = await OffboardingRequest.countDocuments(query);
 
+    // Calculate summary statistics (similar to legacy controller)
+    const allRequests = await OffboardingRequest.find({}).select('status currentStage');
+    const summary = {
+      total: allRequests.length,
+      inProgress: allRequests.filter(r => r.status === 'checklist_active' || r.status === 'clearance_in_progress' || r.status === 'settlement_pending' || r.status === 'feedback_pending').length,
+      completed: allRequests.filter(r => r.status === 'closed').length,
+      cancelled: allRequests.filter(r => r.status === 'cancelled').length,
+      byStage: {}
+    };
+
+    // Count by stage
+    allRequests.forEach(request => {
+      if (request.currentStage) {
+        summary.byStage[request.currentStage] = (summary.byStage[request.currentStage] || 0) + 1;
+      }
+    });
+
+    // Transform data to match frontend expectations
+    const transformedRequests = requests.map(request => ({
+      _id: request._id,
+      employee: request.employeeId ? {
+        firstName: request.employeeId.firstName,
+        lastName: request.employeeId.lastName,
+        email: request.employeeId.email,
+        employeeCode: request.employeeId.employeeCode,
+        department: request.employeeId.department && request.employeeId.department.name
+          ? { name: request.employeeId.department.name }
+          : request.employeeId.department || null
+      } : null,
+      initiatedBy: request.initiatedBy,
+      lastWorkingDate: request.lastWorkingDay,
+      resignationType: request.reason === 'voluntary_resignation' ? 'voluntary' : 'involuntary',
+      reason: request.reason,
+      stages: ['initiation', 'manager_approval', 'hr_approval', 'finance_approval', 'checklist_generation', 'departmental_clearance', 'asset_return', 'knowledge_transfer', 'final_settlement', 'exit_interview', 'closure'],
+      currentStage: request.currentStage,
+      status: request.status === 'closed' ? 'completed' : request.status === 'cancelled' ? 'cancelled' : 'in-progress',
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt
+    }));
+
     res.status(200).json({
       success: true,
-      data: requests,
+      data: transformedRequests,
+      summary,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -99,45 +161,86 @@ exports.getOffboardingRequest = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Offboarding request not found' });
     }
 
-    // Manually populate employee data from main database
+    // Manually populate employee data from tenant database
+    const { getTenantModels } = require('../../utils/tenantModels');
+    const { Employee: TenantEmployee, Department: TenantDepartment } = getTenantModels(req.tenant.connection);
+
+    let employeeData = null;
     if (request.employeeId) {
-      const employee = await Employee.findById(request.employeeId)
-        .populate('department', 'name')
-        .populate('reportingManager', 'firstName lastName email');
-      request.employeeId = employee;
+      if (request.status === 'closed' && request.employeeSnapshot) {
+        // If offboarding is closed and snapshot exists, use archived employee data
+        let departmentData = null;
+        if (request.employeeSnapshot.department) {
+          // Try to populate department name from snapshot
+          try {
+            const department = await TenantDepartment.findById(request.employeeSnapshot.department).select('name');
+            departmentData = department ? { name: department.name } : null;
+          } catch (error) {
+            departmentData = null;
+          }
+        }
+
+        employeeData = {
+          ...request.employeeSnapshot,
+          department: departmentData,
+          reportingManager: request.employeeSnapshot.reportingManager
+        };
+      } else {
+        // Otherwise, fetch live employee data
+        employeeData = await TenantEmployee.findById(request.employeeId)
+          .populate('department', 'name')
+          .populate('reportingManager', 'firstName lastName email');
+      }
     }
-    if (request.initiatedBy) {
-      const user = await User.findById(request.initiatedBy).select('email firstName lastName');
-      request.initiatedBy = user;
-    }
 
-    // Get related data
-    const OffboardingTask = getTenantModel(req.tenant.connection, 'OffboardingTask', offboardingTaskSchema);
-    const tasks = await OffboardingTask.find({ offboardingRequestId: id })
-      .populate('assignedTo', 'email firstName lastName');
+    // Transform to match frontend expectations (legacy format)
+    const transformedData = {
+      _id: request._id,
+      employee: employeeData ? {
+        firstName: employeeData.firstName,
+        lastName: employeeData.lastName,
+        email: employeeData.email,
+        employeeCode: employeeData.employeeCode,
+        department: employeeData.department,
+        designation: employeeData.designation,
+        joiningDate: employeeData.joiningDate,
+        phone: employeeData.phone,
+        address: employeeData.address,
+        reportingManager: employeeData.reportingManager
+      } : null,
+      initiatedBy: request.initiatedBy,
+      lastWorkingDate: request.lastWorkingDay,
+      resignationType: request.reason === 'voluntary_resignation' ? 'voluntary' : 'involuntary',
+      reason: request.reason,
+      reasonDetails: request.reasonDetails,
+      stages: ['initiation', 'manager_approval', 'hr_approval', 'finance_approval', 'checklist_generation', 'departmental_clearance', 'asset_return', 'knowledge_transfer', 'final_settlement', 'exit_interview', 'closure'],
+      currentStage: request.currentStage,
+      status: request.status === 'closed' ? 'completed' : request.status === 'cancelled' ? 'cancelled' : 'in-progress',
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+      notes: request.notes || [],
 
-    const HandoverDetail = getTenantModel(req.tenant.connection, 'HandoverDetail', handoverDetailSchema);
-    const handover = await HandoverDetail.findOne({ offboardingRequestId: id });
-
-    const AssetClearance = getTenantModel(req.tenant.connection, 'AssetClearance', assetClearanceSchema);
-    const assets = await AssetClearance.findOne({ offboardingRequestId: id });
-
-    const FinalSettlement = getTenantModel(req.tenant.connection, 'FinalSettlement', finalSettlementSchema);
-    const settlement = await FinalSettlement.findOne({ offboardingRequestId: id });
-
-    const ExitFeedback = getTenantModel(req.tenant.connection, 'ExitFeedback', exitFeedbackSchema);
-    const feedback = await ExitFeedback.findOne({ offboardingRequestId: id });
+      // Add legacy-compatible fields
+      clearance: {
+        hr: { cleared: false, notes: '' },
+        finance: { cleared: false, notes: '' },
+        it: { cleared: false, notes: '' },
+        admin: { cleared: false, notes: '' }
+      },
+      exitInterview: {
+        completed: request.status === 'closed',
+        feedback: ''
+      },
+      finalSettlement: {
+        amount: 0,
+        paymentStatus: 'pending'
+      },
+      assetsReturned: []
+    };
 
     res.status(200).json({
       success: true,
-      data: {
-        request,
-        tasks,
-        handover,
-        assets,
-        settlement,
-        feedback
-      }
+      data: transformedData
     });
   } catch (error) {
     console.error('Error fetching offboarding request:', error);
@@ -168,10 +271,35 @@ exports.initiateOffboarding = async (req, res) => {
       req.user._id
     );
 
+    // Get employee data for transformation
+    const { getTenantModels } = require('../../utils/tenantModels');
+    const { Employee: TenantEmployee } = getTenantModels(req.tenant.connection);
+    const employeeData = await TenantEmployee.findById(employeeId);
+
+    // Transform to match frontend expectations (legacy format)
+    const transformedData = {
+      _id: offboardingRequest._id,
+      employee: employeeData ? {
+        firstName: employeeData.firstName,
+        lastName: employeeData.lastName,
+        email: employeeData.email,
+        employeeCode: employeeData.employeeCode
+      } : null,
+      initiatedBy: offboardingRequest.initiatedBy,
+      lastWorkingDate: offboardingRequest.lastWorkingDay,
+      resignationType: offboardingRequest.reason === 'voluntary_resignation' ? 'voluntary' : 'involuntary',
+      reason: offboardingRequest.reason,
+      stages: ['initiation', 'manager_approval', 'hr_approval', 'finance_approval', 'checklist_generation', 'departmental_clearance', 'asset_return', 'knowledge_transfer', 'final_settlement', 'exit_interview', 'closure'],
+      currentStage: offboardingRequest.currentStage,
+      status: offboardingRequest.status === 'closed' ? 'completed' : offboardingRequest.status === 'cancelled' ? 'cancelled' : 'in-progress',
+      createdAt: offboardingRequest.createdAt,
+      updatedAt: offboardingRequest.updatedAt
+    };
+
     res.status(201).json({
       success: true,
       message: 'Offboarding process initiated successfully',
-      data: offboardingRequest
+      data: transformedData
     });
   } catch (error) {
     console.error('Error initiating offboarding:', error);
