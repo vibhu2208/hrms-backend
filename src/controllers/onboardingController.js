@@ -586,7 +586,9 @@ exports.updateOnboardingStatus = async (req, res) => {
 
     // Define allowed state transitions
     const allowedTransitions = {
-      'preboarding': ['offer_sent', 'rejected'],
+      'preboarding': ['pending_approval', 'offer_sent', 'rejected'], // Can request approval or send offer (if approved)
+      'pending_approval': ['preboarding', 'approval_rejected'], // Admin can approve (returns to preboarding) or reject
+      'approval_rejected': ['pending_approval', 'rejected'], // HR can re-request or reject candidate
       'offer_sent': ['offer_accepted', 'rejected'],
       'offer_accepted': ['docs_pending', 'rejected'],
       'docs_pending': ['docs_verified', 'rejected'],
@@ -680,6 +682,36 @@ exports.sendOffer = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Onboarding record has no status'
+      });
+    }
+
+    // Check approval status - MANDATORY: Cannot send offer without admin approval
+    // This ensures the approval workflow is not skippable
+    if (onboarding.approvalStatus?.status !== 'approved') {
+      // Check if approval is pending
+      if (onboarding.approvalStatus?.status === 'pending') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot send offer. Approval is pending from admin. Please wait for approval.',
+          code: 'APPROVAL_PENDING'
+        });
+      }
+      
+      // Check if approval was rejected
+      if (onboarding.approvalStatus?.status === 'rejected') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot send offer. Previous approval request was rejected. Please re-request approval.',
+          code: 'APPROVAL_REJECTED',
+          rejectionReason: onboarding.approvalStatus?.rejectionReason
+        });
+      }
+      
+      // No approval requested yet
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot send offer without admin approval. Please request approval first.',
+        code: 'APPROVAL_REQUIRED'
       });
     }
 
@@ -1584,6 +1616,391 @@ exports.requestDocuments = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to request documents',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Request approval from admin before sending offer
+ * @route POST /api/onboarding/:id/request-approval
+ * @access Private (HR only)
+ */
+exports.requestOnboardingApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, offerDetails } = req.body;
+    const hrUserId = req.user.id || req.user._id;
+    const tenantConnection = req.tenant.connection;
+    
+    const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+    const Candidate = getTenantModel(tenantConnection, 'Candidate');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const ApprovalInstanceSchema = require('../models/tenant/ApprovalInstance');
+    const ApprovalInstance = tenantConnection.model('ApprovalInstance', ApprovalInstanceSchema);
+    
+    // Get onboarding record with full details
+    const onboarding = await Onboarding.findById(id)
+      .populate('applicationId')
+      .populate('department', 'name')
+      .populate('jobId', 'title')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('assignedHR', 'firstName lastName email');
+
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Validate status - can only request approval in preboarding or after rejection
+    const allowedStatuses = ['preboarding', 'approval_rejected'];
+    if (!allowedStatuses.includes(onboarding.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot request approval in current status: ${onboarding.status}. Approval can only be requested in preboarding or after rejection.`
+      });
+    }
+
+    // Check if approval is already pending
+    if (onboarding.approvalStatus?.status === 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'An approval request is already pending for this candidate'
+      });
+    }
+
+    // Get HR user details
+    const hrUser = await TenantUser.findById(hrUserId).select('firstName lastName email role');
+    if (!hrUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'HR user not found'
+      });
+    }
+
+    // Get candidate details
+    const candidate = await Candidate.findById(onboarding.applicationId)
+      .populate('appliedFor', 'title department');
+
+    // Find company admin to be the approver
+    const companyAdmin = await TenantUser.findOne({ 
+      role: 'company_admin', 
+      isActive: true 
+    }).select('firstName lastName email');
+
+    if (!companyAdmin) {
+      return res.status(400).json({
+        success: false,
+        message: 'No company admin found to approve this request. Please contact system administrator.'
+      });
+    }
+
+    // Create approval instance with comprehensive metadata
+    const approvalInstance = await ApprovalInstance.create({
+      requestType: 'onboarding_approval',
+      requestId: onboarding._id,
+      requestedBy: hrUserId,
+      currentLevel: 1,
+      totalLevels: 1,
+      status: 'pending',
+      approvalChain: [{
+        level: 1,
+        approverType: 'company_admin',
+        approverId: companyAdmin._id,
+        status: 'pending',
+        sla: {
+          dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+          escalationDate: new Date(Date.now() + 36 * 60 * 60 * 1000),
+          isEscalated: false
+        }
+      }],
+      metadata: {
+        priority: 'high',
+        // Candidate details
+        candidateName: onboarding.candidateName,
+        candidateEmail: onboarding.candidateEmail,
+        candidatePhone: onboarding.candidatePhone,
+        candidateCode: candidate?.candidateCode || 'N/A',
+        // Job details
+        position: onboarding.position,
+        department: onboarding.department?.name || 'N/A',
+        jobTitle: onboarding.jobId?.title || onboarding.position,
+        // HR details
+        requestedByName: `${hrUser.firstName} ${hrUser.lastName}`,
+        requestedByEmail: hrUser.email,
+        requestedByRole: hrUser.role,
+        // Offer details (if provided)
+        offerDetails: offerDetails || {},
+        // Additional notes
+        notes: notes || '',
+        // Onboarding ID for reference
+        onboardingId: onboarding.onboardingId
+      },
+      slaStatus: {
+        startDate: new Date(),
+        expectedCompletionDate: new Date(Date.now() + 24 * 60 * 60 * 1000)
+      },
+      history: [{
+        action: 'CREATED',
+        performedBy: hrUserId,
+        timestamp: new Date(),
+        details: { 
+          notes: notes || 'Onboarding approval request created',
+          candidateName: onboarding.candidateName,
+          position: onboarding.position
+        }
+      }]
+    });
+
+    // Update onboarding record
+    onboarding.status = 'pending_approval';
+    onboarding.approvalStatus = {
+      status: 'pending',
+      approvalInstanceId: approvalInstance._id,
+      requestedBy: hrUserId,
+      requestedAt: new Date(),
+      canReRequest: false
+    };
+
+    // Add audit trail
+    onboarding.auditTrail.push({
+      action: 'approval_requested',
+      description: `Approval requested from admin by ${hrUser.firstName} ${hrUser.lastName}`,
+      performedBy: hrUserId,
+      previousStatus: onboarding.status === 'approval_rejected' ? 'approval_rejected' : 'preboarding',
+      newStatus: 'pending_approval',
+      metadata: { 
+        approvalInstanceId: approvalInstance._id,
+        approverEmail: companyAdmin.email,
+        notes 
+      },
+      timestamp: new Date()
+    });
+
+    await onboarding.save();
+
+    console.log(`✅ Onboarding approval requested for ${onboarding.candidateName} by ${hrUser.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Approval request sent to admin successfully',
+      data: {
+        onboardingId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        approvalInstanceId: approvalInstance._id,
+        status: 'pending',
+        approverEmail: companyAdmin.email,
+        requestedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error requesting onboarding approval:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to request approval',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get approval status for an onboarding record
+ * @route GET /api/onboarding/:id/approval-status
+ * @access Private (HR/Admin)
+ */
+exports.getOnboardingApprovalStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tenantConnection = req.tenant.connection;
+    
+    const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+    const ApprovalInstanceSchema = require('../models/tenant/ApprovalInstance');
+    const ApprovalInstance = tenantConnection.model('ApprovalInstance', ApprovalInstanceSchema);
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    const onboarding = await Onboarding.findById(id);
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Get approval instance if exists
+    let approvalInstance = null;
+    if (onboarding.approvalStatus?.approvalInstanceId) {
+      approvalInstance = await ApprovalInstance.findById(onboarding.approvalStatus.approvalInstanceId)
+        .populate('requestedBy', 'firstName lastName email')
+        .populate('approvalChain.approverId', 'firstName lastName email');
+    }
+
+    // Get history of approval requests for this onboarding
+    const approvalHistory = await ApprovalInstance.find({
+      requestType: 'onboarding_approval',
+      requestId: onboarding._id
+    })
+    .populate('requestedBy', 'firstName lastName email')
+    .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        onboardingId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        currentStatus: onboarding.status,
+        approvalStatus: onboarding.approvalStatus || { status: 'not_requested' },
+        currentApprovalInstance: approvalInstance,
+        approvalHistory: approvalHistory,
+        canRequestApproval: ['preboarding', 'approval_rejected'].includes(onboarding.status) && 
+                           onboarding.approvalStatus?.status !== 'pending',
+        canSendOffer: onboarding.approvalStatus?.status === 'approved'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting approval status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get approval status',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Process onboarding approval (Admin action)
+ * @route PUT /api/onboarding/:id/process-approval
+ * @access Private (Admin only)
+ */
+exports.processOnboardingApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, comments } = req.body; // action: 'approve' or 'reject'
+    const adminUserId = req.user.id || req.user._id;
+    const tenantConnection = req.tenant.connection;
+    
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be either "approve" or "reject"'
+      });
+    }
+
+    const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+    const ApprovalInstanceSchema = require('../models/tenant/ApprovalInstance');
+    const ApprovalInstance = tenantConnection.model('ApprovalInstance', ApprovalInstanceSchema);
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    const onboarding = await Onboarding.findById(id);
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Validate status
+    if (onboarding.status !== 'pending_approval') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot process approval. Current status: ${onboarding.status}`
+      });
+    }
+
+    // Get admin user details
+    const adminUser = await TenantUser.findById(adminUserId).select('firstName lastName email role');
+    
+    // Validate admin role
+    if (!adminUser || adminUser.role !== 'company_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only company admin can approve or reject onboarding requests'
+      });
+    }
+
+    // Get and update approval instance
+    const approvalInstance = await ApprovalInstance.findById(onboarding.approvalStatus.approvalInstanceId);
+    if (approvalInstance) {
+      const currentApprover = approvalInstance.getCurrentApprover();
+      if (currentApprover) {
+        currentApprover.status = action === 'approve' ? 'approved' : 'rejected';
+        currentApprover.actionDate = new Date();
+        currentApprover.comments = comments;
+      }
+      approvalInstance.status = action === 'approve' ? 'approved' : 'rejected';
+      approvalInstance.slaStatus.actualCompletionDate = new Date();
+      approvalInstance.history.push({
+        action: action.toUpperCase(),
+        performedBy: adminUserId,
+        timestamp: new Date(),
+        details: { comments, level: 1 }
+      });
+      await approvalInstance.save();
+    }
+
+    // Update onboarding record
+    const previousStatus = onboarding.status;
+    
+    if (action === 'approve') {
+      onboarding.status = 'preboarding'; // Return to preboarding so HR can send offer
+      onboarding.approvalStatus.status = 'approved';
+      onboarding.approvalStatus.approvedBy = adminUserId;
+      onboarding.approvalStatus.approvedAt = new Date();
+      onboarding.approvalStatus.comments = comments;
+      onboarding.approvalStatus.canReRequest = false;
+    } else {
+      onboarding.status = 'approval_rejected';
+      onboarding.approvalStatus.status = 'rejected';
+      onboarding.approvalStatus.rejectedBy = adminUserId;
+      onboarding.approvalStatus.rejectedAt = new Date();
+      onboarding.approvalStatus.rejectionReason = comments;
+      onboarding.approvalStatus.canReRequest = true; // Allow HR to re-request
+    }
+
+    // Add audit trail
+    onboarding.auditTrail.push({
+      action: action === 'approve' ? 'approval_granted' : 'approval_rejected',
+      description: action === 'approve' 
+        ? `Approval granted by ${adminUser.firstName} ${adminUser.lastName}` 
+        : `Approval rejected by ${adminUser.firstName} ${adminUser.lastName}`,
+      performedBy: adminUserId,
+      previousStatus,
+      newStatus: onboarding.status,
+      metadata: { comments },
+      timestamp: new Date()
+    });
+
+    await onboarding.save();
+
+    console.log(`✅ Onboarding ${action === 'approve' ? 'approved' : 'rejected'} for ${onboarding.candidateName} by ${adminUser.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: action === 'approve' 
+        ? 'Onboarding approved. HR can now send offer letter.' 
+        : 'Onboarding rejected. Candidate is on hold.',
+      data: {
+        onboardingId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        status: onboarding.status,
+        approvalStatus: onboarding.approvalStatus,
+        action,
+        processedBy: `${adminUser.firstName} ${adminUser.lastName}`,
+        processedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing onboarding approval:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process approval',
       error: error.message
     });
   }

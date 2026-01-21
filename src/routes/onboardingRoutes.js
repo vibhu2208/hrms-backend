@@ -19,7 +19,11 @@ const {
   verifyDocument,
   getDocuments,
   requestDocumentResubmission,
-  requestDocuments
+  requestDocuments,
+  // Onboarding Approval Routes
+  requestOnboardingApproval,
+  getOnboardingApprovalStatus,
+  processOnboardingApproval
 } = require('../controllers/onboardingController');
 const { sendTestOnboardingEmail } = require('../controllers/testEmailController');
 const { protect, authorize } = require('../middlewares/auth');
@@ -47,6 +51,11 @@ router.put('/:id/tasks/:taskId/complete', completeTask);
 router.put('/:id/status', updateOnboardingStatus);
 router.post('/:id/send-offer', sendOffer);
 router.post('/:id/set-joining-date', setJoiningDateAndNotify);
+
+// Onboarding Approval Routes - HR requests approval, Admin approves/rejects
+router.post('/:id/request-approval', requestOnboardingApproval);
+router.get('/:id/approval-status', getOnboardingApprovalStatus);
+router.put('/:id/process-approval', processOnboardingApproval);
 
 // Document management routes
 router.get('/:id/documents', getDocuments);
