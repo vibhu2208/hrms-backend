@@ -336,20 +336,36 @@ exports.matchCandidates = async (req, res) => {
     const { minScore = 0, maxResults = 50 } = req.query;
     const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
 
+    console.log(`🔍 JD Search - ID: ${id}, minScore: ${minScore}, maxResults: ${maxResults}`);
+
     const jobDescription = await JobDescription.findById(id);
     if (!jobDescription) {
+      console.error(`❌ JD not found: ${id}`);
       return res.status(404).json({
         success: false,
         error: 'Job description not found'
       });
     }
 
+    console.log(`📄 JD found: ${jobDescription.jobTitle}, Status: ${jobDescription.parsingStatus}`);
+
     if (jobDescription.parsingStatus !== 'completed') {
+      console.error(`⚠️ JD not parsed yet: ${jobDescription.parsingStatus}`);
       return res.status(400).json({
         success: false,
         error: 'Job description parsing not completed yet'
       });
     }
+
+    if (!jobDescription.parsedData) {
+      console.error(`❌ JD parsedData missing for: ${id}`);
+      return res.status(400).json({
+        success: false,
+        error: 'Job description data is missing. Please re-parse the JD.'
+      });
+    }
+
+    console.log(`✅ JD data loaded, starting candidate matching...`);
 
     // Perform candidate matching (don't save to DB, just return results)
     const matches = await candidateMatchingService.matchCandidates(
@@ -357,6 +373,8 @@ exports.matchCandidates = async (req, res) => {
       req.tenant.connection,
       { minScore: parseInt(minScore), maxResults: parseInt(maxResults) }
     );
+
+    console.log(`📊 Found ${matches.length} matches`);
 
     // Populate candidate details for response
     const populatedMatches = await Promise.all(
@@ -366,7 +384,11 @@ exports.matchCandidates = async (req, res) => {
           .select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation');
 
         return {
-          ...match,
+          candidateId: match.candidateId,
+          overallScore: match.overallScore,
+          overallFit: match.overallFit,
+          matchedSkills: match.matchedSkills, // Already simplified to just skill names
+          relevanceExplanation: match.relevanceExplanation,
           candidate: candidate ? {
             id: candidate._id,
             name: `${candidate.firstName} ${candidate.lastName}`,
@@ -385,7 +407,7 @@ exports.matchCandidates = async (req, res) => {
     // Calculate statistics on-the-fly without saving
     const statistics = {
       totalCandidates: matches.length,
-      averageScore: matches.length > 0 
+      averageScore: matches.length > 0
         ? (matches.reduce((sum, m) => sum + m.overallScore, 0) / matches.length).toFixed(2)
         : 0,
       scoreDistribution: {
@@ -395,6 +417,8 @@ exports.matchCandidates = async (req, res) => {
         poor: matches.filter(m => m.overallScore < 40).length
       }
     };
+
+    console.log(`✅ JD search completed successfully`);
 
     res.status(200).json({
       success: true,
@@ -408,7 +432,7 @@ exports.matchCandidates = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Match candidates error:', error);
+    console.error('❌ Match candidates error:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to match candidates',

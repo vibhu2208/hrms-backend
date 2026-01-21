@@ -8,8 +8,10 @@ const {
   deleteDepartment
 } = require('../controllers/departmentController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 router.route('/')
   .get(getDepartments)
