@@ -144,10 +144,16 @@ class CandidateMatchingService {
         // Generate human-readable explanation
         const explanation = this.generateRelevanceExplanation(matchResult);
 
+        // Simplify matched skills for response - just return skill names
+        const simpleMatchedSkills = explanation.matchedSkills.map(skill =>
+          skill.jdSkill || skill.candidateSkill
+        );
+
         matches.push({
           candidateId: candidate._id,
-          matchScore: matchResult.overallScore,
-          matchedSkills: explanation.matchedSkills,
+          overallScore: matchResult.overallScore,
+          matchedSkills: simpleMatchedSkills, // Simple skill names only
+          matchedSkillsCount: explanation.matchedSkillsCount,
           relevanceExplanation: explanation.relevanceExplanation,
           experienceMatch: matchResult.experienceMatch,
           locationMatch: matchResult.locationMatch,
@@ -159,7 +165,7 @@ class CandidateMatchingService {
     }
 
     // Sort by match score (descending)
-    matches.sort((a, b) => b.matchScore - a.matchScore);
+    matches.sort((a, b) => b.overallScore - a.overallScore);
 
     // Limit results if specified
     const maxResults = options.maxResults || 50;
@@ -180,11 +186,16 @@ class CandidateMatchingService {
     const preferredMatched = skillMatches.preferredMatched || 0;
     const technologyMatched = skillMatches.technologyMatched || 0;
 
-    // Extract matched skill names
-    const matchedSkillNames = skillDetails
+    // Extract matched skills with full details
+    const matchedSkillsDetails = skillDetails
       .filter(match => match.score > 0)
-      .map(match => match.skill)
-      .slice(0, 5); // Limit to top 5 skills
+      .map(match => ({
+        jdSkill: match.skill,
+        candidateSkill: match.candidateSkill,
+        matchType: match.matchType,
+        isPreferred: match.isPreferred || false,
+        isTechnology: match.isTechnology || false
+      }));
 
     // Build relevance explanation
     const reasons = [];
@@ -229,7 +240,13 @@ class CandidateMatchingService {
     const relevanceExplanation = reasons.join('. ') + '.';
 
     return {
-      matchedSkills: matchedSkillNames,
+      matchedSkills: matchedSkillsDetails,
+      matchedSkillsCount: {
+        required: requiredMatched,
+        preferred: preferredMatched,
+        technology: technologyMatched,
+        total: matchedSkillsDetails.length
+      },
       relevanceExplanation: relevanceExplanation
     };
   }
