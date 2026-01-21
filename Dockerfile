@@ -9,8 +9,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies only
-# Using npm ci for faster, reliable, reproducible builds
-RUN npm ci --only=production --no-audit --no-fund && \
+# Using npm install --omit=dev instead of npm ci to handle lock file sync issues
+RUN npm install --omit=dev --no-audit --no-fund && \
     npm cache clean --force && \
     rm -rf /tmp/* /var/cache/apk/*
 
