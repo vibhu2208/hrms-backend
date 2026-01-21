@@ -41,5 +41,6 @@ jobs:
             cd /home/ec2-user/app
             docker-compose pull backend
             docker-compose up -d backend
+            docker image prune -af
           EOF
 
