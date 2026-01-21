@@ -4,8 +4,7 @@ exports.getOffboardingList = async (req, res) => {
   try {
     // Get tenant-specific models
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const TenantUserSchema = require('../models/tenant/TenantUser');
-    const TenantUser = req.tenant.connection.model('User', TenantUserSchema);
+    const TenantUser = getTenantModel(req.tenant.connection, 'User');
     
     const { 
       status, 
@@ -141,8 +140,7 @@ exports.getOffboardingList = async (req, res) => {
 exports.getOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const TenantUserSchema = require('../models/tenant/TenantUser');
-    const TenantUser = req.tenant.connection.model('User', TenantUserSchema);
+    const TenantUser = getTenantModel(req.tenant.connection, 'User');
     const Department = getTenantModel(req.tenant.connection, 'Department');
     
     let offboarding = await Offboarding.findById(req.params.id)

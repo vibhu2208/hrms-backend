@@ -9,6 +9,7 @@ const {
 } = require('../services/emailService');
 const onboardingAutomationService = require('../services/onboardingAutomationService');
 const reductoService = require('../services/reductoService');
+const awsS3Service = require('../services/awsS3Service');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -26,6 +27,7 @@ exports.getCandidates = async (req, res) => {
       const candidates = await Candidate.find(query)
         .populate('appliedFor', 'title department')
         .populate('referredBy', 'firstName lastName')
+        .select('+resume')
         .sort({ createdAt: -1 });
 
       return res.status(200).json({ success: true, count: candidates.length, data: candidates });
@@ -36,7 +38,7 @@ exports.getCandidates = async (req, res) => {
     const allCandidates = await Candidate.find(query)
       .populate('appliedFor', 'title department')
       .populate('referredBy', 'firstName lastName')
-      .select('firstName lastName email phone skills experience currentDesignation currentCompany appliedFor candidateCode createdAt');
+      .select('firstName lastName email phone skills experience currentDesignation currentCompany appliedFor candidateCode createdAt resume stage status timeline');
 
     // Convert candidates to format expected by intelligentSearch
     const candidateResumes = allCandidates.map(candidate => ({
@@ -253,8 +255,9 @@ exports.createCandidate = async (req, res) => {
 
     // Create candidate
     console.log('Creating candidate with data:', req.body);
+    let candidate;
     try {
-      const candidate = await Candidate.create(req.body);
+      candidate = await Candidate.create(req.body);
       console.log('Candidate created successfully:', candidate._id, candidate.candidateCode);
     } catch (createError) {
       console.error('Candidate creation failed:', createError.message);
@@ -324,25 +327,59 @@ exports.createCandidate = async (req, res) => {
     
     // Send application received email
     if (candidate.email) {
-      await candidate.populate('appliedFor', 'title');
-      
-      sendApplicationReceivedEmail({
-        candidateName: `${candidate.firstName} ${candidate.lastName}`,
-        candidateEmail: candidate.email,
-        position: candidate.appliedFor?.title || 'Position',
-        companyName: req.body.companyName || 'Our Company'
-      }).catch(err => console.error('Failed to send application email:', err.message));
+      try {
+        await candidate.populate('appliedFor', 'title');
+
+        await sendApplicationReceivedEmail({
+          candidateName: `${candidate.firstName} ${candidate.lastName}`,
+          candidateEmail: candidate.email,
+          position: candidate.appliedFor?.title || 'Position',
+          companyName: req.body.companyName || 'Our Company'
+        });
+        console.log('Application received email sent successfully');
+      } catch (emailError) {
+        console.error('Failed to send application email:', emailError.message);
+        // Don't throw - email failure shouldn't break candidate creation
+      }
     }
     
-    res.status(201).json({
-      success: true,
-      message: existingCandidate ? 'Candidate created (linked to existing profile)' : 'Candidate created successfully',
-      isDuplicate: candidate.isDuplicate || false,
-      linkedToMaster: existingCandidate ? true : false,
-      data: candidate
-    });
+    try {
+      // Create a clean response object to avoid serialization issues
+      const responseData = {
+        success: true,
+        message: existingCandidate ? 'Candidate created (linked to existing profile)' : 'Candidate created successfully',
+        isDuplicate: candidate.isDuplicate || false,
+        linkedToMaster: existingCandidate ? true : false,
+        data: {
+          _id: candidate._id,
+          candidateCode: candidate.candidateCode,
+          firstName: candidate.firstName,
+          lastName: candidate.lastName,
+          email: candidate.email,
+          phone: candidate.phone,
+          stage: candidate.stage,
+          status: candidate.status,
+          createdAt: candidate.createdAt,
+          skills: candidate.skills,
+          currentCompany: candidate.currentCompany,
+          currentDesignation: candidate.currentDesignation
+        }
+      };
+
+      res.status(201).json(responseData);
+      console.log('Response sent successfully for candidate:', candidate._id);
+    } catch (responseError) {
+      console.error('Error sending response:', responseError);
+      // If response already sent, this won't execute
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Error sending response' });
+      }
+    }
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Error in createCandidate:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 };
 
@@ -1850,6 +1887,8 @@ exports.sendInterviewEmail = async (req, res) => {
  * @route POST /api/candidates/upload-resume
  */
 exports.uploadResume = async (req, res) => {
+  let s3UploadResult = null;
+
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -1884,32 +1923,61 @@ exports.uploadResume = async (req, res) => {
 
     console.log(`Processing resume upload: ${file.originalname} (${file.size} bytes)`);
 
-    // Extract candidate data using Reducto
+    // Step 1: Upload file to AWS S3
+    try {
+      s3UploadResult = await awsS3Service.uploadResume(
+        file.path,
+        file.originalname,
+        file.mimetype
+      );
+      console.log('✅ Resume uploaded to S3:', s3UploadResult.key);
+    } catch (s3Error) {
+      console.error('❌ S3 upload failed:', s3Error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload resume to storage',
+        error: s3Error.message
+      });
+    }
+
+    // Step 2: Extract candidate data using Reducto
     let extractionResult;
     try {
       extractionResult = await reductoService.extractCandidateData(file.path);
     } catch (extractError) {
       console.error('Error calling Reducto service:', extractError);
+
+      // If S3 upload succeeded but parsing failed, we still have the file stored
       return res.status(500).json({
         success: false,
-        message: 'Failed to extract data from resume',
-        error: extractError.message || 'Unknown error during extraction'
+        message: 'Resume uploaded to storage but failed to extract data',
+        error: extractError.message || 'Unknown error during extraction',
+        s3File: {
+          key: s3UploadResult.key,
+          url: s3UploadResult.url,
+          bucket: s3UploadResult.bucket
+        }
       });
     }
 
     if (!extractionResult.success) {
       console.error('Reducto extraction failed:', extractionResult.error);
       console.error('Reducto metadata:', extractionResult.metadata);
-      
+
       return res.status(500).json({
         success: false,
-        message: 'Failed to extract data from resume',
+        message: 'Resume uploaded to storage but failed to extract data',
         error: extractionResult.error || 'Reducto API extraction failed',
+        s3File: {
+          key: s3UploadResult.key,
+          url: s3UploadResult.url,
+          bucket: s3UploadResult.bucket
+        },
         details: extractionResult.metadata?.responseData || extractionResult.metadata
       });
     }
 
-    // Clean up uploaded file
+    // Clean up temporary file
     try {
       const fs = require('fs').promises;
       await fs.unlink(file.path);
@@ -1920,25 +1988,34 @@ exports.uploadResume = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Resume parsed successfully',
+      message: 'Resume uploaded to storage and parsed successfully',
       data: {
         extractedData: extractionResult.data,
         rawText: extractionResult.rawText,
         confidence: extractionResult.confidence,
-        metadata: extractionResult.metadata
+        metadata: extractionResult.metadata,
+        s3File: {
+          key: s3UploadResult.key,
+          url: s3UploadResult.url,
+          bucket: s3UploadResult.bucket,
+          fileName: s3UploadResult.fileName,
+          size: s3UploadResult.size,
+          uploadedAt: s3UploadResult.uploadedAt
+        }
       }
     });
 
   } catch (error) {
     console.error('Error in resume upload:', error);
 
-    // Clean up file on error
+    // Clean up temporary file on error
     if (req.file && req.file.path) {
       try {
         const fs = require('fs').promises;
         await fs.unlink(req.file.path);
+        console.log('Temporary file cleaned up after error');
       } catch (cleanupError) {
-        console.warn('Failed to clean up file on error:', cleanupError);
+        console.warn('Failed to clean up temporary file:', cleanupError);
       }
     }
 
