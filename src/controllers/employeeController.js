@@ -1,4 +1,6 @@
+const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
 const TenantUserSchema = require('../models/tenant/TenantUser');
+const { getTenantModel } = require('../middlewares/tenantMiddleware');
 
 // @desc    Get all employees
 // @route   GET /api/employees
@@ -7,29 +9,25 @@ exports.getEmployees = async (req, res) => {
   try {
     // Get tenant connection from middleware
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const { status, department, search, role } = req.query;
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
+    const { status, department, search } = req.query;
     let query = { isActive: true };
 
-    // Filter by role (default: employees and managers)
-    if (role) {
-      query.role = role;
-    } else {
-      query.role = { $in: ['employee', 'manager'] };
-    }
-
+    // Filter by department if specified
     if (department) query.department = department;
+
+    // Search functionality
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },
         { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { email: { $regex: search, $options: 'i' } },
+        { employeeCode: { $regex: search, $options: 'i' } }
       ];
     }
 
-    const employees = await TenantUser.find(query)
-      .select('-password')
+    const employees = await TenantEmployee.find(query)
       .sort({ createdAt: -1 });
 
     console.log(`📋 Found ${employees.length} employees for company ${req.tenant.companyId}`);
@@ -54,10 +52,9 @@ exports.getEmployees = async (req, res) => {
 exports.getEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const employee = await TenantUser.findById(req.params.id)
-      .select('-password');
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
+    const employee = await TenantEmployee.findById(req.params.id);
 
     if (!employee) {
       return res.status(404).json({
@@ -85,42 +82,44 @@ exports.getEmployee = async (req, res) => {
 exports.createEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
     // Generate employee code
-    const employeeCount = await TenantUser.countDocuments({ role: { $in: ['employee', 'manager'] } });
-    const employeeCode = `EMP${String(employeeCount + 1).padStart(5, '0')}`;
-    
-    // Generate temporary password
-    const crypto = require('crypto');
-    const tempPassword = crypto.randomBytes(8).toString('hex');
-    
-    // Prepare employee data with required fields
+    const employeeCount = await TenantEmployee.countDocuments();
+    const employeeCode = `EMP${String(employeeCount + 1).padStart(4, '0')}`;
+
+    // Prepare employee data
     const employeeData = {
-      ...req.body,
+      firstName: req.body.firstName,
+      lastName: req.body.lastName,
+      email: req.body.email,
+      phone: req.body.phone,
       employeeCode,
-      role: req.body.role || 'employee', // Default to 'employee' if not provided
-      password: tempPassword, // Will be hashed by pre-save hook
-      authProvider: 'local',
-      isActive: true,
+      joiningDate: req.body.joiningDate || new Date(),
+      designation: req.body.designation,
+      department: req.body.department,
+      departmentId: req.body.departmentId,
+      reportingManager: req.body.reportingManager,
+      salary: req.body.salary || {
+        basic: 0,
+        hra: 0,
+        allowances: 0,
+        total: 0
+      },
+      isActive: req.body.isActive !== undefined ? req.body.isActive : true,
       isFirstLogin: true,
-      mustChangePassword: true
+      mustChangePassword: true,
+      createdBy: req.user._id
     };
-    
-    const employee = await TenantUser.create(employeeData);
-    
-    // Remove password from response
-    const employeeResponse = employee.toObject();
-    delete employeeResponse.password;
+
+    const employee = await TenantEmployee.create(employeeData);
+
+    console.log(`✅ Created employee: ${employee.firstName} ${employee.lastName} (${employeeCode})`);
 
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
-      data: {
-        ...employeeResponse,
-        tempPassword: tempPassword // Send temp password in response for HR to share
-      },
-      note: 'Please share the temporary password with the employee. They must change it on first login.'
+      data: employee
     });
   } catch (error) {
     console.error('Error creating employee:', error);
@@ -137,13 +136,13 @@ exports.createEmployee = async (req, res) => {
 exports.updateEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const employee = await TenantUser.findByIdAndUpdate(
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
+    const employee = await TenantEmployee.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
-    ).select('-password');
+    );
 
     if (!employee) {
       return res.status(404).json({
@@ -183,7 +182,7 @@ exports.resetEmployeePassword = async (req, res) => {
     }
 
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);
     
     console.log('✅ Tenant connection established');
     
@@ -242,9 +241,9 @@ exports.resetEmployeePassword = async (req, res) => {
 exports.deleteEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const employee = await TenantUser.findByIdAndDelete(req.params.id);
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
+    const employee = await TenantEmployee.findByIdAndDelete(req.params.id);
 
     if (!employee) {
       return res.status(404).json({

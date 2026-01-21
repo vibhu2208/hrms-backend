@@ -95,6 +95,15 @@ const resumePoolSchema = new mongoose.Schema({
     recommendations: [String],
     confidenceScore: Number
   },
+
+  // Reducto AI Parsing Data (store complete response)
+  reductoData: {
+    type: mongoose.Schema.Types.Mixed, // Store complete Reducto JSON response
+    response: mongoose.Schema.Types.Mixed, // Full API response
+    extractedData: mongoose.Schema.Types.Mixed, // Processed extracted data
+    confidence: mongoose.Schema.Types.Mixed, // Confidence scores
+    metadata: mongoose.Schema.Types.Mixed // Parsing metadata
+  },
   
   // Metadata
   source: {

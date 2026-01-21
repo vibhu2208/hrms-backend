@@ -550,18 +550,65 @@ class OffboardingWorkflowEngine {
    * Complete offboarding process
    */
   async completeOffboarding(tenantConnection, offboardingRequest) {
+    // Get the complete employee data before removing from employees collection
+    const TenantEmployee = tenantConnection.models.Employee || tenantConnection.model('Employee', require('../models/tenant/TenantEmployee'));
+
+    const employeeData = await TenantEmployee.findById(offboardingRequest.employeeId).lean();
+
+    if (employeeData) {
+      // Store complete employee data in offboarding record
+      offboardingRequest.employeeSnapshot = {
+        // Basic Information
+        _id: employeeData._id,
+        firstName: employeeData.firstName,
+        lastName: employeeData.lastName,
+        email: employeeData.email,
+        phone: employeeData.phone,
+        employeeCode: employeeData.employeeCode,
+
+        // Employment Information
+        joiningDate: employeeData.joiningDate,
+        designation: employeeData.designation,
+        department: employeeData.department,
+        departmentId: employeeData.departmentId,
+        reportingManager: employeeData.reportingManager,
+
+        // Salary Information
+        salary: employeeData.salary,
+
+        // Status Information
+        isActive: employeeData.isActive,
+        isFirstLogin: employeeData.isFirstLogin,
+        mustChangePassword: employeeData.mustChangePassword,
+        terminatedAt: new Date(), // Mark termination date
+
+        // Metadata
+        createdBy: employeeData.createdBy,
+        createdAt: employeeData.createdAt,
+        updatedAt: employeeData.updatedAt,
+
+        // Original status before termination
+        originalStatus: employeeData.status,
+        terminationReason: offboardingRequest.reason,
+        terminationDetails: offboardingRequest.reasonDetails,
+        lastWorkingDay: offboardingRequest.lastWorkingDay
+      };
+
+      // Remove employee from employees collection
+      await TenantEmployee.findByIdAndDelete(offboardingRequest.employeeId);
+
+      console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) removed from employees collection and archived in offboarding record`);
+    } else {
+      console.warn(`⚠️  Employee ${offboardingRequest.employeeId} not found in employees collection during offboarding completion`);
+    }
+
+    // Update offboarding record status
     offboardingRequest.status = this.workflowStatus.CLOSED;
     offboardingRequest.isCompleted = true;
     offboardingRequest.completedAt = new Date();
     offboardingRequest.completionPercentage = 100;
-    
+
     await offboardingRequest.save();
-    
-    // Update employee status
-    const Employee = getTenantModel(tenantConnection, 'Employee', require('../models/Employee').schema);
-    await Employee.findByIdAndUpdate(offboardingRequest.employeeId, {
-      status: 'terminated'
-    });
   }
 
   /**
