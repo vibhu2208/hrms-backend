@@ -39,7 +39,7 @@ jobs:
               -i ~/.ssh/ec2_key \
               root@${{ secrets.EC2_HOST }} << 'EOF'
             cd /home/ec2-user/app
-            docker compose pull backend
-            docker compose up -d backend
+            docker-compose pull backend
+            docker-compose up -d backend
           EOF
 
