@@ -7,7 +7,9 @@ const {
   updateThemePreference,
   getUserProfile,
   getAllUsers,
-  createUser
+  createUser,
+  updateUserStatus,
+  deleteUser
 } = require('../controllers/userController');
 
 // All routes are protected
@@ -26,5 +28,11 @@ router.get('/all', authorize('admin', 'company_admin'), getAllUsers);
 
 // Admin and Company Admin - Create new user
 router.post('/create', authorize('admin', 'company_admin'), createUser);
+
+// Admin and Company Admin - Update user status
+router.put('/:id/status', authorize('admin', 'company_admin'), updateUserStatus);
+
+// Admin and Company Admin - Delete user
+router.delete('/:id', authorize('admin', 'company_admin'), deleteUser);
 
 module.exports = router;

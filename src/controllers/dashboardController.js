@@ -1,7 +1,5 @@
 const TenantUserSchema = require('../models/tenant/TenantUser');
-const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
 const { getTenantModel } = require('../utils/tenantModels');
-const Payroll = require('../models/Payroll');
 const mongoose = require('mongoose');
 
 exports.getDashboardStats = async (req, res) => {
@@ -9,122 +7,307 @@ exports.getDashboardStats = async (req, res) => {
     // Get tenant connection
     const tenantConnection = req.tenant.connection;
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
-    const Attendance = getTenantModel(tenantConnection, 'Attendance');
-    const Payroll = getTenantModel(tenantConnection, 'Payroll');
-    const Asset = getTenantModel(tenantConnection, 'Asset');
     const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
     const Candidate = getTenantModel(tenantConnection, 'Candidate');
     
-    // Employee stats
+    // 1. HR Management Users Stats (hr, admin, company_admin)
     const totalEmployees = await TenantUser.countDocuments({ 
-      role: { $in: ['employee', 'manager'] },
-      isActive: true 
+      role: { $in: ['hr', 'admin', 'company_admin'] }
     });
-    const activeEmployees = totalEmployees;
     
-    // Calculate employees on leave today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    const onLeaveEmployees = await LeaveRequest.countDocuments({
-      status: 'approved',
-      startDate: { $lte: tomorrow },
-      endDate: { $gte: today }
+    const activeEmployees = await TenantUser.countDocuments({ 
+      role: { $in: ['hr', 'admin', 'company_admin'] },
+      isActive: true
     });
 
-    // Leave stats
-    const pendingLeaves = await LeaveRequest.countDocuments({ status: 'pending' });
-    const approvedLeaves = await LeaveRequest.countDocuments({ status: 'approved' });
-
-    // Attendance stats for today
-    let todayAttendance = 0;
-    if (Attendance) {
-      todayAttendance = await Attendance.countDocuments({
-        date: { $gte: today, $lt: tomorrow },
-        status: 'present'
-      });
-    }
-
-    // Payroll stats
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth() + 1;
-    const currentYear = currentDate.getFullYear();
-    
-    let pendingPayroll = 0;
-    if (Payroll) {
-      pendingPayroll = await Payroll.countDocuments({
-        month: currentMonth,
-        year: currentYear,
-        paymentStatus: 'pending'
-      });
-    }
-
-    // Job stats
+    // 2. Job Openings Stats
     let activeJobs = 0;
     if (JobPosting) {
       activeJobs = await JobPosting.countDocuments({ status: 'active' });
     }
 
-    // Asset stats
-    let totalAssets = 0;
-    let assignedAssets = 0;
-    if (Asset) {
-      totalAssets = await Asset.countDocuments();
-      assignedAssets = await Asset.countDocuments({ status: 'assigned' });
+    // 3. Candidates Stats
+    let totalCandidates = 0;
+    if (Candidate) {
+      totalCandidates = await Candidate.countDocuments({ isActive: true });
     }
 
-    // Department-wise employee distribution
-    const employeesByDepartment = await TenantUser.aggregate([
-      { $match: { role: { $in: ['employee', 'manager'] }, isActive: true } },
-      { $group: { _id: '$department', count: { $sum: 1 } } },
-      { $project: { department: { $ifNull: ['$_id', 'Unassigned'] }, count: 1, _id: 0 } },
-      { $sort: { count: -1 } },
-      { $limit: 5 }
+    // 4. Chart Data - Employee Growth Trend (Last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    sixMonthsAgo.setDate(1); // Start of month
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+
+    const employeeTrend = await TenantUser.aggregate([
+      {
+        $match: {
+          role: { $in: ['hr', 'admin', 'company_admin'] },
+          createdAt: { $gte: sixMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          },
+          total: { $sum: 1 },
+          active: {
+            $sum: {
+              $cond: [
+                { $eq: ['$isActive', true] },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        $sort: { '_id.year': 1, '_id.month': 1 }
+      },
+      {
+        $project: {
+          _id: 0,
+          month: {
+            $dateToString: {
+              format: '%Y-%m',
+              date: {
+                $dateFromParts: {
+                  year: '$_id.year',
+                  month: '$_id.month',
+                  day: 1
+                }
+              }
+            }
+          },
+          total: 1,
+          active: 1
+        }
+      }
     ]);
 
-    // Recent leaves (employeeName is already stored in the schema, no need to populate)
-    const recentLeaves = await LeaveRequest.find()
-      .sort({ appliedOn: -1 })
-      .limit(5)
-      .select('employeeName leaveType status startDate endDate appliedOn numberOfDays')
-      .lean();
+    // Fill in missing months with cumulative counts
+    const filledEmployeeTrend = [];
+    const monthMap = new Map();
+    employeeTrend.forEach(item => {
+      monthMap.set(item.month, item);
+    });
 
-    // Attendance trend for last 7 days
-    let attendanceTrend = [];
-    if (Attendance) {
-      const sevenDaysAgo = new Date(today);
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthKey = date.toISOString().substring(0, 7);
       
-      attendanceTrend = await Attendance.aggregate([
+      if (monthMap.has(monthKey)) {
+        filledEmployeeTrend.push(monthMap.get(monthKey));
+      } else {
+        // Get cumulative count up to this month
+        const cumulativeTotal = await TenantUser.countDocuments({
+          role: { $in: ['hr', 'admin', 'company_admin'] },
+          createdAt: { $lte: new Date(date.getFullYear(), date.getMonth() + 1, 0) }
+        });
+        const cumulativeActive = await TenantUser.countDocuments({
+          role: { $in: ['hr', 'admin', 'company_admin'] },
+          isActive: true,
+          createdAt: { $lte: new Date(date.getFullYear(), date.getMonth() + 1, 0) }
+        });
+        filledEmployeeTrend.push({
+          month: monthKey,
+          total: cumulativeTotal,
+          active: cumulativeActive
+        });
+      }
+    }
+
+    // 5. Chart Data - Job Openings Trend (Last 6 months)
+    let jobOpeningsTrend = [];
+    if (JobPosting) {
+      const jobTrend = await JobPosting.aggregate([
         {
           $match: {
-            date: { $gte: sevenDaysAgo, $lt: tomorrow }
+            status: 'active',
+            createdAt: { $gte: sixMonthsAgo }
           }
         },
         {
           $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
-            present: {
-              $sum: { $cond: [{ $eq: ['$status', 'present'] }, 1, 0] }
+            _id: {
+              year: { $year: '$createdAt' },
+              month: { $month: '$createdAt' }
             },
-            absent: {
-              $sum: { $cond: [{ $eq: ['$status', 'absent'] }, 1, 0] }
-            }
+            count: { $sum: 1 }
           }
         },
-        { $sort: { _id: 1 } },
-        { $limit: 7 }
+        {
+          $sort: { '_id.year': 1, '_id.month': 1 }
+        },
+        {
+          $project: {
+            _id: 0,
+            month: {
+              $dateToString: {
+                format: '%Y-%m',
+                date: {
+                  $dateFromParts: {
+                    year: '$_id.year',
+                    month: '$_id.month',
+                    day: 1
+                  }
+                }
+              }
+            },
+            count: 1
+          }
+        }
       ]);
+
+      // Fill in missing months
+      const jobMonthMap = new Map();
+      jobTrend.forEach(item => {
+        jobMonthMap.set(item.month, item);
+      });
+
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const monthKey = date.toISOString().substring(0, 7);
+        
+        if (jobMonthMap.has(monthKey)) {
+          jobOpeningsTrend.push(jobMonthMap.get(monthKey));
+        } else {
+          // Get active jobs count for this month
+          const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+          const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+          const monthCount = await JobPosting.countDocuments({
+            status: 'active',
+            createdAt: { $lte: monthEnd }
+          });
+          jobOpeningsTrend.push({
+            month: monthKey,
+            count: monthCount
+          });
+        }
+      }
+    } else {
+      // Fill with zeros if JobPosting model doesn't exist
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const monthKey = date.toISOString().substring(0, 7);
+        jobOpeningsTrend.push({ month: monthKey, count: 0 });
+      }
+    }
+
+    // 6. Chart Data - Candidates by Stage
+    let candidatesByStage = [];
+    if (Candidate) {
+      const stageData = await Candidate.aggregate([
+        {
+          $match: { isActive: true }
+        },
+        {
+          $group: {
+            _id: '$stage',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            stage: { $ifNull: ['$_id', 'applied'] },
+            count: 1
+          }
+        },
+        {
+          $sort: { count: -1 }
+        }
+      ]);
+
+      // Map to ensure all stages are represented
+      const stageMap = new Map();
+      stageData.forEach(item => {
+        stageMap.set(item.stage, item.count);
+      });
+
+      const allStages = ['applied', 'screening', 'shortlisted', 'interview', 'offer', 'hired', 'rejected'];
+      candidatesByStage = allStages.map(stage => ({
+        stage: stage.charAt(0).toUpperCase() + stage.slice(1),
+        count: stageMap.get(stage) || 0
+      }));
+    } else {
+      // Default empty stages
+      candidatesByStage = [
+        { stage: 'Applied', count: 0 },
+        { stage: 'Screening', count: 0 },
+        { stage: 'Shortlisted', count: 0 },
+        { stage: 'Interview', count: 0 },
+        { stage: 'Offer', count: 0 },
+        { stage: 'Hired', count: 0 },
+        { stage: 'Rejected', count: 0 }
+      ];
+    }
+
+    // 7. Chart Data - Candidates by Source
+    let candidatesBySource = [];
+    if (Candidate) {
+      const sourceData = await Candidate.aggregate([
+        {
+          $match: { isActive: true }
+        },
+        {
+          $group: {
+            _id: '$source',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            source: { $ifNull: ['$_id', 'other'] },
+            count: 1
+          }
+        },
+        {
+          $sort: { count: -1 }
+        }
+      ]);
+
+      // Map and format source names
+      const sourceMap = new Map();
+      sourceData.forEach(item => {
+        const formattedSource = item.source === 'job-portal' ? 'Job Portal' :
+                               item.source === 'walk-in' ? 'Walk-in' :
+                               item.source.charAt(0).toUpperCase() + item.source.slice(1);
+        sourceMap.set(item.source, { source: formattedSource, count: item.count });
+      });
+
+      const allSources = ['internal', 'linkedin', 'naukri', 'referral', 'job-portal', 'walk-in', 'other'];
+      candidatesBySource = allSources.map(source => {
+        if (sourceMap.has(source)) {
+          return sourceMap.get(source);
+        }
+        const formattedSource = source === 'job-portal' ? 'Job Portal' :
+                               source === 'walk-in' ? 'Walk-in' :
+                               source.charAt(0).toUpperCase() + source.slice(1);
+        return { source: formattedSource, count: 0 };
+      });
+    } else {
+      // Default empty sources
+      candidatesBySource = [
+        { source: 'Internal', count: 0 },
+        { source: 'Linkedin', count: 0 },
+        { source: 'Naukri', count: 0 },
+        { source: 'Referral', count: 0 },
+        { source: 'Job Portal', count: 0 },
+        { source: 'Walk-in', count: 0 },
+        { source: 'Other', count: 0 }
+      ];
     }
 
     console.log(`📊 Dashboard stats for company ${req.tenant.companyId}:`, {
       totalEmployees,
-      pendingLeaves,
-      approvedLeaves,
-      todayAttendance
+      activeEmployees,
+      activeJobs,
+      totalCandidates
     });
 
     res.status(200).json({
@@ -132,29 +315,20 @@ exports.getDashboardStats = async (req, res) => {
       data: {
         employees: {
           total: totalEmployees,
-          active: activeEmployees,
-          onLeave: onLeaveEmployees
-        },
-        attendance: {
-          today: todayAttendance,
-          trend: attendanceTrend
-        },
-        leaves: {
-          pending: pendingLeaves,
-          approved: approvedLeaves
-        },
-        payroll: {
-          pending: pendingPayroll
+          active: activeEmployees
         },
         jobs: {
           active: activeJobs
         },
-        assets: {
-          total: totalAssets,
-          assigned: assignedAssets
+        candidates: {
+          total: totalCandidates
         },
-        employeesByDepartment,
-        recentLeaves
+        charts: {
+          employeeTrend: filledEmployeeTrend,
+          jobOpeningsTrend: jobOpeningsTrend,
+          candidatesByStage: candidatesByStage,
+          candidatesBySource: candidatesBySource
+        }
       }
     });
   } catch (error) {
@@ -170,7 +344,9 @@ exports.getDashboardStats = async (req, res) => {
 exports.getLeaveCalendar = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
+    const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
     const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+    const TenantUserSchema = require('../models/tenant/TenantUser');
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
     
     const { startDate, endDate, department, leaveType } = req.query;
@@ -198,44 +374,13 @@ exports.getLeaveCalendar = async (req, res) => {
     if (department) {
       filteredLeaves = leaves.filter(leave => {
         const empDept = leave.employeeId?.departmentId?.toString();
-        return empDept === department.toString();
+        return empDept === department;
       });
     }
     
-    // Group leaves by date
-    const calendarData = {};
-    filteredLeaves.forEach(leave => {
-      const start = new Date(leave.startDate);
-      const end = new Date(leave.endDate);
-      
-      // Iterate through each day in the leave range
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateKey = d.toISOString().split('T')[0];
-        if (!calendarData[dateKey]) {
-          calendarData[dateKey] = [];
-        }
-        calendarData[dateKey].push({
-          id: leave._id,
-          employeeName: leave.employeeName || `${leave.employeeId?.firstName || ''} ${leave.employeeId?.lastName || ''}`.trim(),
-          employeeEmail: leave.employeeEmail,
-          employeeCode: leave.employeeId?.employeeCode,
-          leaveType: leave.leaveType,
-          startDate: leave.startDate,
-          endDate: leave.endDate,
-          numberOfDays: leave.numberOfDays,
-          reason: leave.reason,
-          department: leave.employeeId?.departmentId
-        });
-      }
-    });
-    
     res.status(200).json({
       success: true,
-      data: {
-        calendar: calendarData,
-        totalLeaves: filteredLeaves.length,
-        dateRange: { start, end }
-      }
+      data: filteredLeaves
     });
   } catch (error) {
     console.error('Error fetching leave calendar:', error);
@@ -246,90 +391,103 @@ exports.getLeaveCalendar = async (req, res) => {
   }
 };
 
+// Get HR Dashboard Stats
 exports.getHRDashboardStats = async (req, res) => {
   try {
-    // Get tenant connection
     const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
     const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+    const { getTenantModel } = require('../utils/tenantModels');
     const Payroll = getTenantModel(tenantConnection, 'Payroll');
     const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
     const Candidate = getTenantModel(tenantConnection, 'Candidate');
     const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
     
-    // Total Employees count (all active employees and managers)
+    // Employee stats
     const totalEmployees = await TenantUser.countDocuments({ 
       role: { $in: ['employee', 'manager'] },
       isActive: true 
     });
-
-    // Pending Leaves count
+    
+    // Leave stats
     const pendingLeaves = await LeaveRequest.countDocuments({ status: 'pending' });
-
-    // Payroll This Month - sum of netSalary for current month
+    
+    // Payroll stats
     const currentDate = new Date();
-    const currentMonth = currentDate.getMonth() + 1; // 1-12
+    const currentMonth = currentDate.getMonth() + 1;
     const currentYear = currentDate.getFullYear();
     
     let payrollThisMonth = 0;
     if (Payroll) {
-      const payrolls = await Payroll.find({
-        month: currentMonth,
-        year: currentYear,
-        paymentStatus: { $in: ['paid', 'processing'] }
-      });
-      payrollThisMonth = payrolls.reduce((sum, payroll) => sum + (payroll.netSalary || 0), 0);
+      const payrollData = await Payroll.aggregate([
+        {
+          $match: {
+            month: currentMonth,
+            year: currentYear
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$netSalary' }
+          }
+        }
+      ]);
+      payrollThisMonth = payrollData.length > 0 ? payrollData[0].total : 0;
     }
-
-    // Open Positions count (active job postings)
+    
+    // Job stats
     let openPositions = 0;
     if (JobPosting) {
       openPositions = await JobPosting.countDocuments({ status: 'active' });
     }
-
+    
     // Recruitment stats
-    let recruitmentStats = {
+    let recruitment = {
       totalApplications: 0,
       shortlisted: 0,
       interviewScheduled: 0,
       selected: 0,
       rejected: 0
     };
+    
     if (Candidate) {
-      recruitmentStats.totalApplications = await Candidate.countDocuments({ isActive: true });
-      recruitmentStats.shortlisted = await Candidate.countDocuments({ stage: 'shortlisted' });
-      recruitmentStats.interviewScheduled = await Candidate.countDocuments({ stage: 'interview-scheduled' });
-      recruitmentStats.selected = await Candidate.countDocuments({ 
-        stage: { $in: ['offer-accepted', 'sent-to-onboarding'] }
+      recruitment.totalApplications = await Candidate.countDocuments({ isActive: true });
+      recruitment.shortlisted = await Candidate.countDocuments({ 
+        isActive: true,
+        stage: 'shortlisted'
       });
-      recruitmentStats.rejected = await Candidate.countDocuments({ stage: 'rejected' });
+      recruitment.interviewScheduled = await Candidate.countDocuments({ 
+        isActive: true,
+        stage: 'interview'
+      });
+      recruitment.selected = await Candidate.countDocuments({ 
+        isActive: true,
+        stage: 'hired'
+      });
+      recruitment.rejected = await Candidate.countDocuments({ 
+        isActive: true,
+        stage: 'rejected'
+      });
     }
-
+    
     // Onboarding stats
-    let onboardingStats = {
+    let onboarding = {
       total: 0,
       preboarding: 0,
       inProgress: 0,
       completed: 0
     };
+    
     if (Onboarding) {
-      onboardingStats.total = await Onboarding.countDocuments();
-      onboardingStats.preboarding = await Onboarding.countDocuments({ status: 'preboarding' });
-      onboardingStats.inProgress = await Onboarding.countDocuments({ 
-        status: { $in: ['offer_sent', 'offer_accepted', 'docs_pending', 'docs_verified', 'ready_for_joining'] }
-      });
-      onboardingStats.completed = await Onboarding.countDocuments({ status: 'completed' });
+      onboarding.total = await Onboarding.countDocuments();
+      onboarding.preboarding = await Onboarding.countDocuments({ status: 'preboarding' });
+      onboarding.inProgress = await Onboarding.countDocuments({ status: 'in-progress' });
+      onboarding.completed = await Onboarding.countDocuments({ status: 'completed' });
     }
-
-    console.log(`📊 HR Dashboard stats for company ${req.tenant.companyId}:`, {
-      totalEmployees,
-      pendingLeaves,
-      payrollThisMonth,
-      openPositions,
-      recruitmentStats,
-      onboardingStats
-    });
-
+    
     res.status(200).json({
       success: true,
       data: {
@@ -337,8 +495,8 @@ exports.getHRDashboardStats = async (req, res) => {
         pendingLeaves,
         payrollThisMonth,
         openPositions,
-        recruitment: recruitmentStats,
-        onboarding: onboardingStats
+        recruitment,
+        onboarding
       }
     });
   } catch (error) {

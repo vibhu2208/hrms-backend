@@ -1333,10 +1333,10 @@ exports.completeOnboardingProcess = async (req, res) => {
     const { companyName } = req.body;
     const tenantConnection = req.tenant.connection;
 
-    console.log(`🔄 Completing onboarding for ID: ${id}`);
 
     // Validate onboarding completion readiness
     const validation = await employeeCreationService.validateOnboardingCompletion(id, tenantConnection);
+
     
     if (!validation.valid) {
       return res.status(400).json({
@@ -1348,6 +1348,7 @@ exports.completeOnboardingProcess = async (req, res) => {
     }
 
     // Use the employee creation service to complete onboarding
+
     const result = await employeeCreationService.completeOnboardingAndCreateEmployee(
       id,
       tenantConnection,
@@ -1361,7 +1362,7 @@ exports.completeOnboardingProcess = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Onboarding completed successfully. Employee account created.',
+      message: 'Onboarding completed successfully. Employee and user accounts created.',
       data: {
         employeeCode: result.employeeCode,
         employeeId: result.employee._id,
@@ -1369,6 +1370,7 @@ exports.completeOnboardingProcess = async (req, res) => {
         name: `${result.employee.firstName} ${result.employee.lastName}`,
         joiningDate: result.employee.joiningDate,
         designation: result.employee.designation,
+        userAccount: result.userAccount,
         tempPassword: result.tempPassword, // Only shown once for admin
         onboardingId: result.onboarding._id,
         completedAt: result.onboarding.completedAt
@@ -1376,11 +1378,36 @@ exports.completeOnboardingProcess = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error completing onboarding:', error);
+    console.error('Error stack:', error.stack);
     
-    return res.status(500).json({
+    // Provide more detailed error messages
+    let errorMessage = 'Failed to complete onboarding process';
+    let statusCode = 500;
+    
+    if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    // Handle specific error types
+    if (error.name === 'ValidationError') {
+      statusCode = 400;
+      errorMessage = `Validation error: ${Object.values(error.errors).map(e => e.message).join(', ')}`;
+    } else if (error.code === 11000) {
+      statusCode = 409;
+      errorMessage = 'Employee with this email or employee code already exists';
+    } else if (error.message.includes('not found')) {
+      statusCode = 404;
+      errorMessage = error.message;
+    } else if (error.message.includes('required') || error.message.includes('must be')) {
+      statusCode = 400;
+      errorMessage = error.message;
+    }
+    
+    return res.status(statusCode).json({
       success: false,
-      message: 'Failed to complete onboarding process',
-      error: error.message
+      message: errorMessage,
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
