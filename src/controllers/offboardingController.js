@@ -73,24 +73,44 @@ exports.getOffboardingList = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Manually populate employee data using TenantUser
+    // Manually populate employee data - try Employee model first, then User model
     const Department = getTenantModel(req.tenant.connection, 'Department');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+    
     for (let item of offboardingList) {
       if (item.employee) {
         try {
-          const employee = await TenantUser.findById(item.employee)
-            .select('firstName lastName email employeeCode designation departmentId')
-            .lean();
+          let employee = null;
           
-          if (employee) {
-            // Populate department if it exists
-            if (employee.departmentId && Department) {
-              const dept = await Department.findById(employee.departmentId).select('name').lean();
-              if (dept) {
-                employee.department = dept;
+          // First try Employee model (most common case)
+          if (TenantEmployee) {
+            employee = await TenantEmployee.findById(item.employee)
+              .select('firstName lastName email employeeCode designation department')
+              .populate('department', 'name')
+              .lean();
+          }
+          
+          // If not found in Employee model, try User model
+          if (!employee && TenantUser) {
+            employee = await TenantUser.findById(item.employee)
+              .select('firstName lastName email employeeCode designation departmentId')
+              .lean();
+            
+            if (employee) {
+              // Populate department if it exists
+              if (employee.departmentId && Department) {
+                const dept = await Department.findById(employee.departmentId).select('name').lean();
+                if (dept) {
+                  employee.department = dept;
+                }
               }
             }
+          }
+          
+          if (employee) {
             item.employee = employee;
+          } else {
+            console.warn(`Employee not found for offboarding ${item._id}, employee ID: ${item.employee}`);
           }
         } catch (err) {
           console.error('Error populating employee:', err);
@@ -157,33 +177,52 @@ exports.getOffboarding = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
     }
 
-    // Manually populate employee data using TenantUser
+    // Manually populate employee data - try Employee model first, then User model
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+    
     if (offboarding.employee) {
       try {
-        const employee = await TenantUser.findById(offboarding.employee)
-          .select('firstName lastName email employeeCode designation departmentId joiningDate dateOfJoining phone address')
-          .lean();
+        let employee = null;
+        
+        // First try Employee model (most common case)
+        if (TenantEmployee) {
+          employee = await TenantEmployee.findById(offboarding.employee)
+            .select('firstName lastName email employeeCode designation department joiningDate dateOfJoining phone address')
+            .populate('department', 'name')
+            .lean();
+        }
+        
+        // If not found in Employee model, try User model
+        if (!employee && TenantUser) {
+          employee = await TenantUser.findById(offboarding.employee)
+            .select('firstName lastName email employeeCode designation departmentId joiningDate dateOfJoining phone address')
+            .lean();
+          
+          if (employee) {
+            // Populate department if it exists
+            if (employee.departmentId && Department) {
+              const dept = await Department.findById(employee.departmentId).select('name').lean();
+              if (dept) {
+                employee.department = dept;
+              }
+            }
+            
+            // Populate reporting manager
+            if (employee.reportingManager) {
+              const manager = await TenantUser.findOne({ email: employee.reportingManager })
+                .select('firstName lastName email')
+                .lean();
+              if (manager) {
+                employee.reportingManager = manager;
+              }
+            }
+          }
+        }
         
         if (employee) {
-          // Populate department
-          if (employee.departmentId && Department) {
-            const dept = await Department.findById(employee.departmentId).select('name').lean();
-            if (dept) {
-              employee.department = dept;
-            }
-          }
-          
-          // Populate reporting manager
-          if (employee.reportingManager) {
-            const manager = await TenantUser.findOne({ email: employee.reportingManager })
-              .select('firstName lastName email')
-              .lean();
-            if (manager) {
-              employee.reportingManager = manager;
-            }
-          }
-          
           offboarding.employee = employee;
+        } else {
+          console.warn(`Employee not found for offboarding ${offboarding._id}, employee ID: ${offboarding.employee}`);
         }
       } catch (err) {
         console.error('Error populating employee:', err);
