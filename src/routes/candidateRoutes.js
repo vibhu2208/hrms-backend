@@ -19,7 +19,10 @@ const {
   checkDuplicate,
   getCandidateHistory,
   getCandidateByEmail,
-  uploadResume: uploadResumeController
+  uploadResume: uploadResumeController,
+  searchCandidatesByJD,
+  getCandidatePoolForJD,
+  compareCandidatesForJD
 } = require('../controllers/candidateController');
 const {
   validateBulkUpload,
@@ -62,6 +65,14 @@ router.get('/:id/timeline', getCandidateTimeline);
 router.put('/:candidateId/interview/:interviewId/feedback', updateInterviewFeedback);
 router.post('/:id/notification', sendNotification);
 router.put('/:id/hr-call', updateHRCall);
+
+// JD-based candidate search routes (must come before /:id routes)
+router.get('/search-by-jd', (req, res, next) => {
+  console.log('🔍 Route /search-by-jd hit with query:', req.query);
+  return searchCandidatesByJD(req, res, next);
+});
+router.get('/pool-for-jd/:jdId', getCandidatePoolForJD);
+router.post('/compare-for-jd/:jdId', compareCandidatesForJD);
 
 // Send interview notification email
 router.post('/:id/send-interview-email', sendInterviewEmail);
