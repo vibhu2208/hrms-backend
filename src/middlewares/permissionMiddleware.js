@@ -3,7 +3,7 @@ const permissionService = require('../services/permissionService');
 const checkPermission = (permissionCode, scope = 'own') => {
   return async (req, res, next) => {
     try {
-      const userId = req.user.userId;
+      const userId = req.user._id || req.user.userId;
       const resourceOwnerId = req.params.employeeId || req.params.userId || req.body.employeeId || null;
       
       const hasPermission = await permissionService.checkPermission(
@@ -11,7 +11,7 @@ const checkPermission = (permissionCode, scope = 'own') => {
         permissionCode,
         scope,
         resourceOwnerId,
-        req.tenant
+        req.tenant?.connection
       );
 
       if (!hasPermission) {
@@ -38,7 +38,7 @@ const checkPermission = (permissionCode, scope = 'own') => {
 const checkAnyPermission = (permissionCodes, scope = 'own') => {
   return async (req, res, next) => {
     try {
-      const userId = req.user.userId;
+      const userId = req.user._id || req.user.userId;
       const resourceOwnerId = req.params.employeeId || req.params.userId || req.body.employeeId || null;
 
       for (const permissionCode of permissionCodes) {
@@ -47,7 +47,7 @@ const checkAnyPermission = (permissionCodes, scope = 'own') => {
           permissionCode,
           scope,
           resourceOwnerId,
-          req.tenant
+          req.tenant?.connection
         );
 
         if (hasPermission) {
@@ -75,7 +75,7 @@ const checkAnyPermission = (permissionCodes, scope = 'own') => {
 const checkAllPermissions = (permissionCodes, scope = 'own') => {
   return async (req, res, next) => {
     try {
-      const userId = req.user.userId;
+      const userId = req.user._id || req.user.userId;
       const resourceOwnerId = req.params.employeeId || req.params.userId || req.body.employeeId || null;
 
       for (const permissionCode of permissionCodes) {
@@ -84,7 +84,7 @@ const checkAllPermissions = (permissionCodes, scope = 'own') => {
           permissionCode,
           scope,
           resourceOwnerId,
-          req.tenant
+          req.tenant?.connection
         );
 
         if (!hasPermission) {

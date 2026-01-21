@@ -264,6 +264,20 @@ exports.createCandidate = async (req, res) => {
       console.error('Validation errors:', createError.errors);
       throw createError;
     }
+
+    // Auto-populate candidate fields from parsed resume data if available
+    if (req.body.resumeParsing?.extractedData) {
+      try {
+        const populatedCandidate = await populateCandidateFromResumeData(candidate, req.body.resumeParsing.extractedData);
+        if (populatedCandidate) {
+          candidate = populatedCandidate;
+          console.log('✅ Candidate fields auto-populated from resume data');
+        }
+      } catch (populateError) {
+        console.warn('⚠️ Failed to auto-populate candidate from resume data:', populateError.message);
+        // Don't throw - candidate creation succeeded, just log the warning
+      }
+    }
     
     // If existing candidate found, link them and update application history
     if (existingCandidate) {
@@ -386,10 +400,30 @@ exports.createCandidate = async (req, res) => {
 exports.updateCandidate = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
-    const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    if (!candidate) {
+
+    // Get current candidate to check for resume parsing data
+    const currentCandidate = await Candidate.findById(req.params.id);
+    if (!currentCandidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
+
+    // Update the candidate
+    const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+
+    // Auto-populate from existing resume data if available and fields are now empty
+    if (currentCandidate.resumeParsing?.extractedData) {
+      try {
+        const populatedCandidate = await populateCandidateFromResumeData(candidate, currentCandidate.resumeParsing.extractedData);
+        if (populatedCandidate && populatedCandidate._id) {
+          candidate = populatedCandidate;
+          console.log('✅ Candidate fields auto-populated from existing resume data during update');
+        }
+      } catch (populateError) {
+        console.warn('⚠️ Failed to auto-populate candidate from existing resume data:', populateError.message);
+        // Don't throw - update succeeded, just log the warning
+      }
+    }
+
     res.status(200).json({ success: true, message: 'Candidate updated successfully', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2023,6 +2057,440 @@ exports.uploadResume = async (req, res) => {
       success: false,
       message: 'Internal server error during resume processing',
       error: error.message
+    });
+  }
+};
+
+/**
+ * Auto-populate candidate fields from parsed resume data
+ * @param {Object} candidate - Candidate document
+ * @param {Object} extractedData - Reducto extracted data
+ * @returns {Object} Updated candidate document
+ */
+const populateCandidateFromResumeData = async (candidate, extractedData) => {
+  if (!candidate || !extractedData) {
+    return candidate;
+  }
+
+  const updates = {};
+  let hasUpdates = false;
+
+  // Helper function to check if a field is empty/null/undefined
+  const isFieldEmpty = (value) => {
+    return value === null || value === undefined ||
+           (typeof value === 'string' && value.trim() === '') ||
+           (Array.isArray(value) && value.length === 0);
+  };
+
+  // Map Reducto fields to candidate fields
+  const fieldMappings = {
+    // Basic info (only populate if missing)
+    firstName: extractedData.firstName,
+    lastName: extractedData.lastName,
+    email: extractedData.email,
+    phone: extractedData.phone,
+
+    // Professional info
+    currentCompany: extractedData.currentCompany,
+    currentDesignation: extractedData.currentDesignation,
+    currentLocation: extractedData.currentLocation,
+
+    // Experience (convert years/months format)
+    experience: extractedData.experienceYears !== null && extractedData.experienceYears !== undefined ? {
+      years: parseInt(extractedData.experienceYears) || 0,
+      months: parseInt(extractedData.experienceMonths) || 0
+    } : undefined,
+
+    // Skills (merge with existing if any)
+    skills: extractedData.skills,
+
+    // Financial info
+    currentCTC: extractedData.currentCTC,
+    expectedCTC: extractedData.expectedCTC,
+    noticePeriod: extractedData.noticePeriod,
+
+    // Job preferences
+    appliedFor: extractedData.appliedFor,
+    preferredLocation: extractedData.preferredLocation,
+
+    // Source (if not set)
+    source: extractedData.source || 'resume-upload'
+  };
+
+  // Apply mappings - only populate empty fields
+  Object.entries(fieldMappings).forEach(([field, value]) => {
+    if (!isFieldEmpty(value) && isFieldEmpty(candidate[field])) {
+      updates[field] = value;
+      hasUpdates = true;
+      console.log(`📝 Auto-populating ${field}: ${Array.isArray(value) ? value.join(', ') : value}`);
+    }
+  });
+
+  // Special handling for skills - merge instead of replace
+  if (!isFieldEmpty(extractedData.skills) && isFieldEmpty(candidate.skills)) {
+    updates.skills = extractedData.skills;
+    hasUpdates = true;
+    console.log(`📝 Auto-populating skills: ${extractedData.skills.join(', ')}`);
+  }
+
+  // Special handling for preferred location - ensure it's an array
+  if (!isFieldEmpty(extractedData.preferredLocation) && isFieldEmpty(candidate.preferredLocation)) {
+    const preferredLocs = Array.isArray(extractedData.preferredLocation)
+      ? extractedData.preferredLocation
+      : [extractedData.preferredLocation].filter(Boolean);
+    if (preferredLocs.length > 0) {
+      updates.preferredLocation = preferredLocs;
+      hasUpdates = true;
+      console.log(`📝 Auto-populating preferred locations: ${preferredLocs.join(', ')}`);
+    }
+  }
+
+  // Update candidate if there are changes
+  if (hasUpdates) {
+    try {
+      const updatedCandidate = await candidate.constructor.findByIdAndUpdate(
+        candidate._id,
+        { $set: updates },
+        { new: true, runValidators: false } // Don't run validators to avoid conflicts
+      );
+
+      // Log what was populated
+      const populatedFields = Object.keys(updates);
+      console.log(`🤖 Auto-populated ${populatedFields.length} fields from resume: ${populatedFields.join(', ')}`);
+
+      return updatedCandidate;
+    } catch (updateError) {
+      console.error('❌ Failed to update candidate with resume data:', updateError.message);
+      throw updateError;
+    }
+  }
+
+  console.log('ℹ️ No fields needed auto-population from resume data');
+  return candidate;
+};
+
+// Export the function for use in tests
+exports.populateCandidateFromResumeData = populateCandidateFromResumeData;
+
+// JD-based Candidate Search and Matching
+exports.searchCandidatesByJD = async (req, res) => {
+  console.log('🔍 searchCandidatesByJD called with query:', req.query);
+  try {
+    const { jdId, jdData, minScore = 0, maxResults = 50, filters = {} } = req.query;
+    console.log('📋 Parameters:', { jdId, jdData: jdData ? 'present' : 'missing', minScore, maxResults });
+
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
+
+    let jobDescription;
+
+    // If jdId is provided, get JD from database
+    if (jdId) {
+      jobDescription = await JobDescription.findById(jdId);
+      if (!jobDescription) {
+        return res.status(404).json({
+          success: false,
+          error: 'Job description not found'
+        });
+      }
+
+      if (jobDescription.parsingStatus !== 'completed') {
+        return res.status(400).json({
+          success: false,
+          error: 'Job description parsing not completed yet'
+        });
+      }
+    }
+    // If jdData is provided (from frontend form), use it directly
+    else if (jdData) {
+      try {
+        console.log('📄 Processing jdData...');
+        // Parse the jdData from query string (URL encoded JSON)
+        const parsedJDData = JSON.parse(decodeURIComponent(jdData));
+        console.log('✅ JD data parsed successfully:', { jobTitle: parsedJDData.jobTitle, hasParsedData: !!parsedJDData.parsedData });
+
+        // Create a virtual JD object that matches the expected structure
+        // The service expects jdData.parsedData to contain the actual parsed data
+        jobDescription = {
+          jobTitle: parsedJDData.jobTitle,
+          companyName: parsedJDData.companyName,
+          location: parsedJDData.location,
+          employmentType: parsedJDData.employmentType,
+          parsedData: parsedJDData.parsedData || parsedJDData, // Ensure the parsedData structure matches service expectations
+          // Add other required fields for matching service
+          statistics: { lastMatchedAt: new Date() }
+        };
+        console.log('🏗️ Virtual JD object created:', { jobTitle: jobDescription.jobTitle, parsedDataKeys: Object.keys(jobDescription.parsedData) });
+      } catch (parseError) {
+        console.error('❌ JD data parsing error:', parseError.message);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid JD data format',
+          details: parseError.message
+        });
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Either jdId or jdData parameter is required'
+      });
+    }
+
+    // Perform candidate matching
+    const candidateMatchingService = require('../services/candidateMatchingService');
+    const matches = await candidateMatchingService.matchCandidates(
+      jobDescription,
+      req.tenant.connection,
+      {
+        minScore: parseInt(minScore),
+        maxResults: parseInt(maxResults),
+        ...filters
+      }
+    );
+
+    // Populate candidate details
+    const populatedMatches = await Promise.all(
+      matches.map(async (match) => {
+        const candidate = await Candidate.findById(match.candidateId)
+          .select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation preferredLocation status stage');
+
+        return {
+          ...match,
+          candidate: candidate ? {
+            id: candidate._id,
+            name: `${candidate.firstName} ${candidate.lastName}`,
+            email: candidate.email,
+            phone: candidate.phone,
+            skills: candidate.skills,
+            experience: candidate.experience,
+            currentDesignation: candidate.currentDesignation,
+            currentCompany: candidate.currentCompany,
+            currentLocation: candidate.currentLocation,
+            preferredLocation: candidate.preferredLocation,
+            status: candidate.status,
+            stage: candidate.stage
+          } : null
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobDescription: {
+          id: jobDescription._id,
+          jobTitle: jobDescription.jobTitle,
+          companyName: jobDescription.companyName
+        },
+        matches: populatedMatches,
+        totalMatches: matches.length,
+        searchCriteria: {
+          minScore,
+          maxResults,
+          filters
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Search candidates by JD error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to search candidates by JD',
+      details: error.message
+    });
+  }
+};
+
+exports.getCandidatePoolForJD = async (req, res) => {
+  try {
+    const { jdId } = req.params;
+    const { skillMatch = 'any', experienceMatch = 'any', locationMatch = 'any' } = req.query;
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
+
+    // Get JD details
+    const jobDescription = await JobDescription.findById(jdId);
+    if (!jobDescription || jobDescription.parsingStatus !== 'completed') {
+      return res.status(404).json({
+        success: false,
+        error: 'Job description not found or not parsed'
+      });
+    }
+
+    const jdData = jobDescription.parsedData;
+    let query = { status: 'active', isActive: true };
+
+    // Apply skill filters
+    if (skillMatch === 'required' && jdData.requiredSkills?.length > 0) {
+      const requiredSkills = jdData.requiredSkills.map(s => s.skill || s).filter(Boolean);
+      query.skills = { $in: requiredSkills };
+    }
+
+    // Apply experience filters
+    if (experienceMatch === 'exact' && jdData.experienceRequired) {
+      const { minYears, maxYears } = jdData.experienceRequired;
+      if (minYears !== null && minYears !== undefined) {
+        query['experience.years'] = { $gte: minYears };
+      }
+      if (maxYears !== null && maxYears !== undefined) {
+        query['experience.years'] = { ...query['experience.years'], $lte: maxYears };
+      }
+    }
+
+    // Apply location filters
+    if (locationMatch === 'preferred') {
+      const locations = [];
+      if (jdData.jobLocation) locations.push(jdData.jobLocation);
+      if (jdData.preferredLocations?.length) locations.push(...jdData.preferredLocations);
+
+      if (locations.length > 0) {
+        query.$or = [
+          { currentLocation: { $in: locations } },
+          { preferredLocation: { $in: locations } }
+        ];
+      }
+    }
+
+    // Get candidates matching criteria
+    const candidates = await Candidate.find(query)
+      .select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation preferredLocation status stage createdAt')
+      .sort({ createdAt: -1 })
+      .limit(100); // Limit to prevent overwhelming responses
+
+    // Calculate basic match scores for each candidate
+    const candidateMatchingService = require('../services/candidateMatchingService');
+    const candidatesWithScores = candidates.map(candidate => {
+      const matchResult = candidateMatchingService.calculateMatchScore(candidate, jobDescription);
+      return {
+        candidate: {
+          id: candidate._id,
+          name: `${candidate.firstName} ${candidate.lastName}`,
+          email: candidate.email,
+          phone: candidate.phone,
+          skills: candidate.skills,
+          experience: candidate.experience,
+          currentDesignation: candidate.currentDesignation,
+          currentCompany: candidate.currentCompany,
+          currentLocation: candidate.currentLocation,
+          preferredLocation: candidate.preferredLocation,
+          status: candidate.status,
+          stage: candidate.stage,
+          createdAt: candidate.createdAt
+        },
+        matchScore: matchResult.overallScore,
+        overallFit: matchResult.overallFit
+      };
+    });
+
+    // Sort by match score
+    candidatesWithScores.sort((a, b) => b.matchScore - a.matchScore);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobDescription: {
+          id: jobDescription._id,
+          jobTitle: jobDescription.jobTitle,
+          parsedData: jdData
+        },
+        candidatePool: candidatesWithScores,
+        totalCandidates: candidatesWithScores.length,
+        filters: {
+          skillMatch,
+          experienceMatch,
+          locationMatch
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get candidate pool for JD error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get candidate pool for JD',
+      details: error.message
+    });
+  }
+};
+
+exports.compareCandidatesForJD = async (req, res) => {
+  try {
+    const { jdId } = req.params;
+    const { candidateIds } = req.body;
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
+
+    if (!candidateIds || !Array.isArray(candidateIds) || candidateIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Candidate IDs array is required'
+      });
+    }
+
+    // Get JD details
+    const jobDescription = await JobDescription.findById(jdId);
+    if (!jobDescription || jobDescription.parsingStatus !== 'completed') {
+      return res.status(404).json({
+        success: false,
+        error: 'Job description not found or not parsed'
+      });
+    }
+
+    // Get candidates
+    const candidates = await Candidate.find({
+      _id: { $in: candidateIds },
+      status: 'active',
+      isActive: true
+    }).select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation preferredLocation status stage');
+
+    // Calculate detailed match scores
+    const candidateMatchingService = require('../services/candidateMatchingService');
+    const comparisonResults = candidates.map(candidate => {
+      const matchResult = candidateMatchingService.calculateMatchScore(candidate, jobDescription);
+
+      return {
+        candidate: {
+          id: candidate._id,
+          name: `${candidate.firstName} ${candidate.lastName}`,
+          email: candidate.email,
+          phone: candidate.phone,
+          skills: candidate.skills,
+          experience: candidate.experience,
+          currentDesignation: candidate.currentDesignation,
+          currentCompany: candidate.currentCompany,
+          currentLocation: candidate.currentLocation,
+          preferredLocation: candidate.preferredLocation,
+          status: candidate.status,
+          stage: candidate.stage
+        },
+        matchDetails: matchResult
+      };
+    });
+
+    // Sort by overall score
+    comparisonResults.sort((a, b) => b.matchDetails.overallScore - a.matchDetails.overallScore);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobDescription: {
+          id: jobDescription._id,
+          jobTitle: jobDescription.jobTitle,
+          parsedData: jobDescription.parsedData
+        },
+        candidateComparison: comparisonResults,
+        totalCompared: comparisonResults.length,
+        topMatch: comparisonResults[0] || null
+      }
+    });
+
+  } catch (error) {
+    console.error('Compare candidates for JD error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to compare candidates for JD',
+      details: error.message
     });
   }
 };
