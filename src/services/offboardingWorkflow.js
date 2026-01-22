@@ -547,13 +547,55 @@ class OffboardingWorkflowEngine {
   }
 
   /**
+   * Calculate experience in years and months from two dates
+   */
+  calculateExperience(startDate, endDate) {
+    if (!startDate || !endDate) {
+      return { years: 0, months: 0 };
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    let years = end.getFullYear() - start.getFullYear();
+    let months = end.getMonth() - start.getMonth();
+    
+    if (months < 0) {
+      years--;
+      months += 12;
+    }
+    
+    // Adjust for days
+    if (end.getDate() < start.getDate()) {
+      months--;
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+    }
+    
+    return { years, months };
+  }
+
+  /**
    * Complete offboarding process
    */
   async completeOffboarding(tenantConnection, offboardingRequest) {
-    // Get the complete employee data before removing from employees collection
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:583',message:'completeOffboarding entry',data:{employeeId:offboardingRequest.employeeId,status:offboardingRequest.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    // Get the complete employee data before marking as ex-employee
     const TenantEmployee = tenantConnection.models.Employee || tenantConnection.model('Employee', require('../models/tenant/TenantEmployee'));
+    const TalentPool = require('../models/TalentPool');
 
-    const employeeData = await TenantEmployee.findById(offboardingRequest.employeeId).lean();
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:588',message:'Before employee findById',data:{employeeId:offboardingRequest.employeeId,employeeIdType:typeof offboardingRequest.employeeId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    const employeeData = await TenantEmployee.findById(offboardingRequest.employeeId);
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:594',message:'After employee findById',data:{employeeFound:!!employeeData,employeeId:employeeData?._id,employeeCode:employeeData?.employeeCode,firstName:employeeData?.firstName,lastName:employeeData?.lastName,email:employeeData?.email,currentIsExEmployee:employeeData?.isExEmployee,currentIsActive:employeeData?.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
 
     if (employeeData) {
       // Store complete employee data in offboarding record
@@ -594,10 +636,173 @@ class OffboardingWorkflowEngine {
         lastWorkingDay: offboardingRequest.lastWorkingDay
       };
 
-      // Remove employee from employees collection
-      await TenantEmployee.findByIdAndDelete(offboardingRequest.employeeId);
+      // Calculate experience from joining date to termination date
+      const terminationDate = offboardingRequest.lastWorkingDay || new Date();
+      const experience = this.calculateExperience(employeeData.joiningDate, terminationDate);
 
-      console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) removed from employees collection and archived in offboarding record`);
+      // Mark employee as ex-employee instead of deleting
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:633',message:'Before marking as ex-employee',data:{employeeId:employeeData._id,currentIsExEmployee:employeeData.isExEmployee,currentIsActive:employeeData.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      employeeData.isExEmployee = true;
+      employeeData.isActive = false;
+      employeeData.status = 'terminated';
+      employeeData.terminatedAt = terminationDate;
+      employeeData.terminationReason = offboardingRequest.reason || 'Offboarding completed';
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:639',message:'Before employee save',data:{employeeId:employeeData._id,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive,status:employeeData.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      await employeeData.save();
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:640',message:'After employee save',data:{employeeId:employeeData._id,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      
+      // Verify the save by re-fetching from database
+      const verifyEmployee = await TenantEmployee.findById(employeeData._id).lean();
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:643',message:'Verifying employee after save',data:{employeeId:verifyEmployee?._id,isExEmployee:verifyEmployee?.isExEmployee,isActive:verifyEmployee?.isActive,employeeCode:verifyEmployee?.employeeCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+
+      // Add ex-employee to talent pool
+      try {
+        const talentPoolData = {
+          name: `${employeeData.firstName} ${employeeData.lastName}`,
+          email: employeeData.email,
+          phone: employeeData.phone || '',
+          desiredDepartment: employeeData.department || 'General',
+          desiredPosition: employeeData.designation || 'Previous Role',
+          experience: {
+            years: experience.years,
+            months: experience.months
+          },
+          currentCompany: 'Previous Employer',
+          currentDesignation: employeeData.designation,
+          currentCTC: employeeData.salary?.total || employeeData.salary || null,
+          skills: [], // Can be populated from employee profile if available
+          status: 'new',
+          isExEmployee: true,
+          exEmployeeId: employeeData._id,
+          exEmployeeCode: employeeData.employeeCode,
+          comments: `Ex-employee from ${employeeData.department || 'General'} department. ${offboardingRequest.reason ? `Reason: ${offboardingRequest.reason}` : ''}`,
+          timeline: [{
+            action: 'Added from Offboarding',
+            description: `Employee offboarding completed. Previous employee code: ${employeeData.employeeCode}. Experience: ${experience.years} years ${experience.months} months.`,
+            timestamp: new Date()
+          }]
+        };
+
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:669',message:'Before talent pool create',data:{email:talentPoolData.email,name:talentPoolData.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+        const talentPoolEntry = await TalentPool.create(talentPoolData);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:671',message:'Talent pool created successfully',data:{talentCode:talentPoolEntry.talentCode,isExEmployee:talentPoolEntry.isExEmployee},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+
+        console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) marked as ex-employee and added to talent pool (${talentPoolEntry.talentCode})`);
+        
+        // Also add ex-employee to candidate pool
+        try {
+          const Candidate = getTenantModel(tenantConnection, 'Candidate', require('../models/Candidate'));
+          // Capture employee data values immediately to avoid closure issues
+          const empFirstName = String(employeeData.firstName || '').trim();
+          const empLastName = String(employeeData.lastName || '').trim();
+          const empEmail = String(employeeData.email || '').trim();
+          const empPhone = String(employeeData.phone || '').trim();
+          const empCode = String(employeeData.employeeCode || '').trim();
+          
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:707',message:'Creating candidate for ex-employee',data:{employeeId:employeeData._id,employeeCode:empCode,firstName:empFirstName,lastName:empLastName,email:empEmail,phone:empPhone},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+          // #endregion
+          
+          // Check if candidate already exists for this ex-employee
+          const existingCandidate = await Candidate.findOne({
+            $or: [
+              { exEmployeeId: employeeData._id },
+              { exEmployeeCode: empCode },
+              { email: empEmail, isExEmployee: true }
+            ]
+          });
+          
+          if (existingCandidate) {
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:720',message:'Candidate already exists for ex-employee',data:{candidateId:existingCandidate._id,candidateCode:existingCandidate.candidateCode,exEmployeeCode:empCode,existingFirstName:existingCandidate.firstName,existingLastName:existingCandidate.lastName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+            // #endregion
+            console.log(`⚠️  Candidate already exists for ex-employee ${empFirstName} ${empLastName} (${empCode}): ${existingCandidate.candidateCode}`);
+            // Update existing candidate if needed
+            if (existingCandidate.firstName !== empFirstName || existingCandidate.lastName !== empLastName) {
+              existingCandidate.firstName = empFirstName;
+              existingCandidate.lastName = empLastName;
+              await existingCandidate.save();
+              // #region agent log
+              fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:728',message:'Updated existing candidate name',data:{candidateCode:existingCandidate.candidateCode,newFirstName:empFirstName,newLastName:empLastName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+              // #endregion
+              console.log(`✅ Updated candidate name for ${existingCandidate.candidateCode}`);
+            }
+            // Skip creating new candidate since one already exists
+          } else {
+            // Create new candidate for ex-employee
+            const candidateData = {
+              firstName: empFirstName,
+              lastName: empLastName,
+              email: empEmail,
+              phone: empPhone,
+              currentLocation: employeeData.address?.city || employeeData.address || '',
+              experience: {
+                years: experience.years,
+                months: experience.months
+              },
+              currentCompany: 'Previous Employer',
+              currentDesignation: employeeData.designation || 'Previous Role',
+              currentCTC: employeeData.salary?.total || employeeData.salary || null,
+              skills: employeeData.skills || [],
+              source: 'internal',
+              stage: 'applied',
+              status: 'active',
+              isExEmployee: true,
+              exEmployeeId: employeeData._id,
+              exEmployeeCode: empCode,
+              notes: `Ex-employee from ${employeeData.department || 'General'} department. ${offboardingRequest.reason ? `Reason: ${offboardingRequest.reason}` : ''}`,
+              timeline: [{
+                action: 'Added from Offboarding',
+                description: `Employee offboarding completed. Previous employee code: ${empCode}. Experience: ${experience.years} years ${experience.months} months.`,
+                timestamp: new Date()
+              }]
+            };
+            
+            // Generate candidate code
+            const lastCandidate = await Candidate.findOne({}).sort({ createdAt: -1 });
+            let candidateNumber = 1;
+            if (lastCandidate && lastCandidate.candidateCode) {
+              const match = lastCandidate.candidateCode.match(/CAND(\d+)/);
+              if (match) {
+                candidateNumber = parseInt(match[1]) + 1;
+              }
+            }
+            candidateData.candidateCode = `CAND${String(candidateNumber).padStart(5, '0')}`;
+            
+            const candidateEntry = await Candidate.create(candidateData);
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:782',message:'Candidate entry created for ex-employee',data:{candidateCode:candidateEntry.candidateCode,firstName:candidateEntry.firstName,lastName:candidateEntry.lastName,isExEmployee:candidateEntry.isExEmployee,exEmployeeCode:candidateEntry.exEmployeeCode,email:candidateEntry.email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+            // #endregion
+            console.log(`✅ Ex-employee ${empFirstName} ${empLastName} (${empCode}) added to candidate pool (${candidateEntry.candidateCode})`);
+          }
+        } catch (candidateError) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:733',message:'Candidate creation failed for ex-employee',data:{error:candidateError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+          // #endregion
+          console.error('⚠️  Error adding ex-employee to candidate pool:', candidateError);
+          // Continue with offboarding completion even if candidate addition fails
+        }
+      } catch (talentPoolError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:737',message:'Talent pool creation failed',data:{error:talentPoolError.message,stack:talentPoolError.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+        console.error('⚠️  Error adding ex-employee to talent pool:', talentPoolError);
+        // Continue with offboarding completion even if talent pool addition fails
+      }
+
+      console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) marked as ex-employee`);
     } else {
       console.warn(`⚠️  Employee ${offboardingRequest.employeeId} not found in employees collection during offboarding completion`);
     }

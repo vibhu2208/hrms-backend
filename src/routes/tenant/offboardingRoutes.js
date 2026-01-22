@@ -16,7 +16,8 @@ const {
   getExitFeedback,
   submitExitFeedback,
   getOffboardingAnalytics,
-  closeOffboarding
+  closeOffboarding,
+  fixCompletedOffboardings
 } = require('../../controllers/tenant/offboardingController');
 
 // Import middleware
@@ -314,6 +315,16 @@ router.post('/:id/feedback',
 router.get('/analytics/dashboard',
   offboardingMiddleware.viewReports,
   getOffboardingAnalytics
+);
+
+/**
+ * @route   POST /api/offboarding/fix-completed
+ * @desc    Fix existing completed offboardings - mark employees as ex-employees
+ * @access  Admin, HR Manager
+ */
+router.post('/fix-completed',
+  offboardingMiddleware.manageOffboarding,
+  fixCompletedOffboardings
 );
 
 module.exports = router;

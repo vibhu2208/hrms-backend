@@ -1,5 +1,6 @@
 const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
 const TenantUserSchema = require('../models/tenant/TenantUser');
+const Department = require('../models/Department');
 const { getTenantModel } = require('../middlewares/tenantMiddleware');
 
 // @desc    Get all employees
@@ -10,9 +11,14 @@ exports.getEmployees = async (req, res) => {
     // Get tenant connection from middleware
     const tenantConnection = req.tenant.connection;
     const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
 
     const { status, department, search } = req.query;
-    let query = { isActive: true };
+    // Build base query - explicitly exclude ex-employees and inactive employees
+    let query = {
+      isActive: true,
+      isExEmployee: { $ne: true } // Simple and reliable: exclude where isExEmployee is true
+    };
 
     // Filter by department if specified
     if (department) query.department = department;
@@ -27,15 +33,55 @@ exports.getEmployees = async (req, res) => {
       ];
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'employeeController.js:17',message:'getEmployees query',data:{query:JSON.stringify(query)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+
     const employees = await TenantEmployee.find(query)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Additional safety filter: explicitly filter out any ex-employees that might have slipped through
+    const filteredEmployees = employees.filter(emp => {
+      return emp.isActive !== false && (emp.isExEmployee !== true);
+    });
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'employeeController.js:42',message:'getEmployees results',data:{countBeforeFilter:employees.length,countAfterFilter:filteredEmployees.length,employeeCodes:filteredEmployees.map(e=>e.employeeCode),isExEmployeeValues:filteredEmployees.map(e=>e.isExEmployee),isActiveValues:filteredEmployees.map(e=>e.isActive),fullEmployeeData:filteredEmployees.map(e=>({code:e.employeeCode,isExEmployee:e.isExEmployee,isActive:e.isActive}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
+    // Also verify specific employees that should be excluded
+    const shouldBeExcluded = await TenantEmployee.find({ employeeCode: { $in: ['EMP0004', 'EMP0005', 'EMP0003', 'EMP0002'] } }).lean();
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'employeeController.js:48',message:'Verifying specific employees',data:{employees:shouldBeExcluded.map(e=>({code:e.employeeCode,isExEmployee:e.isExEmployee,isActive:e.isActive}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+
+    // Populate department information manually since department is stored as string
+    const populatedEmployees = await Promise.all(
+      filteredEmployees.map(async (employee) => {
+        // Try to get department from departmentId first, then from department field
+        const deptId = employee.departmentId || employee.department;
+        if (deptId) {
+          try {
+            const department = await TenantDepartment.findById(deptId);
+            employee.department = department ? { _id: department._id, name: department.name } : null;
+          } catch (error) {
+            console.warn(`Failed to populate department for employee ${employee._id}:`, error.message);
+            employee.department = null;
+          }
+        } else {
+          employee.department = null;
+        }
+        return employee;
+      })
+    );
 
     console.log(`📋 Found ${employees.length} employees for company ${req.tenant.companyId}`);
 
     res.status(200).json({
       success: true,
       count: employees.length,
-      data: employees
+      data: populatedEmployees
     });
   } catch (error) {
     console.error('Error fetching employees:', error);
@@ -53,14 +99,30 @@ exports.getEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
     const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
 
-    const employee = await TenantEmployee.findById(req.params.id);
+    const employee = await TenantEmployee.findById(req.params.id).lean();
 
     if (!employee) {
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
       });
+    }
+
+    // Populate department information manually since department is stored as string
+    // Try to get department from departmentId first, then from department field
+    const deptId = employee.departmentId || employee.department;
+    if (deptId) {
+      try {
+        const department = await TenantDepartment.findById(deptId);
+        employee.department = department ? { _id: department._id, name: department.name } : null;
+      } catch (error) {
+        console.warn(`Failed to populate department for employee ${employee._id}:`, error.message);
+        employee.department = null;
+      }
+    } else {
+      employee.department = null;
     }
 
     res.status(200).json({
@@ -83,6 +145,7 @@ exports.createEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
     const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const { logEmployeeCreated } = require('../services/hrActivityLogService');
 
     // Generate employee code
     const employeeCount = await TenantEmployee.countDocuments();
@@ -97,8 +160,8 @@ exports.createEmployee = async (req, res) => {
       employeeCode,
       joiningDate: req.body.joiningDate || new Date(),
       designation: req.body.designation,
-      department: req.body.department,
-      departmentId: req.body.departmentId,
+      department: req.body.department, // Store department ID as string
+      departmentId: req.body.department, // Also store as ObjectId reference
       reportingManager: req.body.reportingManager,
       salary: req.body.salary || {
         basic: 0,
@@ -115,6 +178,9 @@ exports.createEmployee = async (req, res) => {
     const employee = await TenantEmployee.create(employeeData);
 
     console.log(`✅ Created employee: ${employee.firstName} ${employee.lastName} (${employeeCode})`);
+
+    // Log HR activity
+    await logEmployeeCreated(tenantConnection, employee, req);
 
     res.status(201).json({
       success: true,
@@ -138,11 +204,32 @@ exports.updateEmployee = async (req, res) => {
     const tenantConnection = req.tenant.connection;
     const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
 
+    console.log('📝 Updating employee:', req.params.id);
+    console.log('📝 Update data received:', req.body);
+
+    // Get the current employee data before update for logging
+    const previousEmployee = await TenantEmployee.findById(req.params.id).lean();
+
+    // If department is being updated, also update departmentId
+    const updateData = { ...req.body };
+    if (req.body.department !== undefined) {
+      // If department is being set (even if empty string), update both fields
+      if (req.body.department) {
+        updateData.department = req.body.department;
+        updateData.departmentId = req.body.department;
+      } else {
+        // If department is being cleared
+        updateData.department = null;
+        updateData.departmentId = null;
+      }
+      console.log('📝 Department update:', { department: updateData.department, departmentId: updateData.departmentId });
+    }
+
     const employee = await TenantEmployee.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       { new: true, runValidators: true }
-    );
+    ).lean();
 
     if (!employee) {
       return res.status(404).json({
@@ -151,13 +238,39 @@ exports.updateEmployee = async (req, res) => {
       });
     }
 
+    // Populate department information for response
+    const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
+    if (employee.departmentId) {
+      try {
+        const department = await TenantDepartment.findById(employee.departmentId);
+        employee.department = department ? { _id: department._id, name: department.name } : null;
+      } catch (error) {
+        console.warn(`Failed to populate department for employee ${employee._id}:`, error.message);
+        employee.department = null;
+      }
+    } else {
+      employee.department = null;
+    }
+
+    console.log('✅ Employee updated successfully:', employee._id);
+    console.log('✅ Updated department:', employee.department);
+
+    // Log HR activity
+    try {
+      const { logEmployeeUpdated } = require('../services/hrActivityLogService');
+      await logEmployeeUpdated(tenantConnection, employee, previousEmployee, req);
+      console.log(`📝 HR activity logged for employee update: ${employee.firstName} ${employee.lastName}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for employee update:', logError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Employee updated successfully',
       data: employee
     });
   } catch (error) {
-    console.error('Error updating employee:', error);
+    console.error('❌ Error updating employee:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -252,6 +365,15 @@ exports.deleteEmployee = async (req, res) => {
       });
     }
 
+    // Log HR activity
+    try {
+      const { logEmployeeDeleted } = require('../services/hrActivityLogService');
+      await logEmployeeDeleted(tenantConnection, employee, req);
+      console.log(`📝 HR activity logged for employee deletion: ${employee.firstName} ${employee.lastName}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for employee deletion:', logError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Employee deleted successfully'
@@ -270,13 +392,15 @@ exports.deleteEmployee = async (req, res) => {
 exports.getEmployeeStats = async (req, res) => {
   try {
     const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const total = await Employee.countDocuments();
-    const active = await Employee.countDocuments({ status: 'active' });
-    const inactive = await Employee.countDocuments({ status: 'inactive' });
-    const onLeave = await Employee.countDocuments({ status: 'on-leave' });
+    // Exclude ex-employees from all stats
+    const excludeExEmployees = { isExEmployee: { $ne: true } };
+    const total = await Employee.countDocuments(excludeExEmployees);
+    const active = await Employee.countDocuments({ status: 'active', ...excludeExEmployees });
+    const inactive = await Employee.countDocuments({ status: 'inactive', ...excludeExEmployees });
+    const onLeave = await Employee.countDocuments({ status: 'on-leave', ...excludeExEmployees });
 
     const byDepartment = await Employee.aggregate([
-      { $match: { status: 'active' } },
+      { $match: { status: 'active', isExEmployee: { $ne: true } } },
       { $group: { _id: '$department', count: { $sum: 1 } } },
       { $lookup: { from: 'departments', localField: '_id', foreignField: '_id', as: 'dept' } },
       { $unwind: '$dept' },
