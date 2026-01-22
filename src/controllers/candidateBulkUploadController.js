@@ -106,8 +106,7 @@ exports.validateBulkUpload = async (req, res) => {
         if (isEmpty) {
           const actualValue = fieldValue || 'empty';
           const displayValue = actualValue === 'empty' ? 'empty' : `"${actualValue}"`;
-          // Change from error to warning - allow empty fields for flexibility
-          rowWarnings.push(`Row ${rowNumber}: ${field} is empty (${displayValue}) - will be saved as empty`);
+          rowErrors.push(`Row ${rowNumber}: ${field} is required but empty (${displayValue})`);
         }
       }
 
@@ -280,8 +279,8 @@ exports.importBulkCandidates = async (req, res) => {
         // Check for duplicates
         const existingCandidate = await Candidate.findOne({
           $or: [
-            { email: candidateData.email?.toLowerCase().trim() },
-            { phone: String(candidateData.phone)?.replace(/\D/g, '') }
+            { email: (candidateData.email || candidateData.Email)?.toLowerCase().trim() },
+            { phone: String(candidateData.phone || candidateData.Phone)?.replace(/\D/g, '') }
           ]
         });
 
@@ -296,83 +295,43 @@ exports.importBulkCandidates = async (req, res) => {
 
         // Skip job validation - just use the job title as-is or set to null if empty
         let appliedForValue = null;
-        if (candidateData.appliedfor && candidateData.appliedfor.trim()) {
-          appliedForValue = candidateData.appliedfor.trim();
+        if ((candidateData.appliedFor || candidateData.appliedfor) && (candidateData.appliedFor || candidateData.appliedfor).trim()) {
+          appliedForValue = (candidateData.appliedFor || candidateData.appliedfor).trim();
           console.log(`Using job title: "${appliedForValue}" for candidate ${candidateData.email}`);
         } else {
           console.log(`No job title provided for candidate ${candidateData.email}`);
         }
 
-        // Generate unique candidate code (handle race conditions)
-        let candidateCode;
-        let attempts = 0;
-        const maxAttempts = 20;
+        // Generate unique candidate code using timestamp to avoid conflicts in bulk import
+        const timestamp = Date.now();
+        const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        candidateCode = `CAN${timestamp.toString().slice(-5)}${randomSuffix}`;
 
-        console.log(`Generating candidate code for ${candidateData.email}...`);
-
-        while (attempts < maxAttempts) {
-          try {
-            // Get the highest existing candidate code
-            const lastCandidate = await Candidate.findOne({})
-              .sort({ candidateCode: -1 })
-              .select('candidateCode')
-              .lean();
-
-            if (lastCandidate && lastCandidate.candidateCode) {
-              // Extract number from last code (e.g., "CAN00008" -> 8)
-              const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
-              candidateCode = `CAN${String(lastNumber + 1 + attempts).padStart(5, '0')}`;
-            } else {
-              // No candidates exist, start from 1
-              candidateCode = `CAN${String(1 + attempts).padStart(5, '0')}`;
-            }
-
-            console.log(`Generated candidate code: ${candidateCode} (attempt ${attempts + 1})`);
-
-            // Check if this code already exists (race condition check)
-            const existing = await Candidate.findOne({ candidateCode });
-            if (existing) {
-              console.log(`Candidate code ${candidateCode} already exists, trying next...`);
-              attempts++;
-              continue;
-            }
-            
-            // Code is unique, use it
-            break;
-            
-          } catch (error) {
-            attempts++;
-            if (attempts >= maxAttempts) {
-              // Fallback to timestamp-based code
-              candidateCode = `CAN${Date.now().toString().slice(-8)}`;
-              break;
-            }
-          }
-        }
+        console.log(`Generated candidate code: ${candidateCode} for ${candidateData.email}`);
 
         // Create candidate - handle empty fields gracefully
         const candidate = new Candidate({
           candidateCode,
-          firstName: candidateData.firstname?.trim() || '',
-          lastName: candidateData.lastname?.trim() || '',
+          firstName: candidateData.firstname?.trim() || candidateData.firstName?.trim() || '',
+          lastName: candidateData.lastname?.trim() || candidateData.lastName?.trim() || '',
           email: candidateData.email?.toLowerCase().trim() || '',
           phone: String(candidateData.phone)?.trim() || '',
-          alternatePhone: candidateData.alternatephone ? String(candidateData.alternatephone).trim() : null,
-          currentLocation: candidateData.currentlocation?.trim() || null,
-          preferredLocation: candidateData.preferredlocation || [],
+          alternatePhone: candidateData.alternatephone ? String(candidateData.alternatephone).trim() : candidateData.alternatePhone ? String(candidateData.alternatePhone).trim() : null,
+          currentLocation: candidateData.currentlocation?.trim() || candidateData.currentLocation?.trim() || null,
+          preferredLocation: parseCommaSeparatedString(candidateData.preferredlocation || candidateData.preferredLocation),
           source: candidateData.source?.trim().toLowerCase() || 'other',
           // appliedFor: appliedForValue, // Skip this - model expects ObjectId reference to JobPosting
           experience: {
-            years: parseInt(candidateData.experienceyears) || 0,
-            months: parseInt(candidateData.experiencemonths) || 0
+            years: parseInt(candidateData.experienceyears || candidateData.experienceYears) || 0,
+            months: parseInt(candidateData.experiencemonths || candidateData.experienceMonths) || 0
           },
-          currentCompany: candidateData.currentcompany?.trim() || null,
-          currentDesignation: candidateData.currentdesignation?.trim() || null,
-          currentCTC: candidateData.currentctc ? parseFloat(candidateData.currentctc) : null,
-          expectedCTC: candidateData.expectedctc ? parseFloat(candidateData.expectedctc) : null,
-          noticePeriod: candidateData.noticeperiod ? parseInt(candidateData.noticeperiod) : null,
-          skills: candidateData.skills || [],
-          stage: candidateData.stage?.trim() || 'applied',
+          currentCompany: candidateData.currentcompany?.trim() || candidateData.currentCompany?.trim() || null,
+          currentDesignation: candidateData.currentdesignation?.trim() || candidateData.currentDesignation?.trim() || null,
+          currentCTC: candidateData.currentctc ? parseFloat(candidateData.currentctc) : candidateData.currentCTC ? parseFloat(candidateData.currentCTC) : null,
+          expectedCTC: candidateData.expectedctc ? parseFloat(candidateData.expectedctc) : candidateData.expectedCTC ? parseFloat(candidateData.expectedCTC) : null,
+          noticePeriod: candidateData.noticeperiod ? parseInt(candidateData.noticeperiod) : candidateData.noticePeriod ? parseInt(candidateData.noticePeriod) : null,
+          skills: parseCommaSeparatedString(candidateData.skills),
+          stage: (candidateData.stage?.trim() || 'applied').toLowerCase(),
           status: 'active',
           notes: candidateData.notes?.trim() || null,
           appliedForTitle: appliedForValue // Store job title as string
@@ -592,10 +551,13 @@ function normalizeHeaders(headers) {
       return template.headerMapping[normalized];
     }
 
-    // Try to find partial matches (e.g., "first" should match "firstName")
+    // Try to find partial matches with more specific logic
     for (const [mappedHeader, fieldName] of Object.entries(template.headerMapping)) {
-      if (normalized.includes(mappedHeader) || mappedHeader.includes(normalized)) {
-        console.log(`    🔄 Partial match: "${original}" contains/similar to "${mappedHeader}" -> "${fieldName}"`);
+      // Only match if the normalized header starts with or is contained within the mapped header with word boundaries
+      if (normalized === mappedHeader ||
+          mappedHeader.includes(normalized) ||
+          (normalized.includes(mappedHeader) && normalized.length <= mappedHeader.length + 2)) {
+        console.log(`    🔄 Partial match: "${original}" matches "${mappedHeader}" -> "${fieldName}"`);
         return fieldName;
       }
     }
@@ -627,4 +589,22 @@ function validateHeaders(headers) {
     isValid: errors.length === 0,
     errors
   };
+}
+
+// Helper function to parse comma-separated strings into arrays
+function parseCommaSeparatedString(value) {
+  if (!value) return [];
+
+  // If it's already an array, return as is
+  if (Array.isArray(value)) return value;
+
+  // If it's a string, split by comma and trim
+  if (typeof value === 'string') {
+    return value.split(',')
+      .map(item => item.trim())
+      .filter(item => item.length > 0);
+  }
+
+  // For any other type, return empty array
+  return [];
 }

@@ -131,6 +131,27 @@ const candidateBulkUploadTemplate = {
   
   // Header mapping (normalize various header formats)
   headerMapping: {
+    // CamelCase headers from template
+    'firstName': 'firstName',
+    'lastName': 'lastName',
+    'email': 'email',
+    'phone': 'phone',
+    'appliedFor': 'appliedFor',
+    'alternatePhone': 'alternatePhone',
+    'currentLocation': 'currentLocation',
+    'preferredLocation': 'preferredLocation',
+    'source': 'source',
+    'experienceYears': 'experienceYears',
+    'experienceMonths': 'experienceMonths',
+    'currentCompany': 'currentCompany',
+    'currentDesignation': 'currentDesignation',
+    'currentCTC': 'currentCTC',
+    'expectedCTC': 'expectedCTC',
+    'noticePeriod': 'noticePeriod',
+    'skills': 'skills',
+    'stage': 'stage',
+    'notes': 'notes',
+    // Alternative formats
     'first name': 'firstName',
     'first_name': 'firstName',
     'last name': 'lastName',

@@ -399,7 +399,7 @@ const normalizePhone = (phone) => {
 candidateSchema.pre('save', async function(next) {
   // Skip candidate code generation if already set (done in controller)
   console.log(`Pre-save hook triggered for candidate: ${this.email || 'unknown'}, candidateCode: ${this.candidateCode || 'not set'}`);
-  if (!this.candidateCode) {
+  if (!this.candidateCode || this.candidateCode.trim() === '') {
     try {
       // Find the highest existing candidate code and increment it
       const lastCandidate = await mongoose.model('Candidate').findOne({})
