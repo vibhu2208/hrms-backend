@@ -6,42 +6,10 @@ const HRActivityHistorySchema = require('../models/tenant/HRActivityHistory');
  * @route   GET /api/hr-activity-history
  * @access  Private (Admin, Company Admin)
  */
-// #region agent log - hypothesis D: Frontend/API issue
 exports.getHRActivityHistory = async (req, res) => {
   try {
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'hrActivityHistoryController.js:getHRActivityHistory:entry',
-        message: 'getHRActivityHistory called',
-        data: { queryParams: req.query, tenantConnection: !!req.tenant?.connection },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'hypothesis-check',
-        hypothesisId: 'D'
-      })
-    }).catch(() => {});
-
-    console.log(`📋 Fetching HR activity history with query params:`, req.query);
-
     const tenantConnection = req.tenant.connection;
     const HRActivityHistory = getTenantModel(tenantConnection, 'HRActivityHistory', HRActivityHistorySchema);
-
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'hrActivityHistoryController.js:getHRActivityHistory:model',
-        message: 'HRActivityHistory model obtained',
-        data: { hasModel: !!HRActivityHistory, tenantConnectionName: tenantConnection.name },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'hypothesis-check',
-        hypothesisId: 'D'
-      })
-    }).catch(() => {});
-// #endregion
 
     const {
       hrUserId,
@@ -70,20 +38,6 @@ exports.getHRActivityHistory = async (req, res) => {
     const activities = await HRActivityHistory.getHRTimeline(filters);
     console.log(`✅ Found ${activities.length} HR activity records`);
 
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'hrActivityHistoryController.js:getHRActivityHistory:query-results',
-        message: 'Query results obtained',
-        data: { activitiesCount: activities.length, filters },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'hypothesis-check',
-        hypothesisId: 'D'
-      })
-    }).catch(() => {});
-
     const total = await HRActivityHistory.countDocuments(
       (() => {
         const query = {};
@@ -104,21 +58,6 @@ exports.getHRActivityHistory = async (req, res) => {
     );
 
     console.log(`📊 Total HR activity records in DB: ${total}`);
-
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'hrActivityHistoryController.js:getHRActivityHistory:total-count',
-        message: 'Total count obtained',
-        data: { total },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'hypothesis-check',
-        hypothesisId: 'D'
-      })
-    }).catch(() => {});
-// #endregion
 
     // Get statistics
     const stats = await HRActivityHistory.getActivityStats({
@@ -157,19 +96,6 @@ exports.getHRActivityHistory = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching HR activity history:', error);
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'hrActivityHistoryController.js:getHRActivityHistory:error',
-        message: 'Error in getHRActivityHistory',
-        data: { error: error.message, stack: error.stack },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        runId: 'hypothesis-check',
-        hypothesisId: 'D'
-      })
-    }).catch(() => {});
 
     res.status(500).json({
       success: false,
@@ -178,7 +104,6 @@ exports.getHRActivityHistory = async (req, res) => {
     });
   }
 };
-// #endregion
 
 /**
  * @desc    Get HR Activity History for specific HR user

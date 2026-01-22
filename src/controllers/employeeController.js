@@ -38,9 +38,6 @@ exports.getEmployees = async (req, res) => {
       ];
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'employeeController.js:17',message:'getEmployees query',data:{query:JSON.stringify(query)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
 
     const employees = await TenantEmployee.find(query)
       .sort({ createdAt: -1 })
@@ -51,15 +48,9 @@ exports.getEmployees = async (req, res) => {
       return emp.isActive !== false && (emp.isExEmployee !== true);
     });
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'employeeController.js:42',message:'getEmployees results',data:{countBeforeFilter:employees.length,countAfterFilter:filteredEmployees.length,employeeCodes:filteredEmployees.map(e=>e.employeeCode),isExEmployeeValues:filteredEmployees.map(e=>e.isExEmployee),isActiveValues:filteredEmployees.map(e=>e.isActive),fullEmployeeData:filteredEmployees.map(e=>({code:e.employeeCode,isExEmployee:e.isExEmployee,isActive:e.isActive}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     
     // Also verify specific employees that should be excluded
     const shouldBeExcluded = await TenantEmployee.find({ employeeCode: { $in: ['EMP0004', 'EMP0005', 'EMP0003', 'EMP0002'] } }).lean();
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'employeeController.js:48',message:'Verifying specific employees',data:{employees:shouldBeExcluded.map(e=>({code:e.employeeCode,isExEmployee:e.isExEmployee,isActive:e.isActive}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
 
     // Populate department information manually since department is stored as string
     const populatedEmployees = await Promise.all(

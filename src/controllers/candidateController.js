@@ -19,9 +19,6 @@ exports.getCandidates = async (req, res) => {
     const { stage, status, source, search } = req.query;
     let query = {};
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:14',message:'getCandidates called',data:{stage,status,source,search},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-    // #endregion
 
     if (stage) query.stage = stage;
     if (status) query.status = status;
@@ -61,10 +58,6 @@ exports.getCandidates = async (req, res) => {
         });
       }
       
-      // #region agent log
-      const exEmployeeCandidates = candidates.filter(c=>c.isExEmployee);
-      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:58',message:'getCandidates results (no search)',data:{count:candidates.length,exEmployeeCount:exEmployeeCandidates.length,exEmployeeDetails:exEmployeeCandidates.map(c=>({candidateCode:c.candidateCode,firstName:c.firstName,lastName:c.lastName,exEmployeeCode:c.exEmployeeCode,email:c.email}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
 
       return res.status(200).json({ success: true, count: candidates.length, data: candidates });
     }
@@ -155,10 +148,6 @@ exports.getCandidates = async (req, res) => {
     // Sort by relevance score (already sorted by intelligentSearch, but ensure it)
     resultsWithMetadata.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
     
-    // #region agent log
-    const exEmployeeResults = resultsWithMetadata.filter(c=>c.isExEmployee);
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:159',message:'getCandidates results (with search)',data:{count:resultsWithMetadata.length,exEmployeeCount:exEmployeeResults.length,exEmployeeDetails:exEmployeeResults.map(c=>({candidateCode:c.candidateCode,firstName:c.firstName,lastName:c.lastName,exEmployeeCode:c.exEmployeeCode,email:c.email}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-    // #endregion
 
     res.status(200).json({ 
       success: true, 
@@ -2585,9 +2574,6 @@ exports.fixExEmployeeCandidateNames = async (req, res) => {
     // Find all ex-employee candidates
     const exEmployeeCandidates = await Candidate.find({ isExEmployee: true }).lean();
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2578',message:'Fix ex-employee candidate names - found candidates',data:{count:exEmployeeCandidates.length,candidates:exEmployeeCandidates.map(c=>({candidateCode:c.candidateCode,firstName:c.firstName,lastName:c.lastName,exEmployeeCode:c.exEmployeeCode,exEmployeeId:c.exEmployeeId}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-    // #endregion
     
     let fixedCount = 0;
     let errorCount = 0;
@@ -2627,17 +2613,11 @@ exports.fixExEmployeeCandidateNames = async (req, res) => {
               }
             );
             
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2605',message:'Fixed candidate name',data:{candidateCode:candidate.candidateCode,oldFirstName:candidate.firstName,oldLastName:candidate.lastName,newFirstName:correctFirstName,newLastName:correctLastName,exEmployeeCode:candidate.exEmployeeCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-            // #endregion
             
             fixedCount++;
             console.log(`✅ Fixed candidate ${candidate.candidateCode}: "${candidate.firstName} ${candidate.lastName}" -> "${correctFirstName} ${correctLastName}"`);
           }
         } else {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2612',message:'Could not find employee for candidate',data:{candidateCode:candidate.candidateCode,exEmployeeCode:candidate.exEmployeeCode,exEmployeeId:candidate.exEmployeeId,email:candidate.email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-          // #endregion
           console.warn(`⚠️  Could not find employee for candidate ${candidate.candidateCode} (exEmployeeCode: ${candidate.exEmployeeCode})`);
         }
       } catch (err) {
@@ -2646,9 +2626,6 @@ exports.fixExEmployeeCandidateNames = async (req, res) => {
       }
     }
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2620',message:'Fix ex-employee candidate names completed',data:{total:exEmployeeCandidates.length,fixed:fixedCount,errors:errorCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-    // #endregion
     
     res.status(200).json({
       success: true,
@@ -2680,9 +2657,6 @@ exports.cleanupDuplicateExEmployeeCandidates = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2635',message:'Cleanup duplicates - found candidates',data:{total:exEmployeeCandidates.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-    // #endregion
     
     // Group by exEmployeeCode or exEmployeeId
     const grouped = {};
@@ -2706,9 +2680,6 @@ exports.cleanupDuplicateExEmployeeCandidates = async (req, res) => {
         const toKeep = candidates[0];
         const duplicates = candidates.slice(1);
         
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2652',message:'Found duplicates for ex-employee',data:{exEmployeeCode:key,keepCandidateCode:toKeep.candidateCode,duplicateCount:duplicates.length,duplicateCodes:duplicates.map(c=>c.candidateCode)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-        // #endregion
         
         toDelete.push(...duplicates.map(c => c._id));
       }
@@ -2725,9 +2696,6 @@ exports.cleanupDuplicateExEmployeeCandidates = async (req, res) => {
     // Delete duplicates
     const deleteResult = await Candidate.deleteMany({ _id: { $in: toDelete } });
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2668',message:'Cleanup duplicates completed',data:{deleted:deleteResult.deletedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-    // #endregion
     
     res.status(200).json({
       success: true,
