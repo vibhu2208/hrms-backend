@@ -194,21 +194,6 @@ exports.sendToOnboarding = async (req, res) => {
       
       // Log HR activity
       console.log(`📝 Attempting to log HR activity for send to onboarding (existing record)`);
-      // #region agent log - hypothesis C: Function call issue
-      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'onboardingController.js:sendToOnboarding:log-existing',
-          message: 'About to log send to onboarding for existing record',
-          data: { candidateName: candidate.firstName + ' ' + candidate.lastName, onboardingId: onboarding.onboardingId },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'hypothesis-check',
-          hypothesisId: 'C'
-        })
-      }).catch(() => {});
-      // #endregion
 
       const { logSendToOnboarding } = require('../services/hrActivityLogService');
       await logSendToOnboarding(req.tenant.connection, candidate, onboarding, req);
@@ -261,21 +246,6 @@ exports.sendToOnboarding = async (req, res) => {
       
       // Log HR activity
       console.log(`📝 Attempting to log HR activity for send to onboarding (new record)`);
-      // #region agent log - hypothesis C: Function call issue
-      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'onboardingController.js:sendToOnboarding:log-new',
-          message: 'About to log send to onboarding for new record',
-          data: { candidateName: candidate.firstName + ' ' + candidate.lastName, onboardingId: onboarding.onboardingId },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'hypothesis-check',
-          hypothesisId: 'C'
-        })
-      }).catch(() => {});
-      // #endregion
 
       const { logSendToOnboarding } = require('../services/hrActivityLogService');
       await logSendToOnboarding(req.tenant.connection, candidate, onboarding, req);
@@ -880,21 +850,6 @@ exports.sendOffer = async (req, res) => {
 
     // Log HR activity
     try {
-      // #region agent log - hypothesis C: Function call issue
-      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'onboardingController.js:sendOffer:log-offer',
-          message: 'About to log offer sent',
-          data: { candidateName: candidate.firstName + ' ' + candidate.lastName, onboardingId: onboarding.onboardingId },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'hypothesis-check',
-          hypothesisId: 'C'
-        })
-      }).catch(() => {});
-      // #endregion
 
       const { logOfferSent } = require('../services/hrActivityLogService');
       await logOfferSent(req.tenant.connection, onboarding, req);

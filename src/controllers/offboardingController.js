@@ -80,15 +80,9 @@ exports.getOffboardingList = async (req, res) => {
     // Auto-fix: Process completed offboardings that haven't been processed yet
     for (const offboarding of offboardingList) {
       if (offboarding.status === 'completed' && offboarding.currentStage === 'success') {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:80',message:'Auto-fix check for completed offboarding',data:{offboardingId:offboarding._id,employeeId:offboarding.employee,status:offboarding.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
         if (offboarding.employee && TenantEmployee) {
           TenantEmployee.findById(offboarding.employee)
             .then(employee => {
-              // #region agent log
-              fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:84',message:'Auto-fix employee check',data:{employeeFound:!!employee,isExEmployee:employee?.isExEmployee,employeeId:employee?._id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-              // #endregion
               if (employee && !employee.isExEmployee) {
                 // Process this offboarding
                 const offboardingWorkflow = require('../services/offboardingWorkflow');
@@ -103,14 +97,8 @@ exports.getOffboardingList = async (req, res) => {
                 };
                 offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest)
                   .then(() => {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:97',message:'Auto-fix completed',data:{offboardingId:offboarding._id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                    // #endregion
                   })
                   .catch(err => {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:100',message:'Auto-fix failed',data:{error:err.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                    // #endregion
                     console.error(`Auto-fix failed for offboarding ${offboarding._id}:`, err);
                   });
               }
@@ -445,9 +433,6 @@ exports.updateOffboarding = async (req, res) => {
 
 exports.advanceStage = async (req, res) => {
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:401',message:'advanceStage called',data:{id:req.params.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
     const offboarding = await Offboarding.findById(req.params.id);
     if (!offboarding) {
@@ -463,9 +448,6 @@ exports.advanceStage = async (req, res) => {
 
       // If reached success stage, mark as completed and process ex-employee logic
       if (offboarding.currentStage === 'success') {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:417',message:'Reached success stage - processing completion',data:{employeeId:offboarding.employee,currentStage:offboarding.currentStage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         offboarding.status = 'completed';
         offboarding.completedAt = Date.now();
         
@@ -477,9 +459,6 @@ exports.advanceStage = async (req, res) => {
           // Convert old offboarding format to new format for completeOffboarding
           const employee = await TenantEmployee.findById(offboarding.employee);
           if (employee && !employee.isExEmployee) {
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:426',message:'Employee found, calling completeOffboarding',data:{employeeId:employee._id,employeeCode:employee.employeeCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-            // #endregion
             
             // Create a mock offboardingRequest object for the workflow
             const mockOffboardingRequest = {
@@ -493,18 +472,9 @@ exports.advanceStage = async (req, res) => {
             };
             
             await offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:440',message:'completeOffboarding finished',data:{employeeId:employee._id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-            // #endregion
           } else if (employee && employee.isExEmployee) {
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:442',message:'Employee already marked as ex-employee',data:{employeeId:employee._id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-            // #endregion
           }
         } catch (exEmployeeError) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingController.js:445',message:'Error in ex-employee processing',data:{error:exEmployeeError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-          // #endregion
           console.error('Error processing ex-employee:', exEmployeeError);
           // Don't fail the stage advancement if ex-employee processing fails
         }
