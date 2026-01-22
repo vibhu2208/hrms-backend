@@ -256,6 +256,24 @@ const candidateSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Candidate'
   },
+  // Link to employee if candidate becomes employee
+  employeeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
+  },
+  isEmployee: {
+    type: Boolean,
+    default: false
+  },
+  isExEmployee: {
+    type: Boolean,
+    default: false
+  },
+  exEmployeeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
+  },
+  exEmployeeCode: String,
   applicationHistory: [{
     jobId: {
       type: mongoose.Schema.Types.ObjectId,

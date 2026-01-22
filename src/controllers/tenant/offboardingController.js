@@ -70,12 +70,43 @@ exports.getOffboardingRequests = async (req, res) => {
             department: departmentData,
             reportingManager: request.employeeSnapshot.reportingManager
           };
+          
+          // Auto-fix: If offboarding is closed but employee is not marked as ex-employee, process it
+          // Do this asynchronously to not slow down the response
+          if (request.status === 'closed' && request.isCompleted) {
+            TenantEmployee.findById(request.employeeSnapshot._id || request.employeeId)
+              .then(employee => {
+                if (employee && !employee.isExEmployee) {
+                  // Process this offboarding in background
+                  offboardingWorkflow.completeOffboarding(req.tenant.connection, request)
+                    .then(() => {
+                    })
+                    .catch(err => {
+                      console.error(`Background offboarding fix failed for ${request._id}:`, err);
+                    });
+                }
+              })
+              .catch(err => {
+                console.warn(`Could not check employee for auto-fix:`, err);
+              });
+          }
         } else {
           // Otherwise, fetch live employee data
           const employee = await TenantEmployee.findById(request.employeeId)
             .populate('department', 'name')
             .populate('reportingManager', 'firstName lastName email');
           request.employeeId = employee;
+          
+          // Auto-fix: If offboarding is closed but employee is not marked as ex-employee, process it
+          if (request.status === 'closed' && request.isCompleted && employee && !employee.isExEmployee) {
+            // Process this offboarding in background
+            offboardingWorkflow.completeOffboarding(req.tenant.connection, request)
+              .then(() => {
+              })
+              .catch(err => {
+                console.error(`Background offboarding fix failed for ${request._id}:`, err);
+              });
+          }
         }
       }
       if (request.initiatedBy) {
@@ -652,8 +683,10 @@ exports.closeOffboarding = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Offboarding request not found' });
     }
 
+
     // Complete the offboarding process
     await offboardingWorkflow.completeOffboarding(req.tenant.connection, request);
+
 
     res.status(200).json({
       success: true,
@@ -662,6 +695,62 @@ exports.closeOffboarding = async (req, res) => {
     });
   } catch (error) {
     console.error('Error closing offboarding:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Fix existing completed offboardings - process employees who were completed before the ex-employee feature
+ */
+exports.fixCompletedOffboardings = async (req, res) => {
+  try {
+    const OffboardingRequest = getTenantModel(req.tenant.connection, 'OffboardingRequest', offboardingRequestSchema);
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../../models/tenant/TenantEmployee'));
+    
+    // Find all closed/completed offboarding requests
+    const completedOffboardings = await OffboardingRequest.find({
+      status: 'closed',
+      isCompleted: true
+    });
+
+    let processed = 0;
+    let errors = [];
+
+    for (const offboarding of completedOffboardings) {
+      try {
+        // Check if employee is already marked as ex-employee
+        const employee = await TenantEmployee.findById(offboarding.employeeId);
+        
+        if (employee && !employee.isExEmployee) {
+          // Process this offboarding to mark employee as ex-employee
+          await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboarding);
+          processed++;
+          console.log(`✅ Fixed offboarding for employee ${employee.employeeCode}`);
+        } else if (employee && employee.isExEmployee) {
+          console.log(`ℹ️  Employee ${employee.employeeCode} already marked as ex-employee`);
+        } else {
+          console.warn(`⚠️  Employee not found for offboarding ${offboarding._id}`);
+        }
+      } catch (error) {
+        errors.push({
+          offboardingId: offboarding._id,
+          error: error.message
+        });
+        console.error(`❌ Error processing offboarding ${offboarding._id}:`, error);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Processed ${processed} completed offboardings`,
+      data: {
+        total: completedOffboardings.length,
+        processed,
+        errors: errors.length > 0 ? errors : undefined
+      }
+    });
+  } catch (error) {
+    console.error('Error fixing completed offboardings:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

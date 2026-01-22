@@ -23,6 +23,10 @@ const ExitProcess = require('../models/ExitProcess');
 const TalentPool = require('../models/TalentPool');
 const OfferTemplate = require('../models/OfferTemplate');
 const ResumePool = require('../models/ResumePool');
+const JobDescription = require('../models/JobDescription');
+
+// Import tenant-specific models
+const TenantUser = require('../models/tenant/TenantUser');
 
 // Import offboarding related models (if they exist)
 let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
@@ -81,6 +85,14 @@ try {
   DocumentConfiguration = require('../models/tenant/DocumentConfiguration');
 } catch (e) {
   DocumentConfiguration = null;
+}
+
+// Import HR Activity History model
+let HRActivityHistory;
+try {
+  HRActivityHistory = require('../models/tenant/HRActivityHistory');
+} catch (e) {
+  HRActivityHistory = null;
 }
 
 /**
@@ -155,6 +167,10 @@ function getTenantModels(tenantConnection) {
   models.TalentPool = createTenantModel('TalentPool', TalentPool);
   models.OfferTemplate = createTenantModel('OfferTemplate', OfferTemplate);
   models.ResumePool = createTenantModel('ResumePool', ResumePool);
+  models.JobDescription = createTenantModel('JobDescription', JobDescription);
+  
+  // Tenant-specific models
+  models.TenantUser = createTenantModel('TenantUser', TenantUser);
 
   // Tenant-specific offboarding models (only if they exist)
   if (OffboardingRequest) models.OffboardingRequest = createTenantModel('OffboardingRequest', OffboardingRequest);
@@ -168,6 +184,9 @@ function getTenantModels(tenantConnection) {
   if (CandidateDocumentUploadToken) models.CandidateDocumentUploadToken = createTenantModel('CandidateDocumentUploadToken', CandidateDocumentUploadToken);
   if (CandidateDocument) models.CandidateDocument = createTenantModel('CandidateDocument', CandidateDocument);
   if (DocumentConfiguration) models.DocumentConfiguration = createTenantModel('DocumentConfiguration', DocumentConfiguration);
+
+  // HR Activity History model
+  if (HRActivityHistory) models.HRActivityHistory = createTenantModel('HRActivityHistory', HRActivityHistory);
 
   // Cache models on connection
   tenantConnection._tenantModels = models;

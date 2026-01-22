@@ -109,6 +109,10 @@ const tenantEmployeeSchema = new mongoose.Schema({
   terminationReason: {
     type: String
   },
+  isExEmployee: {
+    type: Boolean,
+    default: false
+  },
 
   // Metadata
   createdBy: {
@@ -127,6 +131,7 @@ tenantEmployeeSchema.index({ email: 1 });
 tenantEmployeeSchema.index({ employeeCode: 1 });
 tenantEmployeeSchema.index({ department: 1 });
 tenantEmployeeSchema.index({ isActive: 1 });
+tenantEmployeeSchema.index({ isExEmployee: 1 });
 tenantEmployeeSchema.index({ joiningDate: -1 });
 
 // Virtual for full name

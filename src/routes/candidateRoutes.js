@@ -19,7 +19,12 @@ const {
   checkDuplicate,
   getCandidateHistory,
   getCandidateByEmail,
-  uploadResume: uploadResumeController
+  uploadResume: uploadResumeController,
+  searchCandidatesByJD,
+  getCandidatePoolForJD,
+  compareCandidatesForJD,
+  fixExEmployeeCandidateNames,
+  cleanupDuplicateExEmployeeCandidates
 } = require('../controllers/candidateController');
 const {
   validateBulkUpload,
@@ -63,6 +68,14 @@ router.put('/:candidateId/interview/:interviewId/feedback', updateInterviewFeedb
 router.post('/:id/notification', sendNotification);
 router.put('/:id/hr-call', updateHRCall);
 
+// JD-based candidate search routes (must come before /:id routes)
+router.get('/search-by-jd', (req, res, next) => {
+  console.log('🔍 Route /search-by-jd hit with query:', req.query);
+  return searchCandidatesByJD(req, res, next);
+});
+router.get('/pool-for-jd/:jdId', getCandidatePoolForJD);
+router.post('/compare-for-jd/:jdId', compareCandidatesForJD);
+
 // Send interview notification email
 router.post('/:id/send-interview-email', sendInterviewEmail);
 
@@ -78,5 +91,11 @@ router.get('/bulk/template', downloadTemplate);
 
 // Resume upload and parsing route
 router.post('/upload-resume', uploadResume, uploadResumeController);
+
+// Fix ex-employee candidate names
+router.post('/fix-ex-employee-names', fixExEmployeeCandidateNames);
+
+// Cleanup duplicate ex-employee candidates
+router.post('/cleanup-duplicates', cleanupDuplicateExEmployeeCandidates);
 
 module.exports = router;

@@ -14,31 +14,70 @@ const awsS3Service = require('../services/awsS3Service');
 exports.getCandidates = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
     const intelligentSearch = require('../services/intelligentSearchService').intelligentSearch;
     const { stage, status, source, search } = req.query;
     let query = {};
+    
 
     if (stage) query.stage = stage;
     if (status) query.status = status;
     if (source) query.source = source;
+    
+    // Exclude candidates who are current employees (not ex-employees)
+    // Allow ex-employees to appear in candidate list
+    query.isEmployee = { $ne: true };
+    
+    // Also exclude by checking if email matches an active employee (not ex-employees)
+    let activeEmployeeEmails = [];
+    try {
+      const activeEmployees = await TenantEmployee.find({ 
+        isActive: true, 
+        isExEmployee: { $ne: true } 
+      }).select('email').lean();
+      activeEmployeeEmails = activeEmployees.map(emp => emp.email?.toLowerCase()).filter(Boolean);
+    } catch (err) {
+      console.warn('Could not fetch active employees for candidate filtering:', err.message);
+    }
 
     // If no search query, use basic filters
     if (!search || !search.trim()) {
-      const candidates = await Candidate.find(query)
+      let candidates = await Candidate.find(query)
         .populate('appliedFor', 'title department')
         .populate('referredBy', 'firstName lastName')
         .select('+resume')
         .sort({ createdAt: -1 });
+      
+      // Filter out candidates who are active employees by email (but allow ex-employees)
+      if (activeEmployeeEmails.length > 0) {
+        candidates = candidates.filter(c => {
+          // Allow ex-employees to appear in candidate list
+          if (c.isExEmployee) return true;
+          const email = c.email?.toLowerCase();
+          return !email || !activeEmployeeEmails.includes(email);
+        });
+      }
+      
 
       return res.status(200).json({ success: true, count: candidates.length, data: candidates });
     }
 
     // With search query - fetch all candidates and apply intelligent search
     // First, do a basic filter without search
-    const allCandidates = await Candidate.find(query)
+    let allCandidates = await Candidate.find(query)
       .populate('appliedFor', 'title department')
       .populate('referredBy', 'firstName lastName')
       .select('firstName lastName email phone skills experience currentDesignation currentCompany appliedFor candidateCode createdAt resume stage status timeline');
+    
+    // Filter out candidates who are active employees by email (but allow ex-employees)
+    if (activeEmployeeEmails.length > 0) {
+      allCandidates = allCandidates.filter(c => {
+        // Allow ex-employees to appear in candidate list
+        if (c.isExEmployee) return true;
+        const email = c.email?.toLowerCase();
+        return !email || !activeEmployeeEmails.includes(email);
+      });
+    }
 
     // Convert candidates to format expected by intelligentSearch
     const candidateResumes = allCandidates.map(candidate => ({
@@ -108,6 +147,7 @@ exports.getCandidates = async (req, res) => {
 
     // Sort by relevance score (already sorted by intelligentSearch, but ensure it)
     resultsWithMetadata.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+    
 
     res.status(200).json({ 
       success: true, 
@@ -264,6 +304,20 @@ exports.createCandidate = async (req, res) => {
       console.error('Validation errors:', createError.errors);
       throw createError;
     }
+
+    // Auto-populate candidate fields from parsed resume data if available
+    if (req.body.resumeParsing?.extractedData) {
+      try {
+        const populatedCandidate = await populateCandidateFromResumeData(candidate, req.body.resumeParsing.extractedData);
+        if (populatedCandidate) {
+          candidate = populatedCandidate;
+          console.log('✅ Candidate fields auto-populated from resume data');
+        }
+      } catch (populateError) {
+        console.warn('⚠️ Failed to auto-populate candidate from resume data:', populateError.message);
+        // Don't throw - candidate creation succeeded, just log the warning
+      }
+    }
     
     // If existing candidate found, link them and update application history
     if (existingCandidate) {
@@ -386,10 +440,30 @@ exports.createCandidate = async (req, res) => {
 exports.updateCandidate = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
-    const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    if (!candidate) {
+
+    // Get current candidate to check for resume parsing data
+    const currentCandidate = await Candidate.findById(req.params.id);
+    if (!currentCandidate) {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
+
+    // Update the candidate
+    const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+
+    // Auto-populate from existing resume data if available and fields are now empty
+    if (currentCandidate.resumeParsing?.extractedData) {
+      try {
+        const populatedCandidate = await populateCandidateFromResumeData(candidate, currentCandidate.resumeParsing.extractedData);
+        if (populatedCandidate && populatedCandidate._id) {
+          candidate = populatedCandidate;
+          console.log('✅ Candidate fields auto-populated from existing resume data during update');
+        }
+      } catch (populateError) {
+        console.warn('⚠️ Failed to auto-populate candidate from existing resume data:', populateError.message);
+        // Don't throw - update succeeded, just log the warning
+      }
+    }
+
     res.status(200).json({ success: true, message: 'Candidate updated successfully', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -489,6 +563,20 @@ exports.updateStage = async (req, res) => {
         joiningDate: candidate.offerDetails?.joiningDate,
         companyName
       }).catch(err => console.error('Failed to send offer email:', err.message));
+
+      // Log HR activity for offer extended
+      try {
+        const { logOfferExtended } = require('../services/hrActivityLogService');
+        await logOfferExtended(req.tenant.connection, {
+          _id: candidate._id,
+          candidateName: `${candidate.firstName} ${candidate.lastName}`,
+          position,
+          candidateEmail: candidate.email
+        }, req);
+        console.log(`📝 HR activity logged for offer extended via stage change to ${candidate.firstName} ${candidate.lastName}`);
+      } catch (logError) {
+        console.error('⚠️ Failed to log HR activity for offer extended:', logError.message);
+      }
     }
 
     // Send rejection email
@@ -1278,12 +1366,26 @@ exports.updateHRCall = async (req, res) => {
           joiningDate: candidate.offerDetails?.joiningDate,
           companyName
         });
-        
+
         candidate.timeline.push({
           action: 'Offer Email Sent',
           description: 'Offer letter email sent to candidate after HR call completion',
           performedBy: req.user?._id
         });
+
+        // Log HR activity for offer sent
+        try {
+          const { logOfferExtended } = require('../services/hrActivityLogService');
+          await logOfferExtended(req.tenant.connection, {
+            _id: candidate.onboardingRecord || candidate._id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            position,
+            candidateEmail: candidate.email
+          }, req);
+          console.log(`📝 HR activity logged for offer extended to ${candidate.firstName} ${candidate.lastName}`);
+        } catch (logError) {
+          console.error('⚠️ Failed to log HR activity for offer extended:', logError.message);
+        }
       } catch (emailError) {
         console.error('Failed to send offer email:', emailError);
       }
@@ -2023,6 +2125,590 @@ exports.uploadResume = async (req, res) => {
       success: false,
       message: 'Internal server error during resume processing',
       error: error.message
+    });
+  }
+};
+
+/**
+ * Auto-populate candidate fields from parsed resume data
+ * @param {Object} candidate - Candidate document
+ * @param {Object} extractedData - Reducto extracted data
+ * @returns {Object} Updated candidate document
+ */
+const populateCandidateFromResumeData = async (candidate, extractedData) => {
+  if (!candidate || !extractedData) {
+    return candidate;
+  }
+
+  const updates = {};
+  let hasUpdates = false;
+
+  // Helper function to check if a field is empty/null/undefined
+  const isFieldEmpty = (value) => {
+    return value === null || value === undefined ||
+           (typeof value === 'string' && value.trim() === '') ||
+           (Array.isArray(value) && value.length === 0);
+  };
+
+  // Map Reducto fields to candidate fields
+  const fieldMappings = {
+    // Basic info (only populate if missing)
+    firstName: extractedData.firstName,
+    lastName: extractedData.lastName,
+    email: extractedData.email,
+    phone: extractedData.phone,
+
+    // Professional info
+    currentCompany: extractedData.currentCompany,
+    currentDesignation: extractedData.currentDesignation,
+    currentLocation: extractedData.currentLocation,
+
+    // Experience (convert years/months format)
+    experience: extractedData.experienceYears !== null && extractedData.experienceYears !== undefined ? {
+      years: parseInt(extractedData.experienceYears) || 0,
+      months: parseInt(extractedData.experienceMonths) || 0
+    } : undefined,
+
+    // Skills (merge with existing if any)
+    skills: extractedData.skills,
+
+    // Financial info
+    currentCTC: extractedData.currentCTC,
+    expectedCTC: extractedData.expectedCTC,
+    noticePeriod: extractedData.noticePeriod,
+
+    // Job preferences
+    appliedFor: extractedData.appliedFor,
+    preferredLocation: extractedData.preferredLocation,
+
+    // Source (if not set)
+    source: extractedData.source || 'resume-upload'
+  };
+
+  // Apply mappings - only populate empty fields
+  Object.entries(fieldMappings).forEach(([field, value]) => {
+    if (!isFieldEmpty(value) && isFieldEmpty(candidate[field])) {
+      updates[field] = value;
+      hasUpdates = true;
+      console.log(`📝 Auto-populating ${field}: ${Array.isArray(value) ? value.join(', ') : value}`);
+    }
+  });
+
+  // Special handling for skills - merge instead of replace
+  if (!isFieldEmpty(extractedData.skills) && isFieldEmpty(candidate.skills)) {
+    updates.skills = extractedData.skills;
+    hasUpdates = true;
+    console.log(`📝 Auto-populating skills: ${extractedData.skills.join(', ')}`);
+  }
+
+  // Special handling for preferred location - ensure it's an array
+  if (!isFieldEmpty(extractedData.preferredLocation) && isFieldEmpty(candidate.preferredLocation)) {
+    const preferredLocs = Array.isArray(extractedData.preferredLocation)
+      ? extractedData.preferredLocation
+      : [extractedData.preferredLocation].filter(Boolean);
+    if (preferredLocs.length > 0) {
+      updates.preferredLocation = preferredLocs;
+      hasUpdates = true;
+      console.log(`📝 Auto-populating preferred locations: ${preferredLocs.join(', ')}`);
+    }
+  }
+
+  // Update candidate if there are changes
+  if (hasUpdates) {
+    try {
+      const updatedCandidate = await candidate.constructor.findByIdAndUpdate(
+        candidate._id,
+        { $set: updates },
+        { new: true, runValidators: false } // Don't run validators to avoid conflicts
+      );
+
+      // Log what was populated
+      const populatedFields = Object.keys(updates);
+      console.log(`🤖 Auto-populated ${populatedFields.length} fields from resume: ${populatedFields.join(', ')}`);
+
+      return updatedCandidate;
+    } catch (updateError) {
+      console.error('❌ Failed to update candidate with resume data:', updateError.message);
+      throw updateError;
+    }
+  }
+
+  console.log('ℹ️ No fields needed auto-population from resume data');
+  return candidate;
+};
+
+// Export the function for use in tests
+exports.populateCandidateFromResumeData = populateCandidateFromResumeData;
+
+// JD-based Candidate Search and Matching
+exports.searchCandidatesByJD = async (req, res) => {
+  console.log('🔍 searchCandidatesByJD called with query:', req.query);
+  try {
+    const { jdId, jdData, minScore = 0, maxResults = 50, filters = {} } = req.query;
+    console.log('📋 Parameters:', { jdId, jdData: jdData ? 'present' : 'missing', minScore, maxResults });
+
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
+
+    let jobDescription;
+
+    // If jdId is provided, get JD from database
+    if (jdId) {
+      jobDescription = await JobDescription.findById(jdId);
+      if (!jobDescription) {
+        return res.status(404).json({
+          success: false,
+          error: 'Job description not found'
+        });
+      }
+
+      if (jobDescription.parsingStatus !== 'completed') {
+        return res.status(400).json({
+          success: false,
+          error: 'Job description parsing not completed yet'
+        });
+      }
+    }
+    // If jdData is provided (from frontend form), use it directly
+    else if (jdData) {
+      try {
+        console.log('📄 Processing jdData...');
+        // Parse the jdData from query string (URL encoded JSON)
+        const parsedJDData = JSON.parse(decodeURIComponent(jdData));
+        console.log('✅ JD data parsed successfully:', { jobTitle: parsedJDData.jobTitle, hasParsedData: !!parsedJDData.parsedData });
+
+        // Create a virtual JD object that matches the expected structure
+        // The service expects jdData.parsedData to contain the actual parsed data
+        jobDescription = {
+          jobTitle: parsedJDData.jobTitle,
+          companyName: parsedJDData.companyName,
+          location: parsedJDData.location,
+          employmentType: parsedJDData.employmentType,
+          parsedData: parsedJDData.parsedData || parsedJDData, // Ensure the parsedData structure matches service expectations
+          // Add other required fields for matching service
+          statistics: { lastMatchedAt: new Date() }
+        };
+        console.log('🏗️ Virtual JD object created:', { jobTitle: jobDescription.jobTitle, parsedDataKeys: Object.keys(jobDescription.parsedData) });
+      } catch (parseError) {
+        console.error('❌ JD data parsing error:', parseError.message);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid JD data format',
+          details: parseError.message
+        });
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Either jdId or jdData parameter is required'
+      });
+    }
+
+    // Perform candidate matching
+    const candidateMatchingService = require('../services/candidateMatchingService');
+    const matches = await candidateMatchingService.matchCandidates(
+      jobDescription,
+      req.tenant.connection,
+      {
+        minScore: parseInt(minScore),
+        maxResults: parseInt(maxResults),
+        ...filters
+      }
+    );
+
+    // Populate candidate details
+    const populatedMatches = await Promise.all(
+      matches.map(async (match) => {
+        const candidate = await Candidate.findById(match.candidateId)
+          .select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation preferredLocation status stage');
+
+        return {
+          ...match,
+          candidate: candidate ? {
+            id: candidate._id,
+            name: `${candidate.firstName} ${candidate.lastName}`,
+            email: candidate.email,
+            phone: candidate.phone,
+            skills: candidate.skills,
+            experience: candidate.experience,
+            currentDesignation: candidate.currentDesignation,
+            currentCompany: candidate.currentCompany,
+            currentLocation: candidate.currentLocation,
+            preferredLocation: candidate.preferredLocation,
+            status: candidate.status,
+            stage: candidate.stage
+          } : null
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobDescription: {
+          id: jobDescription._id,
+          jobTitle: jobDescription.jobTitle,
+          companyName: jobDescription.companyName
+        },
+        matches: populatedMatches,
+        totalMatches: matches.length,
+        searchCriteria: {
+          minScore,
+          maxResults,
+          filters
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Search candidates by JD error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to search candidates by JD',
+      details: error.message
+    });
+  }
+};
+
+exports.getCandidatePoolForJD = async (req, res) => {
+  try {
+    const { jdId } = req.params;
+    const { skillMatch = 'any', experienceMatch = 'any', locationMatch = 'any' } = req.query;
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
+
+    // Get JD details
+    const jobDescription = await JobDescription.findById(jdId);
+    if (!jobDescription || jobDescription.parsingStatus !== 'completed') {
+      return res.status(404).json({
+        success: false,
+        error: 'Job description not found or not parsed'
+      });
+    }
+
+    const jdData = jobDescription.parsedData;
+    let query = { status: 'active', isActive: true };
+
+    // Apply skill filters
+    if (skillMatch === 'required' && jdData.requiredSkills?.length > 0) {
+      const requiredSkills = jdData.requiredSkills.map(s => s.skill || s).filter(Boolean);
+      query.skills = { $in: requiredSkills };
+    }
+
+    // Apply experience filters
+    if (experienceMatch === 'exact' && jdData.experienceRequired) {
+      const { minYears, maxYears } = jdData.experienceRequired;
+      if (minYears !== null && minYears !== undefined) {
+        query['experience.years'] = { $gte: minYears };
+      }
+      if (maxYears !== null && maxYears !== undefined) {
+        query['experience.years'] = { ...query['experience.years'], $lte: maxYears };
+      }
+    }
+
+    // Apply location filters
+    if (locationMatch === 'preferred') {
+      const locations = [];
+      if (jdData.jobLocation) locations.push(jdData.jobLocation);
+      if (jdData.preferredLocations?.length) locations.push(...jdData.preferredLocations);
+
+      if (locations.length > 0) {
+        query.$or = [
+          { currentLocation: { $in: locations } },
+          { preferredLocation: { $in: locations } }
+        ];
+      }
+    }
+
+    // Get candidates matching criteria
+    const candidates = await Candidate.find(query)
+      .select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation preferredLocation status stage createdAt')
+      .sort({ createdAt: -1 })
+      .limit(100); // Limit to prevent overwhelming responses
+
+    // Calculate basic match scores for each candidate
+    const candidateMatchingService = require('../services/candidateMatchingService');
+    const candidatesWithScores = candidates.map(candidate => {
+      const matchResult = candidateMatchingService.calculateMatchScore(candidate, jobDescription);
+      return {
+        candidate: {
+          id: candidate._id,
+          name: `${candidate.firstName} ${candidate.lastName}`,
+          email: candidate.email,
+          phone: candidate.phone,
+          skills: candidate.skills,
+          experience: candidate.experience,
+          currentDesignation: candidate.currentDesignation,
+          currentCompany: candidate.currentCompany,
+          currentLocation: candidate.currentLocation,
+          preferredLocation: candidate.preferredLocation,
+          status: candidate.status,
+          stage: candidate.stage,
+          createdAt: candidate.createdAt
+        },
+        matchScore: matchResult.overallScore,
+        overallFit: matchResult.overallFit
+      };
+    });
+
+    // Sort by match score
+    candidatesWithScores.sort((a, b) => b.matchScore - a.matchScore);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobDescription: {
+          id: jobDescription._id,
+          jobTitle: jobDescription.jobTitle,
+          parsedData: jdData
+        },
+        candidatePool: candidatesWithScores,
+        totalCandidates: candidatesWithScores.length,
+        filters: {
+          skillMatch,
+          experienceMatch,
+          locationMatch
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get candidate pool for JD error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get candidate pool for JD',
+      details: error.message
+    });
+  }
+};
+
+exports.compareCandidatesForJD = async (req, res) => {
+  try {
+    const { jdId } = req.params;
+    const { candidateIds } = req.body;
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const JobDescription = getTenantModel(req.tenant.connection, 'JobDescription');
+
+    if (!candidateIds || !Array.isArray(candidateIds) || candidateIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Candidate IDs array is required'
+      });
+    }
+
+    // Get JD details
+    const jobDescription = await JobDescription.findById(jdId);
+    if (!jobDescription || jobDescription.parsingStatus !== 'completed') {
+      return res.status(404).json({
+        success: false,
+        error: 'Job description not found or not parsed'
+      });
+    }
+
+    // Get candidates
+    const candidates = await Candidate.find({
+      _id: { $in: candidateIds },
+      status: 'active',
+      isActive: true
+    }).select('firstName lastName email phone skills experience currentDesignation currentCompany currentLocation preferredLocation status stage');
+
+    // Calculate detailed match scores
+    const candidateMatchingService = require('../services/candidateMatchingService');
+    const comparisonResults = candidates.map(candidate => {
+      const matchResult = candidateMatchingService.calculateMatchScore(candidate, jobDescription);
+
+      return {
+        candidate: {
+          id: candidate._id,
+          name: `${candidate.firstName} ${candidate.lastName}`,
+          email: candidate.email,
+          phone: candidate.phone,
+          skills: candidate.skills,
+          experience: candidate.experience,
+          currentDesignation: candidate.currentDesignation,
+          currentCompany: candidate.currentCompany,
+          currentLocation: candidate.currentLocation,
+          preferredLocation: candidate.preferredLocation,
+          status: candidate.status,
+          stage: candidate.stage
+        },
+        matchDetails: matchResult
+      };
+    });
+
+    // Sort by overall score
+    comparisonResults.sort((a, b) => b.matchDetails.overallScore - a.matchDetails.overallScore);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        jobDescription: {
+          id: jobDescription._id,
+          jobTitle: jobDescription.jobTitle,
+          parsedData: jobDescription.parsedData
+        },
+        candidateComparison: comparisonResults,
+        totalCompared: comparisonResults.length,
+        topMatch: comparisonResults[0] || null
+      }
+    });
+
+  } catch (error) {
+    console.error('Compare candidates for JD error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to compare candidates for JD',
+      details: error.message
+    });
+  }
+};
+
+/**
+ * Fix ex-employee candidate names - update candidates with correct names from employee records
+ */
+exports.fixExEmployeeCandidateNames = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
+    
+    // Find all ex-employee candidates
+    const exEmployeeCandidates = await Candidate.find({ isExEmployee: true }).lean();
+    
+    
+    let fixedCount = 0;
+    let errorCount = 0;
+    
+    for (const candidate of exEmployeeCandidates) {
+      try {
+        let employee = null;
+        
+        // Try to find employee by exEmployeeId first
+        if (candidate.exEmployeeId) {
+          employee = await TenantEmployee.findById(candidate.exEmployeeId).lean();
+        }
+        
+        // If not found, try by exEmployeeCode
+        if (!employee && candidate.exEmployeeCode) {
+          employee = await TenantEmployee.findOne({ employeeCode: candidate.exEmployeeCode }).lean();
+        }
+        
+        // If still not found, try by email
+        if (!employee && candidate.email) {
+          employee = await TenantEmployee.findOne({ email: candidate.email, isExEmployee: true }).lean();
+        }
+        
+        if (employee) {
+          const correctFirstName = String(employee.firstName || '').trim();
+          const correctLastName = String(employee.lastName || '').trim();
+          
+          // Check if name needs to be updated
+          if (candidate.firstName !== correctFirstName || candidate.lastName !== correctLastName) {
+            await Candidate.updateOne(
+              { _id: candidate._id },
+              { 
+                $set: { 
+                  firstName: correctFirstName,
+                  lastName: correctLastName
+                }
+              }
+            );
+            
+            
+            fixedCount++;
+            console.log(`✅ Fixed candidate ${candidate.candidateCode}: "${candidate.firstName} ${candidate.lastName}" -> "${correctFirstName} ${correctLastName}"`);
+          }
+        } else {
+          console.warn(`⚠️  Could not find employee for candidate ${candidate.candidateCode} (exEmployeeCode: ${candidate.exEmployeeCode})`);
+        }
+      } catch (err) {
+        errorCount++;
+        console.error(`❌ Error fixing candidate ${candidate.candidateCode}:`, err.message);
+      }
+    }
+    
+    
+    res.status(200).json({
+      success: true,
+      message: `Fixed ${fixedCount} candidate name(s)`,
+      data: {
+        total: exEmployeeCandidates.length,
+        fixed: fixedCount,
+        errors: errorCount
+      }
+    });
+  } catch (error) {
+    console.error('Error fixing ex-employee candidate names:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Clean up duplicate ex-employee candidates - keep only the most recent one per ex-employee
+ */
+exports.cleanupDuplicateExEmployeeCandidates = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    
+    // Find all ex-employee candidates grouped by exEmployeeCode
+    const exEmployeeCandidates = await Candidate.find({ isExEmployee: true })
+      .sort({ createdAt: -1 })
+      .lean();
+    
+    
+    // Group by exEmployeeCode or exEmployeeId
+    const grouped = {};
+    const toDelete = [];
+    
+    for (const candidate of exEmployeeCandidates) {
+      const key = candidate.exEmployeeCode || candidate.exEmployeeId?.toString() || candidate.email;
+      if (!key) continue;
+      
+      if (!grouped[key]) {
+        grouped[key] = [candidate];
+      } else {
+        grouped[key].push(candidate);
+      }
+    }
+    
+    // For each group, keep the most recent (first in sorted list) and mark others for deletion
+    for (const [key, candidates] of Object.entries(grouped)) {
+      if (candidates.length > 1) {
+        // Keep the first one (most recent), delete the rest
+        const toKeep = candidates[0];
+        const duplicates = candidates.slice(1);
+        
+        
+        toDelete.push(...duplicates.map(c => c._id));
+      }
+    }
+    
+    if (toDelete.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No duplicate candidates found',
+        data: { deleted: 0 }
+      });
+    }
+    
+    // Delete duplicates
+    const deleteResult = await Candidate.deleteMany({ _id: { $in: toDelete } });
+    
+    
+    res.status(200).json({
+      success: true,
+      message: `Cleaned up ${deleteResult.deletedCount} duplicate candidate(s)`,
+      data: {
+        deleted: deleteResult.deletedCount
+      }
+    });
+  } catch (error) {
+    console.error('Error cleaning up duplicate candidates:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };

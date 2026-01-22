@@ -61,6 +61,7 @@ const superAdminRoutes = require('./routes/superAdminRoutes');
 const testRoutes = require('./routes/testRoutes');
 const managerRoutes = require('./routes/managerRoutes');
 const resumePoolRoutes = require('./routes/resumePoolRoutes');
+const jobDescriptionRoutes = require('./routes/jobDescriptionRoutes');
 const workScheduleRoutes = require('./routes/workScheduleRoutes');
 const holidayRoutes = require('./routes/holidayRoutes');
 const biometricRoutes = require('./routes/biometricRoutes');
@@ -68,11 +69,13 @@ const sapRoutes = require('./routes/sapRoutes');
 const leaveAccrualRoutes = require('./routes/leaveAccrualRoutes');
 const leaveManagementRoutes = require('./routes/leaveManagementRoutes');
 const approvalWorkflowRoutes = require('./routes/approvalWorkflowRoutes');
+const approvalRoutes = require('./routes/approvalRoutes');
 const employeeProfileRoutes = require('./routes/employeeProfileRoutes');
 const leaveEncashmentRoutes = require('./routes/leaveEncashmentRoutes');
 const advancedReportsRoutes = require('./routes/advancedReportsRoutes');
 const publicDocumentUploadRoutes = require('./routes/publicDocumentUploadRoutes');
 const documentVerificationRoutes = require('./routes/documentVerificationRoutes');
+const hrActivityHistoryRoutes = require('./routes/hrActivityHistoryRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -164,6 +167,7 @@ app.use('/api/leave', leaveRoutes);
 app.use('/api/leave-accrual', leaveAccrualRoutes);
 app.use('/api/leave-management', leaveManagementRoutes);
 app.use('/api/approval', approvalWorkflowRoutes);
+app.use('/api/approvals', approvalRoutes);
 app.use('/api/employee/profile', employeeProfileRoutes);
 app.use('/api/leave-encashment', leaveEncashmentRoutes);
 app.use('/api/reports', advancedReportsRoutes);
@@ -185,6 +189,7 @@ app.use('/api/timesheets', timesheetRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/candidates', candidateRoutes);
+app.use('/api/job-descriptions', jobDescriptionRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/exit-process', exitProcessRoutes);
@@ -199,6 +204,7 @@ app.use('/api/manager', managerRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/resume-pool', resumePoolRoutes);
 app.use('/api/document-verification', documentVerificationRoutes);
+app.use('/api/hr-activity-history', hrActivityHistoryRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

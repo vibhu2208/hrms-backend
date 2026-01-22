@@ -72,25 +72,78 @@ exports.getOffboardingList = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
-
-    // Manually populate employee data using TenantUser
+    
+    // Get tenant models for auto-fix and population
     const Department = getTenantModel(req.tenant.connection, 'Department');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+    
+    // Auto-fix: Process completed offboardings that haven't been processed yet
+    for (const offboarding of offboardingList) {
+      if (offboarding.status === 'completed' && offboarding.currentStage === 'success') {
+        if (offboarding.employee && TenantEmployee) {
+          TenantEmployee.findById(offboarding.employee)
+            .then(employee => {
+              if (employee && !employee.isExEmployee) {
+                // Process this offboarding
+                const offboardingWorkflow = require('../services/offboardingWorkflow');
+                const mockOffboardingRequest = {
+                  employeeId: offboarding.employee,
+                  reason: offboarding.reason || 'Offboarding completed',
+                  reasonDetails: offboarding.reason || '',
+                  lastWorkingDay: offboarding.lastWorkingDate || new Date(),
+                  status: 'closed',
+                  isCompleted: true,
+                  save: async function() { return this; }
+                };
+                offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest)
+                  .then(() => {
+                  })
+                  .catch(err => {
+                    console.error(`Auto-fix failed for offboarding ${offboarding._id}:`, err);
+                  });
+              }
+            })
+            .catch(err => console.warn(`Could not check employee for auto-fix:`, err));
+        }
+      }
+    }
+
+    // Manually populate employee data - try Employee model first, then User model
+    
     for (let item of offboardingList) {
       if (item.employee) {
         try {
-          const employee = await TenantUser.findById(item.employee)
-            .select('firstName lastName email employeeCode designation departmentId')
-            .lean();
+          let employee = null;
           
-          if (employee) {
-            // Populate department if it exists
-            if (employee.departmentId && Department) {
-              const dept = await Department.findById(employee.departmentId).select('name').lean();
-              if (dept) {
-                employee.department = dept;
+          // First try Employee model (most common case)
+          if (TenantEmployee) {
+            employee = await TenantEmployee.findById(item.employee)
+              .select('firstName lastName email employeeCode designation department')
+              .populate('department', 'name')
+              .lean();
+          }
+          
+          // If not found in Employee model, try User model
+          if (!employee && TenantUser) {
+            employee = await TenantUser.findById(item.employee)
+              .select('firstName lastName email employeeCode designation departmentId')
+              .lean();
+            
+            if (employee) {
+              // Populate department if it exists
+              if (employee.departmentId && Department) {
+                const dept = await Department.findById(employee.departmentId).select('name').lean();
+                if (dept) {
+                  employee.department = dept;
+                }
               }
             }
+          }
+          
+          if (employee) {
             item.employee = employee;
+          } else {
+            console.warn(`Employee not found for offboarding ${item._id}, employee ID: ${item.employee}`);
           }
         } catch (err) {
           console.error('Error populating employee:', err);
@@ -157,33 +210,52 @@ exports.getOffboarding = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
     }
 
-    // Manually populate employee data using TenantUser
+    // Manually populate employee data - try Employee model first, then User model
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+    
     if (offboarding.employee) {
       try {
-        const employee = await TenantUser.findById(offboarding.employee)
-          .select('firstName lastName email employeeCode designation departmentId joiningDate dateOfJoining phone address')
-          .lean();
+        let employee = null;
+        
+        // First try Employee model (most common case)
+        if (TenantEmployee) {
+          employee = await TenantEmployee.findById(offboarding.employee)
+            .select('firstName lastName email employeeCode designation department joiningDate dateOfJoining phone address')
+            .populate('department', 'name')
+            .lean();
+        }
+        
+        // If not found in Employee model, try User model
+        if (!employee && TenantUser) {
+          employee = await TenantUser.findById(offboarding.employee)
+            .select('firstName lastName email employeeCode designation departmentId joiningDate dateOfJoining phone address')
+            .lean();
+          
+          if (employee) {
+            // Populate department if it exists
+            if (employee.departmentId && Department) {
+              const dept = await Department.findById(employee.departmentId).select('name').lean();
+              if (dept) {
+                employee.department = dept;
+              }
+            }
+            
+            // Populate reporting manager
+            if (employee.reportingManager) {
+              const manager = await TenantUser.findOne({ email: employee.reportingManager })
+                .select('firstName lastName email')
+                .lean();
+              if (manager) {
+                employee.reportingManager = manager;
+              }
+            }
+          }
+        }
         
         if (employee) {
-          // Populate department
-          if (employee.departmentId && Department) {
-            const dept = await Department.findById(employee.departmentId).select('name').lean();
-            if (dept) {
-              employee.department = dept;
-            }
-          }
-          
-          // Populate reporting manager
-          if (employee.reportingManager) {
-            const manager = await TenantUser.findOne({ email: employee.reportingManager })
-              .select('firstName lastName email')
-              .lean();
-            if (manager) {
-              employee.reportingManager = manager;
-            }
-          }
-          
           offboarding.employee = employee;
+        } else {
+          console.warn(`Employee not found for offboarding ${offboarding._id}, employee ID: ${offboarding.employee}`);
         }
       } catch (err) {
         console.error('Error populating employee:', err);
@@ -325,6 +397,21 @@ exports.createOffboarding = async (req, res) => {
       }
     });
 
+    // Get employee details for logging
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
+    const employeeData = await Employee.findById(employeeIdValue);
+
+    // Log HR activity
+    if (employeeData) {
+      try {
+        const { logOffboardingCreated } = require('../services/hrActivityLogService');
+        await logOffboardingCreated(req.tenant.connection, offboarding, employeeData, req);
+        console.log(`📝 HR activity logged for offboarding creation: ${employeeData.firstName} ${employeeData.lastName}`);
+      } catch (logError) {
+        console.error('⚠️ Failed to log HR activity for offboarding creation:', logError.message);
+      }
+    }
+
     res.status(201).json({ success: true, message: 'Offboarding process initiated', data: offboarding });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -354,15 +441,56 @@ exports.advanceStage = async (req, res) => {
 
     const currentIndex = offboarding.stages.indexOf(offboarding.currentStage);
     if (currentIndex < offboarding.stages.length - 1) {
+      const previousStage = offboarding.currentStage;
+      const previousStatus = offboarding.status;
+
       offboarding.currentStage = offboarding.stages[currentIndex + 1];
-      
-      // If reached success stage, mark as completed
+
+      // If reached success stage, mark as completed and process ex-employee logic
       if (offboarding.currentStage === 'success') {
         offboarding.status = 'completed';
         offboarding.completedAt = Date.now();
+        
+        // Process ex-employee logic using the workflow service
+        try {
+          const offboardingWorkflow = require('../services/offboardingWorkflow');
+          const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
+          
+          // Convert old offboarding format to new format for completeOffboarding
+          const employee = await TenantEmployee.findById(offboarding.employee);
+          if (employee && !employee.isExEmployee) {
+            
+            // Create a mock offboardingRequest object for the workflow
+            const mockOffboardingRequest = {
+              employeeId: offboarding.employee,
+              reason: offboarding.reason || 'Offboarding completed',
+              reasonDetails: offboarding.reason || '',
+              lastWorkingDay: offboarding.lastWorkingDate || new Date(),
+              status: 'closed',
+              isCompleted: true,
+              save: async function() { return this; }
+            };
+            
+            await offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest);
+          } else if (employee && employee.isExEmployee) {
+          }
+        } catch (exEmployeeError) {
+          console.error('Error processing ex-employee:', exEmployeeError);
+          // Don't fail the stage advancement if ex-employee processing fails
+        }
       }
-      
+
       await offboarding.save();
+
+      // Log HR activity
+      try {
+        const { logOffboardingStatusChanged } = require('../services/hrActivityLogService');
+        await logOffboardingStatusChanged(req.tenant.connection, offboarding, previousStatus, offboarding.status, req);
+        console.log(`📝 HR activity logged for offboarding stage change: ${offboarding.employeeName} - ${previousStage} → ${offboarding.currentStage}`);
+      } catch (logError) {
+        console.error('⚠️ Failed to log HR activity for offboarding stage change:', logError.message);
+      }
+
       res.status(200).json({ success: true, message: 'Stage advanced successfully', data: offboarding });
     } else {
       res.status(400).json({ success: false, message: 'Already at final stage' });

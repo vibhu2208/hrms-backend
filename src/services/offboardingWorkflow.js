@@ -547,13 +547,84 @@ class OffboardingWorkflowEngine {
   }
 
   /**
+   * Calculate experience in years and months from two dates
+   */
+  calculateExperience(startDate, endDate) {
+    if (!startDate || !endDate) {
+      return { years: 0, months: 0 };
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    let years = end.getFullYear() - start.getFullYear();
+    let months = end.getMonth() - start.getMonth();
+    
+    if (months < 0) {
+      years--;
+      months += 12;
+    }
+    
+    // Adjust for days
+    if (end.getDate() < start.getDate()) {
+      months--;
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+    }
+    
+    return { years, months };
+  }
+
+  /**
    * Complete offboarding process
    */
   async completeOffboarding(tenantConnection, offboardingRequest) {
-    // Get the complete employee data before removing from employees collection
+    // Get the complete employee data before marking as ex-employee
     const TenantEmployee = tenantConnection.models.Employee || tenantConnection.model('Employee', require('../models/tenant/TenantEmployee'));
+    const TalentPool = require('../models/TalentPool');
 
-    const employeeData = await TenantEmployee.findById(offboardingRequest.employeeId).lean();
+    const employeeData = await TenantEmployee.findById(offboardingRequest.employeeId);
+
+
+    if (!employeeData) {
+      throw new Error('Employee not found');
+    }
+
+    // Check if employee is already an ex-employee
+    if (employeeData.isExEmployee) {
+      
+      // Even if already ex-employee, ensure candidate exists
+      try {
+        const Candidate = getTenantModel(tenantConnection, 'Candidate', require('../models/Candidate'));
+        const existingCandidate = await Candidate.findOne({
+          $or: [
+            { exEmployeeId: employeeData._id },
+            { exEmployeeCode: employeeData.employeeCode },
+            { email: employeeData.email, isExEmployee: true }
+          ]
+        });
+        
+        if (!existingCandidate) {
+          // Employee is ex-employee but candidate doesn't exist - create it
+          // This will be handled in the main flow below
+        } else {
+          console.log(`ℹ️  Employee ${employeeData.employeeCode} is already an ex-employee with candidate ${existingCandidate.candidateCode}`);
+          // Still mark offboarding as completed even if employee is already processed
+          if (offboardingRequest && typeof offboardingRequest.save === 'function') {
+            offboardingRequest.status = 'completed';
+            offboardingRequest.currentStage = 'success';
+            offboardingRequest.completedAt = new Date();
+            await offboardingRequest.save();
+          }
+          return { success: true, message: 'Employee already processed as ex-employee' };
+        }
+      } catch (candidateCheckError) {
+        console.warn('Error checking candidate for ex-employee:', candidateCheckError);
+        // Continue with normal flow
+      }
+    }
 
     if (employeeData) {
       // Store complete employee data in offboarding record
@@ -594,10 +665,186 @@ class OffboardingWorkflowEngine {
         lastWorkingDay: offboardingRequest.lastWorkingDay
       };
 
-      // Remove employee from employees collection
-      await TenantEmployee.findByIdAndDelete(offboardingRequest.employeeId);
+      // Calculate experience from joining date to termination date
+      const terminationDate = offboardingRequest.lastWorkingDay || new Date();
+      const experience = this.calculateExperience(employeeData.joiningDate, terminationDate);
 
-      console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) removed from employees collection and archived in offboarding record`);
+      // Mark employee as ex-employee instead of deleting
+      employeeData.isExEmployee = true;
+      employeeData.isActive = false;
+      employeeData.status = 'terminated';
+      employeeData.terminatedAt = terminationDate;
+      employeeData.terminationReason = offboardingRequest.reason || 'Offboarding completed';
+      
+      // Don't modify department field - it might cause validation errors
+      // Only update isExEmployee, isActive, status, and termination fields
+      
+      
+      try {
+        await employeeData.save();
+      } catch (saveError) {
+        console.error('❌ Failed to save employee as ex-employee:', saveError);
+        // Try using updateOne directly to bypass validation if needed
+        try {
+          const updateResult = await TenantEmployee.updateOne(
+            { _id: employeeData._id },
+            { 
+              $set: { 
+                isExEmployee: true,
+                isActive: false,
+                status: 'terminated',
+                terminatedAt: terminationDate,
+                terminationReason: offboardingRequest.reason || 'Offboarding completed'
+              }
+            },
+            { runValidators: false } // Bypass validation
+          );
+          
+          // Verify the update worked by re-fetching
+          const verifyAfterUpdate = await TenantEmployee.findById(employeeData._id).lean();
+          
+          if (verifyAfterUpdate && verifyAfterUpdate.isExEmployee !== true) {
+            // Update didn't work, try using findByIdAndUpdate
+            await TenantEmployee.findByIdAndUpdate(
+              employeeData._id,
+              { 
+                $set: { 
+                  isExEmployee: true,
+                  isActive: false,
+                  status: 'terminated',
+                  terminatedAt: terminationDate,
+                  terminationReason: offboardingRequest.reason || 'Offboarding completed'
+                }
+              },
+              { new: true, runValidators: false }
+            );
+          }
+          
+          console.log(`✅ Employee ${employeeData.employeeCode} marked as ex-employee using updateOne`);
+        } catch (updateError) {
+          throw new Error(`Failed to mark employee as ex-employee: ${updateError.message}`);
+        }
+      }
+      
+      // Verify the save by re-fetching from database
+      const verifyEmployee = await TenantEmployee.findById(employeeData._id).lean();
+
+      // Add ex-employee to talent pool
+      try {
+        const talentPoolData = {
+          name: `${employeeData.firstName} ${employeeData.lastName}`,
+          email: employeeData.email,
+          phone: employeeData.phone || '',
+          desiredDepartment: employeeData.department || 'General',
+          desiredPosition: employeeData.designation || 'Previous Role',
+          experience: {
+            years: experience.years,
+            months: experience.months
+          },
+          currentCompany: 'Previous Employer',
+          currentDesignation: employeeData.designation,
+          currentCTC: employeeData.salary?.total || employeeData.salary || null,
+          skills: [], // Can be populated from employee profile if available
+          status: 'new',
+          isExEmployee: true,
+          exEmployeeId: employeeData._id,
+          exEmployeeCode: employeeData.employeeCode,
+          comments: `Ex-employee from ${employeeData.department || 'General'} department. ${offboardingRequest.reason ? `Reason: ${offboardingRequest.reason}` : ''}`,
+          timeline: [{
+            action: 'Added from Offboarding',
+            description: `Employee offboarding completed. Previous employee code: ${employeeData.employeeCode}. Experience: ${experience.years} years ${experience.months} months.`,
+            timestamp: new Date()
+          }]
+        };
+
+        const talentPoolEntry = await TalentPool.create(talentPoolData);
+
+        console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) marked as ex-employee and added to talent pool (${talentPoolEntry.talentCode})`);
+        
+        // Also add ex-employee to candidate pool
+        try {
+          const Candidate = getTenantModel(tenantConnection, 'Candidate', require('../models/Candidate'));
+          // Capture employee data values immediately to avoid closure issues
+          const empFirstName = String(employeeData.firstName || '').trim();
+          const empLastName = String(employeeData.lastName || '').trim();
+          const empEmail = String(employeeData.email || '').trim();
+          const empPhone = String(employeeData.phone || '').trim();
+          const empCode = String(employeeData.employeeCode || '').trim();
+          
+          
+          // Check if candidate already exists for this ex-employee
+          const existingCandidate = await Candidate.findOne({
+            $or: [
+              { exEmployeeId: employeeData._id },
+              { exEmployeeCode: empCode },
+              { email: empEmail, isExEmployee: true }
+            ]
+          });
+          
+          if (existingCandidate) {
+            console.log(`⚠️  Candidate already exists for ex-employee ${empFirstName} ${empLastName} (${empCode}): ${existingCandidate.candidateCode}`);
+            // Update existing candidate if needed
+            if (existingCandidate.firstName !== empFirstName || existingCandidate.lastName !== empLastName) {
+              existingCandidate.firstName = empFirstName;
+              existingCandidate.lastName = empLastName;
+              await existingCandidate.save();
+              console.log(`✅ Updated candidate name for ${existingCandidate.candidateCode}`);
+            }
+            // Skip creating new candidate since one already exists
+          } else {
+            // Create new candidate for ex-employee
+            const candidateData = {
+              firstName: empFirstName,
+              lastName: empLastName,
+              email: empEmail,
+              phone: empPhone,
+              currentLocation: employeeData.address?.city || employeeData.address || '',
+              experience: {
+                years: experience.years,
+                months: experience.months
+              },
+              currentCompany: 'Previous Employer',
+              currentDesignation: employeeData.designation || 'Previous Role',
+              currentCTC: employeeData.salary?.total || employeeData.salary || null,
+              skills: employeeData.skills || [],
+              source: 'internal',
+              stage: 'applied',
+              status: 'active',
+              isExEmployee: true,
+              exEmployeeId: employeeData._id,
+              exEmployeeCode: empCode,
+              notes: `Ex-employee from ${employeeData.department || 'General'} department. ${offboardingRequest.reason ? `Reason: ${offboardingRequest.reason}` : ''}`,
+              timeline: [{
+                action: 'Added from Offboarding',
+                description: `Employee offboarding completed. Previous employee code: ${empCode}. Experience: ${experience.years} years ${experience.months} months.`,
+                timestamp: new Date()
+              }]
+            };
+            
+            // Generate candidate code
+            const lastCandidate = await Candidate.findOne({}).sort({ createdAt: -1 });
+            let candidateNumber = 1;
+            if (lastCandidate && lastCandidate.candidateCode) {
+              const match = lastCandidate.candidateCode.match(/CAND(\d+)/);
+              if (match) {
+                candidateNumber = parseInt(match[1]) + 1;
+              }
+            }
+            candidateData.candidateCode = `CAND${String(candidateNumber).padStart(5, '0')}`;
+            
+            const candidateEntry = await Candidate.create(candidateData);
+            console.log(`✅ Ex-employee ${empFirstName} ${empLastName} (${empCode}) added to candidate pool (${candidateEntry.candidateCode})`);
+          }
+        } catch (candidateError) {
+          console.error('⚠️  Error adding ex-employee to candidate pool:', candidateError);
+          // Continue with offboarding completion even if candidate addition fails
+        }
+      } catch (talentPoolError) {
+        console.error('⚠️  Error adding ex-employee to talent pool:', talentPoolError);
+        // Continue with offboarding completion even if talent pool addition fails
+      }
+
+      console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) marked as ex-employee`);
     } else {
       console.warn(`⚠️  Employee ${offboardingRequest.employeeId} not found in employees collection during offboarding completion`);
     }

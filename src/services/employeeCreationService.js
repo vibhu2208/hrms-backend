@@ -3,11 +3,17 @@
  * Handles conversion of onboarding candidates to employees
  */
 
-const { getTenantModel } = require('../utils/tenantModels');
+const { getTenantModel } = require('../middlewares/tenantMiddleware');
 const { getTenantConnection } = require('../config/database.config');
 const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
+
+// Create a new schema instance to avoid modifying the shared schema
+const employeeSchema = TenantEmployeeSchema.clone();
+employeeSchema.set('collection', 'employees');
+const TenantUserSchema = require('../models/tenant/TenantUser');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('./emailService');
+const mongoose = require('mongoose');
 
 class EmployeeCreationService {
   /**
@@ -19,22 +25,53 @@ class EmployeeCreationService {
   async completeOnboardingAndCreateEmployee(onboardingId, tenantConnection, additionalData = {}) {
     try {
       const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
-      const TenantEmployee = tenantConnection.model('Employee', TenantEmployeeSchema);
-      
-      // Get onboarding record
+      const Candidate = getTenantModel(tenantConnection, 'Candidate');
+
+      // Get Employee model using the correct TenantEmployeeSchema
+      // Use a unique name to avoid conflicts with models created with wrong schema
+      const TenantEmployee = getTenantModel(tenantConnection, 'TenantEmployee', employeeSchema);
+
+
+      // Get Department model for fetching department details
+      const Department = getTenantModel(tenantConnection, 'Department');
+
+      // Get onboarding record - don't populate department to avoid errors if it's stored as string
       const onboarding = await Onboarding.findById(onboardingId)
         .populate('applicationId')
-        .populate('department');
+        .populate('jobId');
+
+      // Check department type - handle manually to avoid populate errors
+      const rawDepartment = onboarding.department;
+
+      // Only populate if department is a valid ObjectId (not a string name)
+      if (rawDepartment) {
+        if (typeof rawDepartment === 'object' && rawDepartment._id && rawDepartment.name) {
+        } else if (mongoose.Types.ObjectId.isValid(rawDepartment) &&
+                   (rawDepartment instanceof mongoose.Types.ObjectId ||
+                    (typeof rawDepartment === 'string' && rawDepartment.length === 24))) {
+          // It's a valid ObjectId, try to populate
+          try {
+            await onboarding.populate('department');
+          } catch (populateError) {
+          }
+        } else {
+        }
+      }
       
       if (!onboarding) {
         throw new Error('Onboarding record not found');
       }
 
-      // Check if all documents are verified
+      // Check if onboarding is already completed
+      if (onboarding.status === 'completed') {
+        throw new Error('This onboarding has already been completed');
+      }
+
+      // Check if all documents are verified (if documents exist)
       if (onboarding.documents && onboarding.documents.length > 0) {
         const unverifiedDocs = onboarding.documents.filter(doc => doc.status !== 'verified');
         if (unverifiedDocs.length > 0) {
-          throw new Error('All documents must be verified before completing onboarding');
+          throw new Error(`All documents must be verified before completing onboarding. ${unverifiedDocs.length} document(s) still pending verification.`);
         }
       }
 
@@ -47,35 +84,280 @@ class EmployeeCreationService {
       const tempPassword = this.generateTempPassword();
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-      // Create employee record
+      // Prepare employee data
       const employeeData = {
-        firstName: onboarding.candidateName.split(' ')[0],
-        lastName: onboarding.candidateName.split(' ').slice(1).join(' ') || '',
-        email: onboarding.candidateEmail,
-        phone: onboarding.candidatePhone,
+        firstName: onboarding.candidateName?.split(' ')[0] || '',
+        lastName: onboarding.candidateName?.split(' ').slice(1).join(' ') || '',
+        email: onboarding.candidateEmail?.toLowerCase().trim(),
+        phone: onboarding.candidatePhone || '',
         employeeCode: employeeCode,
-        designation: onboarding.position,
-        department: onboarding.department?.name || onboarding.department,
-        departmentId: onboarding.department?._id || onboarding.department,
+        designation: onboarding.position || '',
         joiningDate: onboarding.joiningDate || new Date(),
-        isActive: true,
-        isFirstLogin: true,
-        mustChangePassword: true,
-        // Salary details from offer
-        salary: {
-          basic: onboarding.offer?.salary?.basic || 0,
-          hra: onboarding.offer?.salary?.hra || 0,
-          allowances: onboarding.offer?.salary?.allowances || 0,
-          total: onboarding.offer?.offeredCTC || 0
-        },
-        // Additional data
-        ...additionalData
+        status: 'active',
+        isActive: true
       };
+      
+      // Apply additional data, but exclude department fields to set them manually
+      const { department: _dept, departmentId: _deptId, ...safeAdditionalData } = additionalData || {};
+      Object.assign(employeeData, safeAdditionalData);
+
+      // Handle department - ensure it's always set correctly
+      let departmentId = null;
+      let departmentName = null;
+
+
+      // Try to get department from onboarding.department (populated, ObjectId, or string name)
+      if (onboarding.department) {
+        if (typeof onboarding.department === 'object' && onboarding.department._id && onboarding.department.name) {
+          // Department is populated object
+          departmentId = onboarding.department._id;
+          departmentName = onboarding.department.name || onboarding.department.departmentName || null;
+        } else if (onboarding.department instanceof mongoose.Types.ObjectId ||
+                   (mongoose.Types.ObjectId.isValid(onboarding.department) &&
+                    typeof onboarding.department === 'string' && onboarding.department.length === 24)) {
+          // Department is ObjectId (not populated) - we need to fetch the name
+          departmentId = onboarding.department instanceof mongoose.Types.ObjectId ?
+                        onboarding.department : new mongoose.Types.ObjectId(onboarding.department);
+        } else if (typeof onboarding.department === 'string') {
+          // Could be ObjectId string or department name - need to check
+          // First check if it's a valid ObjectId
+          if (mongoose.Types.ObjectId.isValid(onboarding.department) && onboarding.department.length === 24) {
+            // It's a valid ObjectId string
+            departmentId = new mongoose.Types.ObjectId(onboarding.department);
+          } else {
+            // It's a department name string (like "Finance")
+            departmentName = onboarding.department.trim();
+          }
+        }
+      }
+      
+      // Fallback: Try to get department from jobId if available
+      if (!departmentId && !departmentName && onboarding.jobId) {
+        console.log('🔍 Trying to get department from jobId...');
+        if (typeof onboarding.jobId === 'object' && onboarding.jobId.department) {
+          if (typeof onboarding.jobId.department === 'object' && onboarding.jobId.department._id) {
+            departmentId = onboarding.jobId.department._id;
+            departmentName = onboarding.jobId.department.name || onboarding.jobId.department.departmentName || null;
+            console.log('✅ Got department from jobId (populated):', departmentId, departmentName);
+          } else if (onboarding.jobId.department instanceof mongoose.Types.ObjectId) {
+            departmentId = onboarding.jobId.department;
+            console.log('✅ Got department from jobId (ObjectId):', departmentId);
+          } else if (typeof onboarding.jobId.department === 'string') {
+            if (mongoose.Types.ObjectId.isValid(onboarding.jobId.department) && onboarding.jobId.department.length === 24) {
+              departmentId = new mongoose.Types.ObjectId(onboarding.jobId.department);
+              console.log('✅ Got department from jobId (ObjectId string):', departmentId);
+            } else {
+              departmentName = onboarding.jobId.department.trim();
+              console.log('⚠️ Got department name from jobId, will lookup:', departmentName);
+            }
+          }
+        }
+      }
+      
+      // If we have department name but not ID, look it up in Department collection
+      if (departmentName && !departmentId && Department) {
+        try {
+          console.log(`🔍 Looking up department by name: "${departmentName}"`);
+          const departmentDoc = await Department.findOne({ 
+            name: { $regex: new RegExp(`^${departmentName}$`, 'i') } 
+          });
+          if (departmentDoc) {
+            departmentId = departmentDoc._id;
+            departmentName = departmentDoc.name; // Use the exact name from DB
+            console.log(`✅ Found department: ${departmentName} (${departmentId})`);
+          } else {
+            throw new Error(`Department "${departmentName}" not found in the system. Please ensure the department exists.`);
+          }
+        } catch (deptError) {
+          if (deptError.message.includes('not found')) {
+            throw deptError;
+          }
+          console.warn('⚠️ Failed to lookup department by name:', deptError.message);
+          throw deptError;
+        }
+      }
+      
+      // If we have departmentId but not name, fetch it
+      if (departmentId && !departmentName && Department) {
+        try {
+          console.log(`🔍 Fetching department name for ID: ${departmentId}`);
+          const departmentDoc = await Department.findById(departmentId);
+          if (departmentDoc) {
+            departmentName = departmentDoc.name || departmentDoc.departmentName || null;
+            console.log(`✅ Fetched department name: ${departmentName}`);
+          } else {
+            throw new Error(`Department with ID ${departmentId} not found in the system.`);
+          }
+        } catch (deptError) {
+          if (deptError.message.includes('not found')) {
+            throw deptError;
+          }
+          console.warn('⚠️ Failed to fetch department name:', deptError.message);
+          throw deptError;
+        }
+      }
+      
+      // Set department fields in employee data - CRITICAL: department must be string, departmentId must be ObjectId
+      if (departmentId) {
+        // Ensure departmentId is a valid ObjectId instance
+        if (!(departmentId instanceof mongoose.Types.ObjectId)) {
+          try {
+            // Validate it's a valid ObjectId format before converting
+            if (!mongoose.Types.ObjectId.isValid(departmentId)) {
+              throw new Error(`Invalid department ID format: ${departmentId}. Expected ObjectId, got: ${typeof departmentId}`);
+            }
+            departmentId = new mongoose.Types.ObjectId(departmentId);
+          } catch (idError) {
+            throw new Error(`Invalid department ID format: ${departmentId}. Expected ObjectId. Error: ${idError.message}`);
+          }
+        }
+        
+        // Set departmentId (ObjectId field)
+        employeeData.departmentId = departmentId;
+        
+        // Set department (String field) - MUST be a string, never an ObjectId
+        if (departmentName && typeof departmentName === 'string') {
+          employeeData.department = departmentName.trim();
+        } else if (!departmentName) {
+          // If we don't have name but have ID, fetch it
+          if (Department) {
+            try {
+              const deptDoc = await Department.findById(departmentId);
+              if (deptDoc) {
+                employeeData.department = deptDoc.name || String(departmentId);
+              } else {
+                employeeData.department = String(departmentId); // Fallback
+              }
+            } catch (err) {
+              employeeData.department = String(departmentId); // Fallback
+            }
+          } else {
+            employeeData.department = String(departmentId); // Fallback
+          }
+        } else {
+          // departmentName exists but is not a string - convert to string
+          employeeData.department = String(departmentName);
+        }
+        
+        // Final validation: ensure department is a string
+        if (typeof employeeData.department !== 'string') {
+          employeeData.department = String(employeeData.department);
+        }
+        
+        console.log(`✅ Set employee department: departmentId=${departmentId} (${typeof employeeData.departmentId}), department="${employeeData.department}" (${typeof employeeData.department})`);
+      } else {
+        // If no department found, throw error
+        throw new Error('Department is required for employee creation. Please ensure the onboarding record has a valid department assigned.');
+      }
+
+      // Handle salary details from offer
+      if (onboarding.offer) {
+        employeeData.salary = {
+          basic: onboarding.offer.salary?.basic || onboarding.offer.salary?.base || 0,
+          hra: onboarding.offer.salary?.hra || 0,
+          allowances: onboarding.offer.salary?.allowances || 0,
+          total: onboarding.offer.offeredCTC || onboarding.offer.salary?.total || 0
+        };
+      }
+
+      // Validate required fields before creating
+      if (!employeeData.email) {
+        throw new Error('Employee email is required');
+      }
+      if (!employeeData.firstName) {
+        throw new Error('Employee first name is required');
+      }
+
+      // Check if employee with this email already exists
+      const existingEmployee = await TenantEmployee.findOne({ email: employeeData.email });
+      if (existingEmployee) {
+        throw new Error(`Employee with email ${employeeData.email} already exists`);
+      }
+
+      // Final validation: Ensure department is a string (not ObjectId)
+      if (employeeData.department !== undefined) {
+        if (typeof employeeData.department !== 'string') {
+          console.warn(`⚠️ Converting department from ${typeof employeeData.department} to string`);
+          if (employeeData.department instanceof mongoose.Types.ObjectId) {
+            // If it's an ObjectId, we need to fetch the name
+            if (Department) {
+              try {
+                const deptDoc = await Department.findById(employeeData.department);
+                employeeData.department = deptDoc ? deptDoc.name : String(employeeData.department);
+              } catch (err) {
+                employeeData.department = String(employeeData.department);
+              }
+            } else {
+              employeeData.department = String(employeeData.department);
+            }
+          } else {
+            employeeData.department = String(employeeData.department);
+          }
+        }
+        // Ensure it's not empty
+        if (!employeeData.department || employeeData.department.trim() === '') {
+          delete employeeData.department; // Remove if empty
+        }
+      }
+      
+      // Ensure departmentId is ObjectId if set
+      if (employeeData.departmentId !== undefined) {
+        if (!(employeeData.departmentId instanceof mongoose.Types.ObjectId)) {
+          if (mongoose.Types.ObjectId.isValid(employeeData.departmentId)) {
+            employeeData.departmentId = new mongoose.Types.ObjectId(employeeData.departmentId);
+          } else {
+            throw new Error(`Invalid departmentId: ${employeeData.departmentId}. Must be a valid ObjectId.`);
+          }
+        }
+      }
+
 
       // Create employee record
-      const employee = await TenantEmployee.create(employeeData);
+
+      let employee;
+      try {
+        employee = await TenantEmployee.create(employeeData);
+      } catch (createError) {
+        throw createError;
+      }
+
 
       console.log(`✅ Employee created: ${employee.email} (${employeeCode})`);
+
+      // Create user account with 'employee' role
+      const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);
+      let userAccount = null;
+
+      try {
+        // Check if user account already exists
+        const existingUser = await TenantUser.findOne({ email: employee.email.toLowerCase() });
+        if (!existingUser) {
+          // Create user account with employee role
+          userAccount = new TenantUser({
+            email: employee.email.toLowerCase(),
+            password: tempPassword, // Same password as employee welcome email
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            role: 'employee',
+            phone: employee.phone,
+            department: employee.department, // String field - department name
+            departmentId: employee.departmentId, // ObjectId field - department reference
+            employeeId: employee._id, // Link to employee record
+            companyId: tenantConnection.name.split('_')[1], // Extract company ID from tenant DB name
+            isFirstLogin: true,
+            mustChangePassword: true,
+            isActive: true
+          });
+
+          await userAccount.save();
+          console.log(`✅ User account created for ${employee.email} with role 'employee'`);
+        } else {
+          console.log(`⚠️ User account already exists for ${employee.email}`);
+        }
+      } catch (userError) {
+        console.warn('⚠️ Failed to create user account:', userError.message);
+        // Don't throw - user account creation failure shouldn't stop employee creation
+      }
 
       // Update onboarding status
       onboarding.status = 'completed';
@@ -96,6 +378,63 @@ class EmployeeCreationService {
 
       await onboarding.save();
 
+      // Update candidate status to 'joined' if candidate exists
+      // Try to find candidate by applicationId or candidateId
+      let candidateId = null;
+      if (onboarding.applicationId) {
+        candidateId = onboarding.applicationId._id || onboarding.applicationId;
+      } else if (onboarding.candidateId) {
+        candidateId = onboarding.candidateId._id || onboarding.candidateId;
+      }
+      
+      // Also try to find by email if no ID is available
+      if (!candidateId && onboarding.candidateEmail && Candidate) {
+        try {
+          const candidateByEmail = await Candidate.findOne({ email: onboarding.candidateEmail });
+          if (candidateByEmail) {
+            candidateId = candidateByEmail._id;
+          }
+        } catch (emailSearchError) {
+          console.warn('⚠️ Failed to search candidate by email:', emailSearchError.message);
+        }
+      }
+      
+      if (candidateId && Candidate) {
+        try {
+          const candidate = await Candidate.findById(candidateId);
+          if (candidate) {
+            candidate.stage = 'joined';
+            candidate.status = 'joined';
+            candidate.finalDecision = 'joined';
+            candidate.joinedAt = new Date();
+            // Mark candidate as employee and link to employee record
+            candidate.isEmployee = true;
+            candidate.employeeId = employee._id;
+            
+            // Add to timeline
+            if (!candidate.timeline) {
+              candidate.timeline = [];
+            }
+            candidate.timeline.push({
+              action: 'Onboarding Completed',
+              description: `Candidate successfully completed onboarding and joined as employee (${employeeCode})`,
+              performedBy: additionalData.createdBy,
+              timestamp: new Date()
+            });
+            
+            await candidate.save();
+            console.log(`✅ Candidate status updated to 'joined' and linked to employee for ${candidate.email}`);
+          } else {
+            console.warn(`⚠️ Candidate with ID ${candidateId} not found`);
+          }
+        } catch (candidateError) {
+          console.warn('⚠️ Failed to update candidate status:', candidateError.message);
+          // Don't throw - candidate update failure shouldn't stop employee creation
+        }
+      } else if (!Candidate) {
+        console.warn('⚠️ Candidate model not available - skipping candidate status update');
+      }
+
       // Send welcome email with credentials
       await this.sendWelcomeEmail(employee, tempPassword, onboarding);
 
@@ -103,6 +442,11 @@ class EmployeeCreationService {
         success: true,
         employee,
         employeeCode,
+        userAccount: userAccount ? {
+          id: userAccount._id,
+          email: userAccount.email,
+          role: userAccount.role
+        } : null,
         tempPassword, // Only for logging/admin view
         onboarding
       };
@@ -116,7 +460,8 @@ class EmployeeCreationService {
    * Generate unique employee code
    */
   async generateEmployeeCode(tenantConnection) {
-    const TenantEmployee = tenantConnection.model('Employee', TenantEmployeeSchema);
+    // Use the same Employee model with correct schema
+    const TenantEmployee = getTenantModel(tenantConnection, 'TenantEmployee', employeeSchema);
 
     // Get count of existing employees
     const employeeCount = await TenantEmployee.countDocuments();
@@ -235,20 +580,69 @@ class EmployeeCreationService {
    */
   async validateOnboardingCompletion(onboardingId, tenantConnection) {
     const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
-    const onboarding = await Onboarding.findById(onboardingId);
+
+    // Use the same Employee model with correct schema
+    const TenantEmployee = getTenantModel(tenantConnection, 'TenantEmployee', employeeSchema);
+    
+    const onboarding = await Onboarding.findById(onboardingId)
+      .populate('department');
 
     if (!onboarding) {
       return { valid: false, errors: ['Onboarding record not found'] };
+    }
+
+    // Check if already completed
+    if (onboarding.status === 'completed') {
+      return { valid: false, errors: ['This onboarding has already been completed'] };
     }
 
     const errors = [];
     const warnings = [];
 
     // Check required fields
-    if (!onboarding.candidateEmail) errors.push('Candidate email is required');
-    if (!onboarding.candidateName) errors.push('Candidate name is required');
-    if (!onboarding.position) errors.push('Position is required');
-    if (!onboarding.department) errors.push('Department is required');
+    if (!onboarding.candidateEmail) {
+      errors.push('Candidate email is required');
+    } else {
+      // Check if employee with this email already exists
+      const existingEmployee = await TenantEmployee.findOne({ 
+        email: onboarding.candidateEmail.toLowerCase().trim() 
+      });
+      if (existingEmployee) {
+        errors.push(`Employee with email ${onboarding.candidateEmail} already exists`);
+      }
+    }
+    
+    if (!onboarding.candidateName) {
+      errors.push('Candidate name is required');
+    }
+    
+    if (!onboarding.position) {
+      errors.push('Position/Designation is required');
+    }
+    
+    // Check department - it's required in onboarding schema, but verify it exists
+    if (!onboarding.department) {
+      // Try to get from jobId if available
+      if (onboarding.jobId) {
+        const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+        if (JobPosting) {
+          try {
+            const job = await JobPosting.findById(onboarding.jobId).populate('department');
+            if (job && job.department) {
+              // Department exists in job, this is okay
+            } else {
+              errors.push('Department is required - not found in job posting');
+            }
+          } catch (jobError) {
+            errors.push('Department is required - could not verify from job posting');
+          }
+        } else {
+          errors.push('Department is required');
+        }
+      } else {
+        errors.push('Department is required');
+      }
+    }
 
     // Check documents
     if (onboarding.documents && onboarding.documents.length > 0) {
@@ -262,12 +656,12 @@ class EmployeeCreationService {
 
     // Check joining date
     if (!onboarding.joiningDate) {
-      warnings.push('Joining date not set');
+      warnings.push('Joining date not set - will use current date');
     }
 
-    // Check offer details
+    // Check offer details (warnings only, not blocking)
     if (!onboarding.offer || !onboarding.offer.offeredCTC) {
-      warnings.push('Offer details incomplete');
+      warnings.push('Offer details incomplete - salary will be set to 0');
     }
 
     return {

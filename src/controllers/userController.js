@@ -1,5 +1,4 @@
 const User = require('../models/User');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
@@ -257,14 +256,13 @@ exports.createUser = async (req, res) => {
     // Generate temporary password
     const tempPassword = crypto.randomBytes(8).toString('hex');
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(tempPassword, salt);
+    // Note: Password will be hashed by the TenantUser model's pre-save hook
+    // Do NOT hash it here to avoid double hashing
 
     // Create user in tenant database
     const newUser = new TenantUser({
       email: email.toLowerCase(),
-      password: hashedPassword,
+      password: tempPassword, // Pass plain password - model will hash it
       firstName,
       lastName,
       role,
@@ -343,6 +341,15 @@ exports.createUser = async (req, res) => {
 
     console.log(`👤 New user created: ${email} (${role}) by ${req.user.email}`);
 
+    // Log HR activity
+    try {
+      const { logUserCreated } = require('../services/hrActivityLogService');
+      await logUserCreated(tenantConnection, savedUser, req);
+      console.log(`📝 HR activity logged for user creation: ${email}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for user creation:', logError.message);
+    }
+
     // Build response message based on email status
     let message = 'User created successfully.';
     if (emailSent) {
@@ -365,6 +372,145 @@ exports.createUser = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to create user'
+    });
+  }
+};
+
+/**
+ * @desc Update user status (active/inactive)
+ * @route PUT /api/user/:id/status
+ * @access Private/Admin
+ */
+exports.updateUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'isActive must be a boolean value'
+      });
+    }
+
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    // Prevent deactivating yourself
+    if (id === req.user._id.toString() && !isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot deactivate your own account'
+      });
+    }
+
+    // Find user before update to capture previous status
+    const existingUser = await TenantUser.findById(id);
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const previousStatus = existingUser.isActive;
+
+    // Find and update user
+    const user = await TenantUser.findByIdAndUpdate(
+      id,
+      { isActive },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    console.log(`👤 User status updated: ${user.email} - ${isActive ? 'Active' : 'Inactive'} by ${req.user.email}`);
+
+    // Log HR activity
+    try {
+      const { logUserStatusChanged } = require('../services/hrActivityLogService');
+      await logUserStatusChanged(tenantConnection, user, previousStatus, isActive, req);
+      console.log(`📝 HR activity logged for user status change: ${user.email}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for user status change:', logError.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `User ${isActive ? 'activated' : 'deactivated'} successfully`,
+      data: user
+    });
+  } catch (error) {
+    console.error('Error updating user status:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update user status'
+    });
+  }
+};
+
+/**
+ * @desc Delete user
+ * @route DELETE /api/user/:id
+ * @access Private/Admin
+ */
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    // Prevent deleting yourself
+    if (id === req.user._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot delete your own account'
+      });
+    }
+
+    // Find user before deletion
+    const user = await TenantUser.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Prevent deleting company_admin users (only super admin should do this)
+    if (user.role === 'company_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot delete company administrator. Contact super admin for assistance.'
+      });
+    }
+
+    // Delete user
+    await TenantUser.findByIdAndDelete(id);
+
+    console.log(`👤 User deleted: ${user.email} by ${req.user.email}`);
+
+    // Log HR activity
+    try {
+      const { logUserDeleted } = require('../services/hrActivityLogService');
+      await logUserDeleted(tenantConnection, user, req);
+      console.log(`📝 HR activity logged for user deletion: ${user.email}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for user deletion:', logError.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to delete user'
     });
   }
 };

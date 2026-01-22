@@ -18,7 +18,7 @@ const approvalWorkflowSchema = new mongoose.Schema({
   requestType: {
     type: String,
     required: [true, 'Request type is required'],
-    enum: ['leave', 'attendance', 'expense', 'payroll', 'asset', 'document', 'offboarding', 'roster_change', 'profile_update', 'attendance_regularization', 'other'],
+    enum: ['leave', 'attendance', 'expense', 'payroll', 'asset', 'document', 'offboarding', 'onboarding_approval', 'roster_change', 'profile_update', 'attendance_regularization', 'other'],
     index: true
   },
   entityType: {
