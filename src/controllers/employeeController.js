@@ -16,8 +16,13 @@ exports.getEmployees = async (req, res) => {
     const { status, department, search } = req.query;
     // Build base query - explicitly exclude ex-employees and inactive employees
     let query = {
-      isActive: true,
-      isExEmployee: { $ne: true } // Simple and reliable: exclude where isExEmployee is true
+      isActive: { $ne: false }, // Exclude where isActive is explicitly false
+      $or: [
+        { isExEmployee: { $exists: false } }, // Field doesn't exist (old records)
+        { isExEmployee: null }, // Field is null
+        { isExEmployee: false }, // Field is false
+        { isExEmployee: { $ne: true } } // Field is not true (covers undefined, etc.)
+      ]
     };
 
     // Filter by department if specified

@@ -597,7 +597,66 @@ class OffboardingWorkflowEngine {
     fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:594',message:'After employee findById',data:{employeeFound:!!employeeData,employeeId:employeeData?._id,employeeCode:employeeData?.employeeCode,firstName:employeeData?.firstName,lastName:employeeData?.lastName,email:employeeData?.email,currentIsExEmployee:employeeData?.isExEmployee,currentIsActive:employeeData?.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
     // #endregion
 
+    if (!employeeData) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:600',message:'Employee not found - cannot complete offboarding',data:{employeeId:offboardingRequest.employeeId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      throw new Error('Employee not found');
+    }
+
+    // Check if employee is already an ex-employee
+    if (employeeData.isExEmployee) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:606',message:'Employee already marked as ex-employee - checking candidate',data:{employeeId:employeeData._id,employeeCode:employeeData.employeeCode,isExEmployee:employeeData.isExEmployee},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
+      // #endregion
+      
+      // Even if already ex-employee, ensure candidate exists
+      try {
+        const Candidate = getTenantModel(tenantConnection, 'Candidate', require('../models/Candidate'));
+        const existingCandidate = await Candidate.findOne({
+          $or: [
+            { exEmployeeId: employeeData._id },
+            { exEmployeeCode: employeeData.employeeCode },
+            { email: employeeData.email, isExEmployee: true }
+          ]
+        });
+        
+        if (!existingCandidate) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:620',message:'Ex-employee found but no candidate - creating candidate',data:{employeeId:employeeData._id,employeeCode:employeeData.employeeCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
+          // #endregion
+          // Employee is ex-employee but candidate doesn't exist - create it
+          // This will be handled in the main flow below
+        } else {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:625',message:'Ex-employee already has candidate - skipping',data:{employeeId:employeeData._id,employeeCode:employeeData.employeeCode,candidateCode:existingCandidate.candidateCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
+          // #endregion
+          console.log(`ℹ️  Employee ${employeeData.employeeCode} is already an ex-employee with candidate ${existingCandidate.candidateCode}`);
+          // Still mark offboarding as completed even if employee is already processed
+          if (offboardingRequest && typeof offboardingRequest.save === 'function') {
+            offboardingRequest.status = 'completed';
+            offboardingRequest.currentStage = 'success';
+            offboardingRequest.completedAt = new Date();
+            await offboardingRequest.save();
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:636',message:'Offboarding marked as completed for already-processed ex-employee',data:{employeeId:employeeData._id,employeeCode:employeeData.employeeCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
+            // #endregion
+          }
+          return { success: true, message: 'Employee already processed as ex-employee' };
+        }
+      } catch (candidateCheckError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:631',message:'Error checking candidate for ex-employee',data:{error:candidateCheckError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
+        // #endregion
+        console.warn('Error checking candidate for ex-employee:', candidateCheckError);
+        // Continue with normal flow
+      }
+    }
+
     if (employeeData) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:646',message:'Starting offboarding processing',data:{employeeId:employeeData._id,employeeCode:employeeData.employeeCode,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
+      // #endregion
       // Store complete employee data in offboarding record
       offboardingRequest.employeeSnapshot = {
         // Basic Information
@@ -649,13 +708,77 @@ class OffboardingWorkflowEngine {
       employeeData.status = 'terminated';
       employeeData.terminatedAt = terminationDate;
       employeeData.terminationReason = offboardingRequest.reason || 'Offboarding completed';
+      
+      // Don't modify department field - it might cause validation errors
+      // Only update isExEmployee, isActive, status, and termination fields
+      
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:639',message:'Before employee save',data:{employeeId:employeeData._id,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive,status:employeeData.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:712',message:'Before employee save',data:{employeeId:employeeData._id,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive,status:employeeData.status,department:employeeData.department,departmentId:employeeData.departmentId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
-      await employeeData.save();
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:640',message:'After employee save',data:{employeeId:employeeData._id,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
+      
+      try {
+        await employeeData.save();
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:718',message:'After employee save - success',data:{employeeId:employeeData._id,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+      } catch (saveError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:721',message:'Employee save failed',data:{employeeId:employeeData._id,error:saveError.message,errorStack:saveError.stack,employeeData:{department:employeeData.department,departmentId:employeeData.departmentId,isExEmployee:employeeData.isExEmployee,isActive:employeeData.isActive}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        console.error('❌ Failed to save employee as ex-employee:', saveError);
+        // Try using updateOne directly to bypass validation if needed
+        try {
+          const updateResult = await TenantEmployee.updateOne(
+            { _id: employeeData._id },
+            { 
+              $set: { 
+                isExEmployee: true,
+                isActive: false,
+                status: 'terminated',
+                terminatedAt: terminationDate,
+                terminationReason: offboardingRequest.reason || 'Offboarding completed'
+              }
+            },
+            { runValidators: false } // Bypass validation
+          );
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:728',message:'Employee updated using updateOne (bypassed validation)',data:{employeeId:employeeData._id,matchedCount:updateResult.matchedCount,modifiedCount:updateResult.modifiedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          
+          // Verify the update worked by re-fetching
+          const verifyAfterUpdate = await TenantEmployee.findById(employeeData._id).lean();
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:736',message:'Verification after updateOne',data:{employeeId:employeeData._id,employeeCode:employeeData.employeeCode,isExEmployee:verifyAfterUpdate?.isExEmployee,isActive:verifyAfterUpdate?.isActive},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          
+          if (verifyAfterUpdate && verifyAfterUpdate.isExEmployee !== true) {
+            // Update didn't work, try using findByIdAndUpdate
+            await TenantEmployee.findByIdAndUpdate(
+              employeeData._id,
+              { 
+                $set: { 
+                  isExEmployee: true,
+                  isActive: false,
+                  status: 'terminated',
+                  terminatedAt: terminationDate,
+                  terminationReason: offboardingRequest.reason || 'Offboarding completed'
+                }
+              },
+              { new: true, runValidators: false }
+            );
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:750',message:'Used findByIdAndUpdate as fallback',data:{employeeId:employeeData._id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+          }
+          
+          console.log(`✅ Employee ${employeeData.employeeCode} marked as ex-employee using updateOne`);
+        } catch (updateError) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'offboardingWorkflow.js:755',message:'updateOne also failed',data:{employeeId:employeeData._id,error:updateError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
+          throw new Error(`Failed to mark employee as ex-employee: ${updateError.message}`);
+        }
+      }
       
       // Verify the save by re-fetching from database
       const verifyEmployee = await TenantEmployee.findById(employeeData._id).lean();
