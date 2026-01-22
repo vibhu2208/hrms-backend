@@ -64,6 +64,16 @@ const talentPoolSchema = new mongoose.Schema({
   },
   reviewedAt: Date,
   notes: String,
+  // Ex-employee identification
+  isExEmployee: {
+    type: Boolean,
+    default: false
+  },
+  exEmployeeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
+  },
+  exEmployeeCode: String,
   // If later moved to a specific job
   movedToJob: {
     type: mongoose.Schema.Types.ObjectId,

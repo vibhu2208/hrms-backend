@@ -407,6 +407,9 @@ class EmployeeCreationService {
             candidate.status = 'joined';
             candidate.finalDecision = 'joined';
             candidate.joinedAt = new Date();
+            // Mark candidate as employee and link to employee record
+            candidate.isEmployee = true;
+            candidate.employeeId = employee._id;
             
             // Add to timeline
             if (!candidate.timeline) {
@@ -420,7 +423,7 @@ class EmployeeCreationService {
             });
             
             await candidate.save();
-            console.log(`✅ Candidate status updated to 'joined' for ${candidate.email}`);
+            console.log(`✅ Candidate status updated to 'joined' and linked to employee for ${candidate.email}`);
           } else {
             console.warn(`⚠️ Candidate with ID ${candidateId} not found`);
           }

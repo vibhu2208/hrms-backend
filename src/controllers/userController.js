@@ -341,6 +341,15 @@ exports.createUser = async (req, res) => {
 
     console.log(`👤 New user created: ${email} (${role}) by ${req.user.email}`);
 
+    // Log HR activity
+    try {
+      const { logUserCreated } = require('../services/hrActivityLogService');
+      await logUserCreated(tenantConnection, savedUser, req);
+      console.log(`📝 HR activity logged for user creation: ${email}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for user creation:', logError.message);
+    }
+
     // Build response message based on email status
     let message = 'User created successfully.';
     if (emailSent) {
@@ -397,6 +406,17 @@ exports.updateUserStatus = async (req, res) => {
       });
     }
 
+    // Find user before update to capture previous status
+    const existingUser = await TenantUser.findById(id);
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const previousStatus = existingUser.isActive;
+
     // Find and update user
     const user = await TenantUser.findByIdAndUpdate(
       id,
@@ -404,14 +424,16 @@ exports.updateUserStatus = async (req, res) => {
       { new: true, runValidators: true }
     ).select('-password');
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
     console.log(`👤 User status updated: ${user.email} - ${isActive ? 'Active' : 'Inactive'} by ${req.user.email}`);
+
+    // Log HR activity
+    try {
+      const { logUserStatusChanged } = require('../services/hrActivityLogService');
+      await logUserStatusChanged(tenantConnection, user, previousStatus, isActive, req);
+      console.log(`📝 HR activity logged for user status change: ${user.email}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for user status change:', logError.message);
+    }
 
     res.status(200).json({
       success: true,
@@ -470,6 +492,15 @@ exports.deleteUser = async (req, res) => {
     await TenantUser.findByIdAndDelete(id);
 
     console.log(`👤 User deleted: ${user.email} by ${req.user.email}`);
+
+    // Log HR activity
+    try {
+      const { logUserDeleted } = require('../services/hrActivityLogService');
+      await logUserDeleted(tenantConnection, user, req);
+      console.log(`📝 HR activity logged for user deletion: ${user.email}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for user deletion:', logError.message);
+    }
 
     res.status(200).json({
       success: true,

@@ -81,6 +81,7 @@ exports.getTalentPool = async (req, res) => {
         { name: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
         { talentCode: { $regex: search, $options: 'i' } },
+        { exEmployeeCode: { $regex: search, $options: 'i' } },
         { desiredPosition: { $regex: search, $options: 'i' } }
       ];
     }

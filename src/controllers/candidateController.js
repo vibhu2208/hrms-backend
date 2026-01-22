@@ -14,31 +14,77 @@ const awsS3Service = require('../services/awsS3Service');
 exports.getCandidates = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
     const intelligentSearch = require('../services/intelligentSearchService').intelligentSearch;
     const { stage, status, source, search } = req.query;
     let query = {};
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:14',message:'getCandidates called',data:{stage,status,source,search},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+    // #endregion
 
     if (stage) query.stage = stage;
     if (status) query.status = status;
     if (source) query.source = source;
+    
+    // Exclude candidates who are current employees (not ex-employees)
+    // Allow ex-employees to appear in candidate list
+    query.isEmployee = { $ne: true };
+    
+    // Also exclude by checking if email matches an active employee (not ex-employees)
+    let activeEmployeeEmails = [];
+    try {
+      const activeEmployees = await TenantEmployee.find({ 
+        isActive: true, 
+        isExEmployee: { $ne: true } 
+      }).select('email').lean();
+      activeEmployeeEmails = activeEmployees.map(emp => emp.email?.toLowerCase()).filter(Boolean);
+    } catch (err) {
+      console.warn('Could not fetch active employees for candidate filtering:', err.message);
+    }
 
     // If no search query, use basic filters
     if (!search || !search.trim()) {
-      const candidates = await Candidate.find(query)
+      let candidates = await Candidate.find(query)
         .populate('appliedFor', 'title department')
         .populate('referredBy', 'firstName lastName')
         .select('+resume')
         .sort({ createdAt: -1 });
+      
+      // Filter out candidates who are active employees by email (but allow ex-employees)
+      if (activeEmployeeEmails.length > 0) {
+        candidates = candidates.filter(c => {
+          // Allow ex-employees to appear in candidate list
+          if (c.isExEmployee) return true;
+          const email = c.email?.toLowerCase();
+          return !email || !activeEmployeeEmails.includes(email);
+        });
+      }
+      
+      // #region agent log
+      const exEmployeeCandidates = candidates.filter(c=>c.isExEmployee);
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:58',message:'getCandidates results (no search)',data:{count:candidates.length,exEmployeeCount:exEmployeeCandidates.length,exEmployeeDetails:exEmployeeCandidates.map(c=>({candidateCode:c.candidateCode,firstName:c.firstName,lastName:c.lastName,exEmployeeCode:c.exEmployeeCode,email:c.email}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+      // #endregion
 
       return res.status(200).json({ success: true, count: candidates.length, data: candidates });
     }
 
     // With search query - fetch all candidates and apply intelligent search
     // First, do a basic filter without search
-    const allCandidates = await Candidate.find(query)
+    let allCandidates = await Candidate.find(query)
       .populate('appliedFor', 'title department')
       .populate('referredBy', 'firstName lastName')
       .select('firstName lastName email phone skills experience currentDesignation currentCompany appliedFor candidateCode createdAt resume stage status timeline');
+    
+    // Filter out candidates who are active employees by email (but allow ex-employees)
+    if (activeEmployeeEmails.length > 0) {
+      allCandidates = allCandidates.filter(c => {
+        // Allow ex-employees to appear in candidate list
+        if (c.isExEmployee) return true;
+        const email = c.email?.toLowerCase();
+        return !email || !activeEmployeeEmails.includes(email);
+      });
+    }
 
     // Convert candidates to format expected by intelligentSearch
     const candidateResumes = allCandidates.map(candidate => ({
@@ -108,6 +154,11 @@ exports.getCandidates = async (req, res) => {
 
     // Sort by relevance score (already sorted by intelligentSearch, but ensure it)
     resultsWithMetadata.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+    
+    // #region agent log
+    const exEmployeeResults = resultsWithMetadata.filter(c=>c.isExEmployee);
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:159',message:'getCandidates results (with search)',data:{count:resultsWithMetadata.length,exEmployeeCount:exEmployeeResults.length,exEmployeeDetails:exEmployeeResults.map(c=>({candidateCode:c.candidateCode,firstName:c.firstName,lastName:c.lastName,exEmployeeCode:c.exEmployeeCode,email:c.email}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+    // #endregion
 
     res.status(200).json({ 
       success: true, 
@@ -523,6 +574,20 @@ exports.updateStage = async (req, res) => {
         joiningDate: candidate.offerDetails?.joiningDate,
         companyName
       }).catch(err => console.error('Failed to send offer email:', err.message));
+
+      // Log HR activity for offer extended
+      try {
+        const { logOfferExtended } = require('../services/hrActivityLogService');
+        await logOfferExtended(req.tenant.connection, {
+          _id: candidate._id,
+          candidateName: `${candidate.firstName} ${candidate.lastName}`,
+          position,
+          candidateEmail: candidate.email
+        }, req);
+        console.log(`📝 HR activity logged for offer extended via stage change to ${candidate.firstName} ${candidate.lastName}`);
+      } catch (logError) {
+        console.error('⚠️ Failed to log HR activity for offer extended:', logError.message);
+      }
     }
 
     // Send rejection email
@@ -1312,12 +1377,26 @@ exports.updateHRCall = async (req, res) => {
           joiningDate: candidate.offerDetails?.joiningDate,
           companyName
         });
-        
+
         candidate.timeline.push({
           action: 'Offer Email Sent',
           description: 'Offer letter email sent to candidate after HR call completion',
           performedBy: req.user?._id
         });
+
+        // Log HR activity for offer sent
+        try {
+          const { logOfferExtended } = require('../services/hrActivityLogService');
+          await logOfferExtended(req.tenant.connection, {
+            _id: candidate.onboardingRecord || candidate._id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            position,
+            candidateEmail: candidate.email
+          }, req);
+          console.log(`📝 HR activity logged for offer extended to ${candidate.firstName} ${candidate.lastName}`);
+        } catch (logError) {
+          console.error('⚠️ Failed to log HR activity for offer extended:', logError.message);
+        }
       } catch (emailError) {
         console.error('Failed to send offer email:', emailError);
       }
@@ -2491,6 +2570,177 @@ exports.compareCandidatesForJD = async (req, res) => {
       success: false,
       error: 'Failed to compare candidates for JD',
       details: error.message
+    });
+  }
+};
+
+/**
+ * Fix ex-employee candidate names - update candidates with correct names from employee records
+ */
+exports.fixExEmployeeCandidateNames = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
+    
+    // Find all ex-employee candidates
+    const exEmployeeCandidates = await Candidate.find({ isExEmployee: true }).lean();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2578',message:'Fix ex-employee candidate names - found candidates',data:{count:exEmployeeCandidates.length,candidates:exEmployeeCandidates.map(c=>({candidateCode:c.candidateCode,firstName:c.firstName,lastName:c.lastName,exEmployeeCode:c.exEmployeeCode,exEmployeeId:c.exEmployeeId}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+    // #endregion
+    
+    let fixedCount = 0;
+    let errorCount = 0;
+    
+    for (const candidate of exEmployeeCandidates) {
+      try {
+        let employee = null;
+        
+        // Try to find employee by exEmployeeId first
+        if (candidate.exEmployeeId) {
+          employee = await TenantEmployee.findById(candidate.exEmployeeId).lean();
+        }
+        
+        // If not found, try by exEmployeeCode
+        if (!employee && candidate.exEmployeeCode) {
+          employee = await TenantEmployee.findOne({ employeeCode: candidate.exEmployeeCode }).lean();
+        }
+        
+        // If still not found, try by email
+        if (!employee && candidate.email) {
+          employee = await TenantEmployee.findOne({ email: candidate.email, isExEmployee: true }).lean();
+        }
+        
+        if (employee) {
+          const correctFirstName = String(employee.firstName || '').trim();
+          const correctLastName = String(employee.lastName || '').trim();
+          
+          // Check if name needs to be updated
+          if (candidate.firstName !== correctFirstName || candidate.lastName !== correctLastName) {
+            await Candidate.updateOne(
+              { _id: candidate._id },
+              { 
+                $set: { 
+                  firstName: correctFirstName,
+                  lastName: correctLastName
+                }
+              }
+            );
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2605',message:'Fixed candidate name',data:{candidateCode:candidate.candidateCode,oldFirstName:candidate.firstName,oldLastName:candidate.lastName,newFirstName:correctFirstName,newLastName:correctLastName,exEmployeeCode:candidate.exEmployeeCode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+            // #endregion
+            
+            fixedCount++;
+            console.log(`✅ Fixed candidate ${candidate.candidateCode}: "${candidate.firstName} ${candidate.lastName}" -> "${correctFirstName} ${correctLastName}"`);
+          }
+        } else {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2612',message:'Could not find employee for candidate',data:{candidateCode:candidate.candidateCode,exEmployeeCode:candidate.exEmployeeCode,exEmployeeId:candidate.exEmployeeId,email:candidate.email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+          // #endregion
+          console.warn(`⚠️  Could not find employee for candidate ${candidate.candidateCode} (exEmployeeCode: ${candidate.exEmployeeCode})`);
+        }
+      } catch (err) {
+        errorCount++;
+        console.error(`❌ Error fixing candidate ${candidate.candidateCode}:`, err.message);
+      }
+    }
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2620',message:'Fix ex-employee candidate names completed',data:{total:exEmployeeCandidates.length,fixed:fixedCount,errors:errorCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+    // #endregion
+    
+    res.status(200).json({
+      success: true,
+      message: `Fixed ${fixedCount} candidate name(s)`,
+      data: {
+        total: exEmployeeCandidates.length,
+        fixed: fixedCount,
+        errors: errorCount
+      }
+    });
+  } catch (error) {
+    console.error('Error fixing ex-employee candidate names:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Clean up duplicate ex-employee candidates - keep only the most recent one per ex-employee
+ */
+exports.cleanupDuplicateExEmployeeCandidates = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    
+    // Find all ex-employee candidates grouped by exEmployeeCode
+    const exEmployeeCandidates = await Candidate.find({ isExEmployee: true })
+      .sort({ createdAt: -1 })
+      .lean();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2635',message:'Cleanup duplicates - found candidates',data:{total:exEmployeeCandidates.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
+    // #endregion
+    
+    // Group by exEmployeeCode or exEmployeeId
+    const grouped = {};
+    const toDelete = [];
+    
+    for (const candidate of exEmployeeCandidates) {
+      const key = candidate.exEmployeeCode || candidate.exEmployeeId?.toString() || candidate.email;
+      if (!key) continue;
+      
+      if (!grouped[key]) {
+        grouped[key] = [candidate];
+      } else {
+        grouped[key].push(candidate);
+      }
+    }
+    
+    // For each group, keep the most recent (first in sorted list) and mark others for deletion
+    for (const [key, candidates] of Object.entries(grouped)) {
+      if (candidates.length > 1) {
+        // Keep the first one (most recent), delete the rest
+        const toKeep = candidates[0];
+        const duplicates = candidates.slice(1);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2652',message:'Found duplicates for ex-employee',data:{exEmployeeCode:key,keepCandidateCode:toKeep.candidateCode,duplicateCount:duplicates.length,duplicateCodes:duplicates.map(c=>c.candidateCode)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
+        // #endregion
+        
+        toDelete.push(...duplicates.map(c => c._id));
+      }
+    }
+    
+    if (toDelete.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No duplicate candidates found',
+        data: { deleted: 0 }
+      });
+    }
+    
+    // Delete duplicates
+    const deleteResult = await Candidate.deleteMany({ _id: { $in: toDelete } });
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'candidateController.js:2668',message:'Cleanup duplicates completed',data:{deleted:deleteResult.deletedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
+    // #endregion
+    
+    res.status(200).json({
+      success: true,
+      message: `Cleaned up ${deleteResult.deletedCount} duplicate candidate(s)`,
+      data: {
+        deleted: deleteResult.deletedCount
+      }
+    });
+  } catch (error) {
+    console.error('Error cleaning up duplicate candidates:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };

@@ -22,7 +22,9 @@ const {
   uploadResume: uploadResumeController,
   searchCandidatesByJD,
   getCandidatePoolForJD,
-  compareCandidatesForJD
+  compareCandidatesForJD,
+  fixExEmployeeCandidateNames,
+  cleanupDuplicateExEmployeeCandidates
 } = require('../controllers/candidateController');
 const {
   validateBulkUpload,
@@ -89,5 +91,11 @@ router.get('/bulk/template', downloadTemplate);
 
 // Resume upload and parsing route
 router.post('/upload-resume', uploadResume, uploadResumeController);
+
+// Fix ex-employee candidate names
+router.post('/fix-ex-employee-names', fixExEmployeeCandidateNames);
+
+// Cleanup duplicate ex-employee candidates
+router.post('/cleanup-duplicates', cleanupDuplicateExEmployeeCandidates);
 
 module.exports = router;

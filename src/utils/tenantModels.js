@@ -87,6 +87,14 @@ try {
   DocumentConfiguration = null;
 }
 
+// Import HR Activity History model
+let HRActivityHistory;
+try {
+  HRActivityHistory = require('../models/tenant/HRActivityHistory');
+} catch (e) {
+  HRActivityHistory = null;
+}
+
 /**
  * Get tenant-specific models using the tenant's database connection
  * @param {mongoose.Connection} tenantConnection - Tenant database connection
@@ -176,6 +184,9 @@ function getTenantModels(tenantConnection) {
   if (CandidateDocumentUploadToken) models.CandidateDocumentUploadToken = createTenantModel('CandidateDocumentUploadToken', CandidateDocumentUploadToken);
   if (CandidateDocument) models.CandidateDocument = createTenantModel('CandidateDocument', CandidateDocument);
   if (DocumentConfiguration) models.DocumentConfiguration = createTenantModel('DocumentConfiguration', DocumentConfiguration);
+
+  // HR Activity History model
+  if (HRActivityHistory) models.HRActivityHistory = createTenantModel('HRActivityHistory', HRActivityHistory);
 
   // Cache models on connection
   tenantConnection._tenantModels = models;

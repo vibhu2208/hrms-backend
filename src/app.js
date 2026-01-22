@@ -75,6 +75,7 @@ const leaveEncashmentRoutes = require('./routes/leaveEncashmentRoutes');
 const advancedReportsRoutes = require('./routes/advancedReportsRoutes');
 const publicDocumentUploadRoutes = require('./routes/publicDocumentUploadRoutes');
 const documentVerificationRoutes = require('./routes/documentVerificationRoutes');
+const hrActivityHistoryRoutes = require('./routes/hrActivityHistoryRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -203,6 +204,7 @@ app.use('/api/manager', managerRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/resume-pool', resumePoolRoutes);
 app.use('/api/document-verification', documentVerificationRoutes);
+app.use('/api/hr-activity-history', hrActivityHistoryRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

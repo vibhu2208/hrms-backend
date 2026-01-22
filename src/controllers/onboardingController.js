@@ -133,6 +133,12 @@ exports.sendToOnboarding = async (req, res) => {
 
     // Check if already sent to onboarding - allow re-initialization if not completed
     const existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+    console.log(`🔍 Checking existing onboarding for ${candidate.email}:`, {
+      exists: !!existingOnboarding,
+      status: existingOnboarding?.status,
+      isCompleted: existingOnboarding?.status === 'completed'
+    });
+
     if (existingOnboarding && existingOnboarding.status === 'completed') {
       return res.status(400).json({
         success: false,
@@ -185,6 +191,27 @@ exports.sendToOnboarding = async (req, res) => {
       
       // Update candidate's applicationHistory
       await updateCandidateApplicationHistory(candidate, onboarding, Candidate);
+      
+      // Log HR activity
+      console.log(`📝 Attempting to log HR activity for send to onboarding (existing record)`);
+      // #region agent log - hypothesis C: Function call issue
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'onboardingController.js:sendToOnboarding:log-existing',
+          message: 'About to log send to onboarding for existing record',
+          data: { candidateName: candidate.firstName + ' ' + candidate.lastName, onboardingId: onboarding.onboardingId },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'hypothesis-check',
+          hypothesisId: 'C'
+        })
+      }).catch(() => {});
+      // #endregion
+
+      const { logSendToOnboarding } = require('../services/hrActivityLogService');
+      await logSendToOnboarding(req.tenant.connection, candidate, onboarding, req);
     } else {
       // Create new onboarding record
       const onboardingData = {
@@ -231,6 +258,27 @@ exports.sendToOnboarding = async (req, res) => {
       
       // Update candidate's applicationHistory
       await updateCandidateApplicationHistory(candidate, onboarding, Candidate);
+      
+      // Log HR activity
+      console.log(`📝 Attempting to log HR activity for send to onboarding (new record)`);
+      // #region agent log - hypothesis C: Function call issue
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'onboardingController.js:sendToOnboarding:log-new',
+          message: 'About to log send to onboarding for new record',
+          data: { candidateName: candidate.firstName + ' ' + candidate.lastName, onboardingId: onboarding.onboardingId },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'hypothesis-check',
+          hypothesisId: 'C'
+        })
+      }).catch(() => {});
+      // #endregion
+
+      const { logSendToOnboarding } = require('../services/hrActivityLogService');
+      await logSendToOnboarding(req.tenant.connection, candidate, onboarding, req);
     }
 
     // Auto-generate document upload token
@@ -631,6 +679,15 @@ exports.updateOnboardingStatus = async (req, res) => {
 
     await onboarding.save();
 
+    // Log HR activity
+    try {
+      const { logOnboardingStatusChanged } = require('../services/hrActivityLogService');
+      await logOnboardingStatusChanged(req.tenant.connection, onboarding, previousStatus, status, req);
+      console.log(`📝 HR activity logged for onboarding status change: ${onboarding.candidateName} - ${previousStatus} → ${status}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for onboarding status change:', logError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Onboarding status updated successfully',
@@ -805,7 +862,7 @@ exports.sendOffer = async (req, res) => {
 
     // Get candidate details
     const candidate = await Candidate.findById(onboarding.candidateId);
-    
+
     // Send offer email to candidate
     try {
       await sendOfferExtendedEmail({
@@ -819,6 +876,32 @@ exports.sendOffer = async (req, res) => {
     } catch (emailError) {
       console.error('⚠️ Failed to send offer email:', emailError.message);
       // Don't fail the request if email fails
+    }
+
+    // Log HR activity
+    try {
+      // #region agent log - hypothesis C: Function call issue
+      fetch('http://127.0.0.1:7243/ingest/691fb4e9-ae1d-4385-9f99-b10fde5f9ecf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'onboardingController.js:sendOffer:log-offer',
+          message: 'About to log offer sent',
+          data: { candidateName: candidate.firstName + ' ' + candidate.lastName, onboardingId: onboarding.onboardingId },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'hypothesis-check',
+          hypothesisId: 'C'
+        })
+      }).catch(() => {});
+      // #endregion
+
+      const { logOfferSent } = require('../services/hrActivityLogService');
+      await logOfferSent(req.tenant.connection, onboarding, req);
+      console.log(`📝 HR activity logged for offer sent to ${candidate.firstName} ${candidate.lastName}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for offer sent:', logError.message);
+      // Don't fail the request if logging fails
     }
 
     res.status(200).json({
@@ -1391,6 +1474,10 @@ exports.completeOnboardingProcess = async (req, res) => {
     );
 
     console.log(`✅ Onboarding completed successfully for ${result.employee.email}`);
+
+    // Log HR activity
+    const { logOnboardingCompleted } = require('../services/hrActivityLogService');
+    await logOnboardingCompleted(tenantConnection, result.onboarding, result.employee, req);
 
     return res.status(200).json({
       success: true,
