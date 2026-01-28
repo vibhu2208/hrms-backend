@@ -249,6 +249,7 @@ exports.submitApplication = async (req, res) => {
       skills: parseJsonField(req.body.skills),
       education: parseJsonField(req.body.education),
       professionalExperience: parseJsonField(req.body.professionalExperience),
+      trainingCertificates: parseJsonField(req.body.trainingCertificates),
       // Handle experience object
       experience: {
         years: parseInt(req.body['experience[years]']) || 0,

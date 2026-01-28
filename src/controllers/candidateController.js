@@ -293,6 +293,47 @@ exports.createCandidate = async (req, res) => {
       }
     }
 
+    // Parse JSON fields if they are strings (from FormData)
+    if (typeof req.body.preferredLocation === 'string') {
+      try {
+        req.body.preferredLocation = JSON.parse(req.body.preferredLocation);
+      } catch (e) {
+        req.body.preferredLocation = [];
+      }
+    }
+    
+    if (typeof req.body.professionalExperience === 'string') {
+      try {
+        req.body.professionalExperience = JSON.parse(req.body.professionalExperience);
+      } catch (e) {
+        req.body.professionalExperience = [];
+      }
+    }
+    
+    if (typeof req.body.skills === 'string') {
+      try {
+        req.body.skills = JSON.parse(req.body.skills);
+      } catch (e) {
+        req.body.skills = [];
+      }
+    }
+    
+    if (typeof req.body.education === 'string') {
+      try {
+        req.body.education = JSON.parse(req.body.education);
+      } catch (e) {
+        req.body.education = [];
+      }
+    }
+    
+    if (typeof req.body.trainingCertificates === 'string') {
+      try {
+        req.body.trainingCertificates = JSON.parse(req.body.trainingCertificates);
+      } catch (e) {
+        req.body.trainingCertificates = [];
+      }
+    }
+
     // Create candidate
     console.log('Creating candidate with data:', req.body);
     let candidate;
@@ -764,13 +805,8 @@ exports.scheduleInterview = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
-    // Validation: Email must be sent before scheduling interview
-    if (!candidate.notifications?.interviewEmail?.sent) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Interview notification email must be sent before scheduling an interview' 
-      });
-    }
+    // Note: Email will be sent after scheduling the interview
+    // Removed the requirement for email to be sent before scheduling
 
     const interviewData = {
       interviewType: interviewType || 'Technical',
@@ -801,6 +837,9 @@ exports.scheduleInterview = async (req, res) => {
     const companyName = req.body.companyName || 'TechThrive System';
     
     try {
+      console.log('📧 Sending interview notification email to:', candidate.email);
+      console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
+      
       await sendInterviewNotification({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
@@ -813,6 +852,8 @@ exports.scheduleInterview = async (req, res) => {
         position: candidate.appliedFor?.title || 'Position',
         companyName: companyName
       });
+      
+      console.log('✅ Interview notification email sent successfully to:', candidate.email);
       
       // Update notification tracking
       candidate.timeline.push({
@@ -827,7 +868,13 @@ exports.scheduleInterview = async (req, res) => {
       
       await candidate.save();
     } catch (emailError) {
-      console.error('Failed to send interview notification email:', emailError);
+      console.error('❌ Failed to send interview notification email:', emailError);
+      console.error('❌ Email error details:', {
+        candidateEmail: candidate.email,
+        interviewType,
+        scheduledDate,
+        error: emailError.message
+      });
       // Don't fail the interview scheduling if email fails
     }
 
@@ -1014,8 +1061,8 @@ exports.moveToOnboarding = async (req, res) => {
         });
 
         const tenantId = req.tenant.companyId || req.tenant.clientId;
-        const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+        // Hard-coded public upload URL as requested
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
         console.log(`✅ Upload token generated for ${onboarding.candidateName}: ${uploadUrl}`);
 
         // Send offer letter with document upload link
@@ -1499,8 +1546,7 @@ exports.updateHRCall = async (req, res) => {
               });
 
               const tenantId = req.tenant.companyId || req.tenant.clientId;
-              const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-              const uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+              const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
               console.log(`✅ Upload token generated: ${uploadUrl}`);
 
               // Send offer letter with document upload link
@@ -1895,13 +1941,8 @@ exports.sendInterviewEmail = async (req, res) => {
       });
     }
 
-    // Check if interview is scheduled
-    if (interview.status !== 'scheduled') {
-      return res.status(400).json({
-        success: false,
-        message: 'Interview must be in scheduled status to send notification'
-      });
-    }
+    // Allow sending interview email regardless of status
+    // Removed the requirement that interview must be scheduled first
 
     // Prepare interviewer name
     const interviewerName = interview.interviewer && interview.interviewer.length > 0
@@ -1910,6 +1951,15 @@ exports.sendInterviewEmail = async (req, res) => {
 
     // Send email
     try {
+      console.log('📧 Sending interview email to:', candidate.email);
+      console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
+      console.log('📧 Interview details:', {
+        interviewType: interview.interviewType,
+        scheduledDate: interview.scheduledDate,
+        scheduledTime: interview.scheduledTime,
+        meetingPlatform: interview.meetingPlatform
+      });
+      
       const emailResult = await sendInterviewNotification({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
@@ -1922,6 +1972,8 @@ exports.sendInterviewEmail = async (req, res) => {
         position: candidate.appliedFor?.title || 'Position',
         companyName: companyName || 'Our Company'
       });
+      
+      console.log('✅ Interview email sent successfully. Message ID:', emailResult.messageId);
 
       // Update notification status
       if (!candidate.notifications) {
@@ -1965,11 +2017,19 @@ exports.sendInterviewEmail = async (req, res) => {
       });
 
     } catch (emailError) {
-      console.error('Failed to send interview email:', emailError);
+      console.error('❌ Failed to send interview email:', emailError);
+      console.error('❌ Email error details:', {
+        candidateEmail: candidate.email,
+        candidateName: `${candidate.firstName} ${candidate.lastName}`,
+        interviewType: interview.interviewType,
+        scheduledDate: interview.scheduledDate,
+        error: emailError.message,
+        stack: emailError.stack
+      });
       
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
-        message: 'Failed to send interview notification email',
+        message: 'Failed to send interview email',
         error: emailError.message
       });
     }

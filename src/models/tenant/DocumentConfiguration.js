@@ -21,6 +21,7 @@ const documentConfigurationSchema = new mongoose.Schema({
       'address_proof',
       'bank_details',
       'passport',
+      'training_certificate',
       'other'
     ]
   },
@@ -192,6 +193,30 @@ documentConfigurationSchema.statics.getDefaultConfigurations = function() {
       verificationGuidelines: 'Verify passport number, validity, and name matches.',
       displayOrder: 9,
       category: 'identity'
+    },
+    {
+      documentType: 'training_certificate',
+      displayName: 'Training / Course Certificates',
+      description: 'Certificates from trainings, workshops, online courses, or professional programs.',
+      isMandatory: false,
+      allowedFormats: ['pdf', 'jpg', 'jpeg', 'png'],
+      maxFileSizeMB: 10,
+      uploadInstructions: 'Upload any relevant training or course completion certificates. You can upload multiple certificates for this section.',
+      verificationGuidelines: 'Verify training provider, course name, and completion date.',
+      displayOrder: 10,
+      category: 'education'
+    },
+    {
+      documentType: 'other',
+      displayName: 'Other Supporting Documents / Certificates',
+      description: 'Any additional certificates or documents you want to share (awards, memberships, etc.).',
+      isMandatory: false,
+      allowedFormats: ['pdf', 'jpg', 'jpeg', 'png'],
+      maxFileSizeMB: 10,
+      uploadInstructions: 'Upload any other relevant documents or certificates. You can upload multiple documents for this section.',
+      verificationGuidelines: 'Check that the document is readable and relevant to the candidate profile.',
+      displayOrder: 11,
+      category: 'other'
     }
   ];
 };

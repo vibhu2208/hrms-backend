@@ -41,13 +41,13 @@ exports.generateUploadToken = async (req, res) => {
     });
     
     if (existingToken) {
-      const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
       return res.status(200).json({
         success: true,
         message: 'Upload token already exists',
         data: {
           token: existingToken.token,
-          uploadUrl: `${frontendBaseUrl}/public/upload-documents/${existingToken.token}?tenantId=${tenantId}`,
+          uploadUrl: `${baseUrl}/public/upload-documents/${existingToken.token}?tenantId=${tenantId}`,
           expiresAt: existingToken.expiresAt
         }
       });
@@ -70,15 +70,14 @@ exports.generateUploadToken = async (req, res) => {
     });
     
     console.log(`✅ Upload token generated for ${onboarding.candidateName} (${onboarding.onboardingId})`);
-    
-    const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
     res.status(201).json({
       success: true,
       message: 'Upload token generated successfully',
       data: {
         token: uploadToken.token,
-        uploadUrl: `${frontendBaseUrl}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`,
+        uploadUrl: `${baseUrl}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`,
         expiresAt: uploadToken.expiresAt
       }
     });
@@ -190,7 +189,7 @@ exports.validateToken = async (req, res) => {
 exports.uploadDocument = async (req, res) => {
   try {
     const { token } = req.params;
-    const { tenantId, documentType } = req.body;
+    const { tenantId, documentType, originalDocumentId: originalDocumentIdFromClient } = req.body;
     
     if (!tenantId) {
       return res.status(400).json({
@@ -264,20 +263,50 @@ exports.uploadDocument = async (req, res) => {
     }
     
     // Check if document already exists and mark as inactive
-    const existingDoc = await CandidateDocument.findOne({
-      onboardingId: uploadToken.onboardingId,
-      documentType,
-      isActive: true
-    });
+    // For certain document types (identity/bank docs) we only keep the latest active document.
+    // For others (education, experience, training, other certifications), we allow multiple active uploads.
+    const singleInstanceTypes = [
+      'aadhaar_card',
+      'pan_card',
+      'photograph',
+      'address_proof',
+      'bank_details',
+      'passport',
+      'resume'
+    ];
     
     let isResubmission = false;
     let originalDocumentId = null;
     
-    if (existingDoc) {
-      existingDoc.isActive = false;
-      await existingDoc.save();
-      isResubmission = true;
-      originalDocumentId = existingDoc._id;
+    // If a specific originalDocumentId is provided (for multi-document types),
+    // treat this as a re-upload/overwrite of that particular document.
+    if (originalDocumentIdFromClient) {
+      const existingDoc = await CandidateDocument.findOne({
+        _id: originalDocumentIdFromClient,
+        onboardingId: uploadToken.onboardingId,
+        documentType,
+        isActive: true
+      });
+
+      if (existingDoc) {
+        existingDoc.isActive = false;
+        await existingDoc.save();
+        isResubmission = true;
+        originalDocumentId = existingDoc._id;
+      }
+    } else if (singleInstanceTypes.includes(documentType)) {
+      const existingDoc = await CandidateDocument.findOne({
+        onboardingId: uploadToken.onboardingId,
+        documentType,
+        isActive: true
+      });
+      
+      if (existingDoc) {
+        existingDoc.isActive = false;
+        await existingDoc.save();
+        isResubmission = true;
+        originalDocumentId = existingDoc._id;
+      }
     }
     
     // Create document record

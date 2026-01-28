@@ -47,6 +47,24 @@ const tenantEmployeeSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  
+  // Employment Type
+  employmentType: {
+    type: String,
+    enum: ['full-time', 'contract-fixed-deliverable', 'contract-rate-based', 'contract-hourly-based'],
+    default: 'full-time',
+    required: true
+  },
+  
+  // Contract Reference (for contract employees)
+  contractId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Contract'
+  },
+  hasActiveContract: {
+    type: Boolean,
+    default: false
+  },
 
   // Department and Manager
   department: {
@@ -133,6 +151,8 @@ tenantEmployeeSchema.index({ department: 1 });
 tenantEmployeeSchema.index({ isActive: 1 });
 tenantEmployeeSchema.index({ isExEmployee: 1 });
 tenantEmployeeSchema.index({ joiningDate: -1 });
+tenantEmployeeSchema.index({ employmentType: 1 });
+tenantEmployeeSchema.index({ hasActiveContract: 1 });
 
 // Virtual for full name
 tenantEmployeeSchema.virtual('fullName').get(function() {
