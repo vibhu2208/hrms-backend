@@ -272,8 +272,8 @@ exports.sendToOnboarding = async (req, res) => {
       });
 
       const tenantId = req.tenant.companyId || req.tenant.clientId;
-      const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+      // Hard-coded public upload documents base URL as requested
+      uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
       console.log(`✅ Upload token generated for ${onboarding.candidateName}: ${uploadUrl}`);
     } catch (tokenError) {
       console.error('Error generating upload token:', tokenError);
@@ -1235,7 +1235,7 @@ exports.verifyDocument = async (req, res) => {
           candidateEmail: onboarding.candidateEmail,
           documentName: document.name || document.type,
           rejectionReason: notes,
-          uploadUrl: document.uploadUrl || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
+          uploadUrl: document.uploadUrl || `http://3.108.172.119/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
           companyName: process.env.COMPANY_NAME || 'Our Company'
         });
         console.log(`✅ Document rejection email sent to ${onboarding.candidateEmail}`);
@@ -1612,32 +1612,31 @@ exports.requestDocuments = async (req, res) => {
 
     let uploadUrl;
     const tenantId = req.tenant.companyId || req.tenant.clientId;
-    const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-    if (uploadToken) {
-      // Reuse existing token
-      uploadUrl = `${frontendBaseUrl}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
-      console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
-    } else {
-      // Generate new token
-      const token = require('crypto').randomBytes(32).toString('hex');
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30); // 30 days validity
+      if (uploadToken) {
+        // Reuse existing token
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+        console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
+      } else {
+        // Generate new token
+        const token = require('crypto').randomBytes(32).toString('hex');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30); // 30 days validity
 
-      uploadToken = await CandidateDocumentUploadToken.create({
-        onboardingId: onboarding._id,
-        candidateId: onboarding.onboardingId,
-        candidateName: onboarding.candidateName,
-        candidateEmail: onboarding.candidateEmail,
-        position: onboarding.position,
-        token,
-        expiresAt,
-        generatedBy: req.user._id
-      });
+        uploadToken = await CandidateDocumentUploadToken.create({
+          onboardingId: onboarding._id,
+          candidateId: onboarding.onboardingId,
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          token,
+          expiresAt,
+          generatedBy: req.user._id
+        });
 
-      uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
-      console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
-    }
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+        console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
+      }
 
     // Send email with upload link
     try {

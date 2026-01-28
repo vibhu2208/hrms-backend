@@ -69,7 +69,8 @@ exports.sendTestOnboardingEmail = async (req, res) => {
       });
     }
 
-    const uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/public/upload-documents/${uploadToken.token}`;
+    // Hard-coded public upload URL as requested
+    const uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}`;
 
     // Send test email
     await sendOfferLetterWithDocumentLink({

@@ -1014,8 +1014,8 @@ exports.moveToOnboarding = async (req, res) => {
         });
 
         const tenantId = req.tenant.companyId || req.tenant.clientId;
-        const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+        // Hard-coded public upload URL as requested
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
         console.log(`✅ Upload token generated for ${onboarding.candidateName}: ${uploadUrl}`);
 
         // Send offer letter with document upload link
@@ -1499,8 +1499,7 @@ exports.updateHRCall = async (req, res) => {
               });
 
               const tenantId = req.tenant.companyId || req.tenant.clientId;
-              const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-              const uploadUrl = `${frontendBaseUrl}/public/upload-documents/${token}?tenantId=${tenantId}`;
+              const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
               console.log(`✅ Upload token generated: ${uploadUrl}`);
 
               // Send offer letter with document upload link
