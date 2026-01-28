@@ -462,6 +462,24 @@ exports.approveContract = async (req, res) => {
     const employee = await TenantEmployee.findById(contract.employeeId);
     if (employee) {
       employee.hasActiveContract = true;
+      
+      // Only update employmentType if it's not already set correctly
+      const employmentTypeMap = {
+        'fixed-deliverable': 'contract-fixed-deliverable',
+        'rate-based': 'contract-rate-based',
+        'hourly-based': 'contract-hourly-based'
+      };
+      
+      const expectedEmploymentType = employmentTypeMap[contract.contractType];
+      if (employee.employmentType !== expectedEmploymentType) {
+        employee.employmentType = expectedEmploymentType;
+      }
+      
+      // Handle missing department - set a default if not present
+      if (!employee.department) {
+        employee.department = 'Contracts'; // Default department for contract employees
+      }
+      
       await employee.save();
     }
     
