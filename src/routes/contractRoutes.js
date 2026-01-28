@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const contractController = require('../controllers/contractController');
-const { protect } = require('../middlewares/auth');
+const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // All routes require authentication and tenant context
@@ -15,7 +15,7 @@ router.use(tenantMiddleware);
 // Contract CRUD operations
 router.post('/', contractController.createContract);
 router.get('/', contractController.getContracts);
-router.get('/stats', contractController.getContractStats);
+router.get('/stats', authorize('admin', 'company_admin'), contractController.getContractStats);
 router.get('/:id', contractController.getContractById);
 router.put('/:id', contractController.updateContract);
 

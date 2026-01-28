@@ -16,7 +16,7 @@ const jobPostingSchema = new mongoose.Schema({
   },
   employmentType: {
     type: String,
-    enum: ['full-time', 'part-time', 'contract', 'intern'],
+    enum: ['full-time', 'part-time', 'contract', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
     default: 'full-time'
   },
   experience: {
@@ -48,6 +48,17 @@ const jobPostingSchema = new mongoose.Schema({
     type: Number,
     default: 1
   },
+  // Employment type specific fields
+  contractDuration: String,
+  hourlyRate: Number,
+  deliverables: [String],
+  rateAmount: Number,
+  ratePeriod: {
+    type: String,
+    enum: ['daily', 'weekly', 'monthly', 'quarterly', 'per-project'],
+    default: 'monthly'
+  },
+  workHours: String,
   status: {
     type: String,
     enum: ['draft', 'active', 'closed', 'on-hold', 'archived'],

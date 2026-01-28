@@ -33,6 +33,11 @@ const candidateSchema = new mongoose.Schema({
     enum: ['internal', 'linkedin', 'naukri', 'referral', 'job-portal', 'walk-in', 'other'],
     default: 'other'
   },
+  employmentType: {
+    type: String,
+    enum: ['full-time', 'part-time', 'contract', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
+    default: 'full-time'
+  },
   referredBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee'
@@ -78,6 +83,29 @@ const candidateSchema = new mongoose.Schema({
     institution: String,
     passingYear: Number,
     percentage: Number
+  }],
+  trainingCertificates: [{
+    type: {
+      type: String,
+      enum: ['training', 'certificate'],
+      default: 'training'
+    },
+    name: {
+      type: String,
+      required: true
+    },
+    issuingOrganization: {
+      type: String,
+      required: true
+    },
+    completionDate: {
+      type: Date,
+      required: true
+    },
+    expiryDate: Date,
+    credentialId: String,
+    credentialUrl: String,
+    description: String
   }],
   resume: {
     url: String,
