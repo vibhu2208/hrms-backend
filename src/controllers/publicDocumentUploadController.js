@@ -41,13 +41,13 @@ exports.generateUploadToken = async (req, res) => {
     });
     
     if (existingToken) {
-      const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
       return res.status(200).json({
         success: true,
         message: 'Upload token already exists',
         data: {
           token: existingToken.token,
-          uploadUrl: `${frontendBaseUrl}/public/upload-documents/${existingToken.token}?tenantId=${tenantId}`,
+          // Hard-coded public upload URL as requested
+          uploadUrl: `http://3.108.172.119/public/upload-documents/${existingToken.token}?tenantId=${tenantId}`,
           expiresAt: existingToken.expiresAt
         }
       });
@@ -70,15 +70,13 @@ exports.generateUploadToken = async (req, res) => {
     });
     
     console.log(`✅ Upload token generated for ${onboarding.candidateName} (${onboarding.onboardingId})`);
-    
-    const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
     res.status(201).json({
       success: true,
       message: 'Upload token generated successfully',
       data: {
         token: uploadToken.token,
-        uploadUrl: `${frontendBaseUrl}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`,
+        uploadUrl: `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`,
         expiresAt: uploadToken.expiresAt
       }
     });

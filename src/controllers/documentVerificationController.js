@@ -272,7 +272,8 @@ exports.unverifyDocument = async (req, res) => {
           candidateEmail: document.candidateEmail,
           documentName: document.documentName,
           rejectionReason: reason,
-          uploadUrl: `${process.env.FRONTEND_URL}/public/upload-documents/${uploadToken.token}`,
+          // Hard-coded public upload URL as requested
+          uploadUrl: `http://3.108.172.119/public/upload-documents/${uploadToken.token}`,
           rejectedDocuments: uploadToken.rejectedDocuments
         });
         
@@ -362,6 +363,9 @@ exports.bulkVerifyDocuments = async (req, res) => {
 /**
  * Download document
  */
+const path = require('path');
+const fs = require('fs');
+
 exports.downloadDocument = async (req, res) => {
   try {
     const { documentId } = req.params;
@@ -377,8 +381,23 @@ exports.downloadDocument = async (req, res) => {
       });
     }
     
-    // Send file
-    res.download(document.filePath, document.originalFileName);
+    // Resolve absolute file path. filePath is stored relative to backend root (e.g. "uploads/...").
+    const absolutePath = path.isAbsolute(document.filePath)
+      ? document.filePath
+      : path.join(__dirname, '..', '..', document.filePath);
+
+    if (!fs.existsSync(absolutePath)) {
+      console.error('Download error: file not found on disk', {
+        filePath: document.filePath,
+        resolvedPath: absolutePath
+      });
+      return res.status(404).json({
+        success: false,
+        message: 'File not found on server'
+      });
+    }
+
+    res.download(absolutePath, document.originalFileName);
   } catch (error) {
     console.error('Error downloading document:', error);
     res.status(500).json({
