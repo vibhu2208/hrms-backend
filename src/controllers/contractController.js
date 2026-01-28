@@ -310,15 +310,19 @@ exports.getContracts = async (req, res) => {
  */
 exports.getContractById = async (req, res) => {
   try {
+    console.log('🔍 Fetching contract with ID:', req.params.id);
+    console.log('🏢 Tenant context available:', !!req.tenant);
+    
     // Get tenant connection from middleware
     const tenantConnection = req.tenant.connection;
     const contractSchema = require('../models/tenant/Contract');
     const Contract = getTenantModel(tenantConnection, 'Contract', contractSchema);
     
-    const contract = await Contract.findById(req.params.id)
-      .populate('createdBy', 'email name')
-      .populate('approvedBy', 'email name')
-      .lean();
+    console.log('📊 Contract model created successfully');
+    
+    const contract = await Contract.findById(req.params.id).lean();
+    
+    console.log('📄 Contract query result:', contract ? 'Found' : 'Not found');
     
     if (!contract) {
       return res.status(404).json({
@@ -343,7 +347,8 @@ exports.getContractById = async (req, res) => {
       data: enrichedContract
     });
   } catch (error) {
-    console.error('Error fetching contract:', error);
+    console.error('❌ Error fetching contract:', error);
+    console.error('❌ Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch contract',
