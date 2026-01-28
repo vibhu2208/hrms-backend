@@ -40,6 +40,7 @@ const candidateDocumentSchema = new mongoose.Schema({
       'address_proof',
       'bank_details',
       'passport',
+      'training_certificate',
       'other'
     ]
   },
