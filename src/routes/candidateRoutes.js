@@ -44,6 +44,9 @@ router.route('/')
   .get(getCandidates)
   .post(createCandidate);
 
+// Job application route with file upload support
+router.post('/apply', uploadResume, createCandidate);
+
 // Check for duplicate candidate
 router.get('/check-duplicate', checkDuplicate);
 
