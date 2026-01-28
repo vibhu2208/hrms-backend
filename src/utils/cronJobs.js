@@ -188,14 +188,68 @@ const checkApprovalSLAs = cron.schedule('0 */2 * * *', async () => {
 // Import leave accrual jobs
 const { startAccrualJobs } = require('./leaveAccrualJobs');
 
+// Import contract renewal service
+const contractRenewalService = require('../services/contractRenewalService');
+
+// Check for contract renewals daily at 9 AM
+const checkEmployeeContractRenewals = cron.schedule('0 9 * * *', async () => {
+  try {
+    console.log('🔍 Running employee contract renewal check...');
+    
+    const { connectGlobalDB } = require('../config/database.config');
+    
+    // Get all companies from global DB
+    const globalConnection = await connectGlobalDB();
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+    
+    const companies = await CompanyRegistry.find({ status: 'active' });
+    
+    let totalNotifications = 0;
+    
+    for (const company of companies) {
+      try {
+        // Check contract renewals for this tenant
+        const result = await contractRenewalService.checkContractRenewals(company.companyId);
+        
+        if (result.success && result.notificationsSent > 0) {
+          totalNotifications += result.notificationsSent;
+          console.log(`   📧 ${company.companyName}: Sent ${result.notificationsSent} renewal notification(s)`);
+        }
+        
+        // Update expired contracts
+        const expiredResult = await contractRenewalService.updateExpiredContracts(company.companyId);
+        if (expiredResult.success && expiredResult.updatedCount > 0) {
+          console.log(`   📅 ${company.companyName}: Updated ${expiredResult.updatedCount} expired contract(s)`);
+        }
+        
+        // Process auto-renewals
+        const autoRenewResult = await contractRenewalService.processAutoRenewals(company.companyId);
+        if (autoRenewResult.success && autoRenewResult.renewedCount > 0) {
+          console.log(`   🔄 ${company.companyName}: Auto-renewed ${autoRenewResult.renewedCount} contract(s)`);
+        }
+      } catch (tenantError) {
+        console.error(`   ❌ Error checking contracts for ${company.companyName}:`, tenantError.message);
+      }
+    }
+    
+    console.log(`✅ Contract renewal check completed - Total notifications: ${totalNotifications}`);
+  } catch (error) {
+    console.error('❌ Error in employee contract renewal check:', error);
+  }
+}, {
+  scheduled: false
+});
+
 // Start all cron jobs
 const startCronJobs = () => {
   checkExpiringDocuments.start();
   checkDueCompliances.start();
   checkExpiringContracts.start();
   checkApprovalSLAs.start();
+  checkEmployeeContractRenewals.start();
   startAccrualJobs();
-  console.log('✅ Cron jobs started (including SLA monitoring every 2 hours)');
+  console.log('✅ Cron jobs started (including SLA monitoring and contract renewal checks)');
 };
 
 // Import leave accrual jobs stop function
@@ -207,6 +261,7 @@ const stopCronJobs = () => {
   checkDueCompliances.stop();
   checkExpiringContracts.stop();
   checkApprovalSLAs.stop();
+  checkEmployeeContractRenewals.stop();
   stopAccrualJobs();
   console.log('⏹️  Cron jobs stopped');
 };
