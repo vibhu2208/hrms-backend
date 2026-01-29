@@ -119,6 +119,23 @@ exports.submitApplication = async (req, res) => {
     const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
     const Candidate = getTenantModel(tenantConnection, 'Candidate');
 
+    // Verify models are available
+    if (!JobPosting) {
+      console.error('❌ JobPosting model not found for tenant:', tenantId);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'JobPosting model not available' 
+      });
+    }
+
+    if (!Candidate) {
+      console.error('❌ Candidate model not found for tenant:', tenantId);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Candidate model not available' 
+      });
+    }
+
     // Verify job exists and is active
     console.log('Looking for job with ID:', jobId);
     const job = await JobPosting.findById(jobId);
@@ -211,8 +228,42 @@ exports.submitApplication = async (req, res) => {
     // Parse JSON fields from FormData
     const parseJsonField = (field) => {
       try {
-        if (!field || field === 'undefined' || field === 'null') return [];
-        return JSON.parse(field);
+        if (!field || field === 'undefined' || field === 'null' || field === '[]') return [];
+        
+        // Handle string representation of arrays
+        if (typeof field === 'string') {
+          // Remove extra quotes if the string is double-quoted
+          const cleanField = field.replace(/^"(.*)"$/, '$1');
+          const parsed = JSON.parse(cleanField);
+          
+          // Special handling for trainingCertificates - convert date strings to Date objects
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].completionDate) {
+            return parsed.map(item => ({
+              ...item,
+              completionDate: item.completionDate ? new Date(item.completionDate) : undefined,
+              expiryDate: item.expiryDate ? new Date(item.expiryDate) : undefined
+            }));
+          }
+          
+          // Special handling for professionalExperience - convert date strings to Date objects
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].company) {
+            return parsed.map(item => ({
+              ...item,
+              startDate: item.startDate ? new Date(item.startDate) : undefined,
+              endDate: item.endDate ? new Date(item.endDate) : undefined,
+              ctc: item.ctc ? parseFloat(item.ctc) : undefined
+            }));
+          }
+          
+          return parsed;
+        }
+        
+        // Handle if it's already an object/array
+        if (typeof field === 'object') {
+          return field;
+        }
+        
+        return [];
       } catch (error) {
         console.error('JSON parse error for field:', field, error);
         return [];
@@ -231,7 +282,32 @@ exports.submitApplication = async (req, res) => {
     });
     console.log('Has file:', !!req.file);
 
-    // Create candidate application with only the required fields first
+    // Parse experience object from FormData
+    let experienceData = { years: 0, months: 0 };
+    if (req.body.experience) {
+      // If experience is sent as a JSON string or object
+      try {
+        if (typeof req.body.experience === 'string') {
+          experienceData = JSON.parse(req.body.experience);
+        } else if (typeof req.body.experience === 'object') {
+          experienceData = req.body.experience;
+        }
+      } catch (error) {
+        console.error('Error parsing experience:', error);
+      }
+    } else {
+      // Try to get experience from individual fields
+      experienceData = {
+        years: parseInt(req.body['experience[years]']) || 0,
+        months: parseInt(req.body['experience[months]']) || 0
+      };
+    }
+
+    // Ensure experience years and months are numbers
+    experienceData.years = parseInt(experienceData.years) || 0;
+    experienceData.months = parseInt(experienceData.months) || 0;
+
+    // Create candidate application with all required fields
     const candidateData = {
       firstName: req.body.firstName,
       lastName: req.body.lastName,
@@ -251,10 +327,7 @@ exports.submitApplication = async (req, res) => {
       professionalExperience: parseJsonField(req.body.professionalExperience),
       trainingCertificates: parseJsonField(req.body.trainingCertificates),
       // Handle experience object
-      experience: {
-        years: parseInt(req.body['experience[years]']) || 0,
-        months: parseInt(req.body['experience[months]']) || 0
-      },
+      experience: experienceData,
       // Optional fields
       currentCompany: req.body.currentCompany || '',
       currentDesignation: req.body.currentDesignation || '',
@@ -272,8 +345,27 @@ exports.submitApplication = async (req, res) => {
       firstName: candidateData.firstName,
       lastName: candidateData.lastName,
       email: candidateData.email,
-      appliedFor: candidateData.appliedFor
+      appliedFor: candidateData.appliedFor,
+      experience: candidateData.experience,
+      professionalExperience: candidateData.professionalExperience?.length || 0,
+      education: candidateData.education?.length || 0,
+      skills: candidateData.skills?.length || 0
     });
+
+    // Validate required fields before creating candidate
+    const validationErrors = [];
+    if (!candidateData.firstName?.trim()) validationErrors.push('First name is required');
+    if (!candidateData.lastName?.trim()) validationErrors.push('Last name is required');
+    if (!candidateData.email?.trim()) validationErrors.push('Email is required');
+    if (!candidateData.phone?.trim()) validationErrors.push('Phone is required');
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
 
     // Generate unique candidate code (handle race conditions)
     let candidateCode;
@@ -281,68 +373,31 @@ exports.submitApplication = async (req, res) => {
     const maxAttempts = 20;
     let candidate;
     
-    while (attempts < maxAttempts) {
-      try {
-        // Get the highest existing candidate code
-        const lastCandidate = await Candidate.findOne({})
-          .sort({ candidateCode: -1 })
-          .select('candidateCode')
-          .lean();
-        
-        if (lastCandidate && lastCandidate.candidateCode) {
-          // Extract number from last code (e.g., "CAN00008" -> 8)
-          const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
-          candidateCode = `CAN${String(lastNumber + 1 + attempts).padStart(5, '0')}`;
-        } else {
-          // No candidates exist, start from 1
-          candidateCode = `CAN${String(1 + attempts).padStart(5, '0')}`;
-        }
-        
-        // Check if this code already exists (race condition check)
-        const existing = await Candidate.findOne({ candidateCode });
-        if (existing) {
-          attempts++;
-          continue;
-        }
-        
-        // Code is unique, use it
-        candidateData.candidateCode = candidateCode;
-        console.log('Generated candidate code:', candidateCode);
-        
-        // Try to create the candidate
-        candidate = await Candidate.create(candidateData);
-        break; // Success, exit loop
-        
-      } catch (error) {
-        // Handle duplicate key error
-        if (error.code === 11000 && error.keyPattern?.candidateCode) {
-          console.log(`Duplicate candidate code ${candidateCode} detected, trying again... (attempt ${attempts + 1}/${maxAttempts})`);
-          attempts++;
-          
-          if (attempts >= maxAttempts) {
-            // Fallback to timestamp-based code if all attempts fail
-            candidateCode = `CAN${Date.now().toString().slice(-8)}`;
-            candidateData.candidateCode = candidateCode;
-            try {
-              candidate = await Candidate.create(candidateData);
-              break;
-            } catch (fallbackError) {
-              // If even timestamp fails, use random suffix
-              candidateCode = `CAN${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100)}`;
-              candidateData.candidateCode = candidateCode;
-              candidate = await Candidate.create(candidateData);
-              break;
-            }
-          }
-        } else {
-          // Different error, re-throw
-          throw error;
-        }
-      }
-    }
+    // For debugging, try a simple timestamp-based code first
+    candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+    candidateData.candidateCode = candidateCode;
     
-    if (!candidate) {
-      throw new Error('Failed to create candidate after multiple attempts');
+    console.log(`🔍 Using timestamp-based candidate code: ${candidateCode}`);
+    
+    try {
+      console.log(`🔍 Attempting to create candidate with code: ${candidateCode}`);
+      console.log(`🔍 Candidate data keys:`, Object.keys(candidateData));
+      console.log(`🔍 Experience data:`, candidateData.experience);
+      
+      candidate = await Candidate.create(candidateData);
+      console.log(`✅ Successfully created candidate with ID: ${candidate._id}`);
+    } catch (createError) {
+      console.error(`❌ Candidate creation error:`, createError);
+      console.error(`❌ Error name:`, createError.name);
+      console.error(`❌ Error message:`, createError.message);
+      if (createError.errors) {
+        console.error(`❌ Validation errors:`, Object.values(createError.errors).map(e => ({
+          field: e.path,
+          message: e.message,
+          value: e.value
+        })));
+      }
+      throw createError;
     }
 
     // Increment application count on job posting
@@ -373,7 +428,8 @@ exports.submitApplication = async (req, res) => {
     // Handle validation errors
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
-      console.error('Validation errors:', messages);
+      console.error('❌ Validation errors:', messages);
+      console.error('❌ Error details:', error.errors);
       return res.status(400).json({
         success: false,
         message: 'Validation failed',

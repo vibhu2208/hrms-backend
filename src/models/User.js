@@ -31,9 +31,17 @@ const userSchema = new mongoose.Schema({
   profilePicture: {
     type: String
   },
+  firstName: {
+    type: String,
+    required: false
+  },
+  lastName: {
+    type: String,
+    required: false
+  },
   role: {
     type: String,
-    enum: ['superadmin', 'admin', 'hr', 'employee'],
+    enum: ['superadmin', 'admin', 'hr', 'manager', 'employee'],
     default: 'employee'
   },
   // Internal Super Admin role for RBAC within Super Admin module

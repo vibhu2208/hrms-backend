@@ -7,15 +7,60 @@ const { getTenantModel } = require('../middlewares/tenantMiddleware');
 const HRActivityHistorySchema = require('../models/tenant/HRActivityHistory');
 
 /**
+ * Helper function to get HR user details from request
+ */
+const getHRUserDetails = (req) => {
+  if (!req || !req.user) {
+    return null;
+  }
+  
+  return {
+    id: req.user.id,
+    email: req.user.email,
+    name: req.user.name || req.user.firstName && req.user.lastName ? 
+      `${req.user.firstName} ${req.user.lastName}` : req.user.email,
+    role: req.user.role,
+    ip: req.ip || req.connection?.remoteAddress,
+    userAgent: req.get('User-Agent')
+  };
+};
+
+/**
  * Log HR activity
  * @param {Object} tenantConnection - Tenant database connection
  * @param {Object} activityData - Activity data to log
  * @param {Object} req - Express request object (optional, for IP and user agent)
  */
+const logHRActivity = async (tenantConnection, activityData, req) => {
+  try {
+    if (!tenantConnection) {
+      console.warn('⚠️ Cannot log HR activity: No tenant connection provided');
+      return;
+    }
 
-/**
- * Helper function to get HR user details from request
- */
+    const HRActivityHistory = getTenantModel(tenantConnection, 'HRActivityHistory');
+    if (!HRActivityHistory) {
+      console.warn('⚠️ Cannot log HR activity: HRActivityHistory model not available');
+      return;
+    }
+
+    const logEntry = {
+      ...activityData,
+      timestamp: new Date(),
+      // Add request metadata if available
+      ...(req && {
+        ip: req.ip || req.connection?.remoteAddress,
+        userAgent: req.get('User-Agent')
+      })
+    };
+
+    await HRActivityHistory.create(logEntry);
+    console.log(`✅ HR activity logged: ${activityData.action}`);
+  } catch (error) {
+    console.error('❌ Error logging HR activity:', error);
+    // Don't throw - logging should not break the main flow
+  }
+};
 
 /**
  * Log employee creation activity
@@ -528,7 +573,6 @@ const logAttendanceModified = async (tenantConnection, attendance, action, req) 
 };
 
 module.exports = {
-  logHRActivity,
   getHRUserDetails,
   logEmployeeCreated,
   logEmployeeUpdated,

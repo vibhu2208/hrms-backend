@@ -64,10 +64,10 @@ const updateCandidateApplicationHistory = async (candidate, onboarding, Candidat
 
     if (applicationEntry) {
       // Update existing entry
-      applicationEntry.onboardingRecord = onboarding._id;
       applicationEntry.stage = 'sent-to-onboarding';
       applicationEntry.status = 'active';
-      applicationEntry.outcome = 'onboarding';
+      applicationEntry.outcome = 'ongoing'; // Fixed: 'onboarding' is not a valid enum value
+      applicationEntry.onboardingRecord = onboarding._id;
     } else {
       // Add new entry
       updatedCandidate.applicationHistory.push({
@@ -76,8 +76,9 @@ const updateCandidateApplicationHistory = async (candidate, onboarding, Candidat
         appliedDate: candidate.createdAt || new Date(),
         stage: 'sent-to-onboarding',
         status: 'active',
-        outcome: 'onboarding',
-        onboardingRecord: onboarding._id
+        outcome: 'ongoing', // Fixed: 'onboarding' is not a valid enum value
+        onboardingRecord: onboarding._id,
+        interviews: []
       });
     }
 
