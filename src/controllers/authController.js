@@ -10,7 +10,7 @@ const { getTenantConnection } = require('../config/database.config');
 // @access  Public
 exports.register = async (req, res) => {
   try {
-    const { email, password, role, employeeId } = req.body;
+    const { email, password, role, employeeId, firstName, lastName, isActive } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -37,7 +37,10 @@ exports.register = async (req, res) => {
       email,
       password,
       role: role || 'employee',
-      employeeId
+      employeeId,
+      firstName,
+      lastName,
+      isActive: isActive !== undefined ? isActive : true
     });
 
     // Generate token
@@ -50,7 +53,10 @@ exports.register = async (req, res) => {
         user: {
           userId: user._id,
           email: user.email,
-          role: user.role
+          role: user.role,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          isActive: user.isActive
         },
         token
       }
