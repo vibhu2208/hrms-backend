@@ -997,10 +997,10 @@ exports.setJoiningDateAndNotify = async (req, res) => {
 
     // Validate joining date
     const joinDate = new Date(joiningDate);
-    if (joinDate <= new Date()) {
+    if (isNaN(joinDate.getTime())) {
       return res.status(400).json({
         success: false,
-        message: 'Joining date must be in the future'
+        message: 'Invalid joining date'
       });
     }
 

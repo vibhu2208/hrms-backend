@@ -315,6 +315,7 @@ exports.getOffboarding = async (req, res) => {
 exports.createOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
     // Map frontend field names to backend field names
     const { employee, employeeId, lastWorkingDate, lastWorkingDay, resignationType, reason } = req.body;
 
@@ -362,13 +363,35 @@ exports.createOffboarding = async (req, res) => {
       });
     }
 
-    // Validate last working date (should be in the future)
+    // Validate last working date format
     const lastWorkingDateObj = new Date(lastWorkingDateValue);
     if (isNaN(lastWorkingDateObj.getTime())) {
       return res.status(400).json({
         success: false,
         message: 'Invalid last working date format'
       });
+    }
+
+    // Validate against employee joining date
+    if (Employee) {
+      const employeeRecord = await Employee.findById(employeeIdValue).select('joiningDate dateOfJoining firstName lastName');
+      if (!employeeRecord) {
+        return res.status(400).json({
+          success: false,
+          message: 'Employee not found for validating last working date'
+        });
+      }
+
+      const joiningSource = employeeRecord.joiningDate || employeeRecord.dateOfJoining;
+      if (joiningSource) {
+        const joiningDateObj = new Date(joiningSource);
+        if (!isNaN(joiningDateObj.getTime()) && lastWorkingDateObj <= joiningDateObj) {
+          return res.status(400).json({
+            success: false,
+            message: 'Last working date must be after the employee joining date'
+          });
+        }
+      }
     }
 
     // Initialize clearance status properly
@@ -398,8 +421,7 @@ exports.createOffboarding = async (req, res) => {
     });
 
     // Get employee details for logging
-    const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const employeeData = await Employee.findById(employeeIdValue);
+    const employeeData = Employee ? await Employee.findById(employeeIdValue) : null;
 
     // Log HR activity
     if (employeeData) {
@@ -421,10 +443,44 @@ exports.createOffboarding = async (req, res) => {
 exports.updateOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const offboarding = await Offboarding.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const Employee = getTenantModel(req.tenant.connection, 'Employee');
+
+    const offboarding = await Offboarding.findById(req.params.id);
     if (!offboarding) {
       return res.status(404).json({ success: false, message: 'Offboarding record not found' });
     }
+
+    // If last working date is being updated, validate it against joining date
+    const incomingLastWorking =
+      req.body.lastWorkingDate || req.body.lastWorkingDay || req.body.lastWorkingDateValue;
+
+    if (incomingLastWorking && Employee) {
+      const lastWorkingDateObj = new Date(incomingLastWorking);
+      if (isNaN(lastWorkingDateObj.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid last working date format'
+        });
+      }
+
+      const employeeRecord = await Employee.findById(offboarding.employee).select('joiningDate dateOfJoining');
+      if (employeeRecord) {
+        const joiningSource = employeeRecord.joiningDate || employeeRecord.dateOfJoining;
+        if (joiningSource) {
+          const joiningDateObj = new Date(joiningSource);
+          if (!isNaN(joiningDateObj.getTime()) && lastWorkingDateObj <= joiningDateObj) {
+            return res.status(400).json({
+              success: false,
+              message: 'Last working date must be after the employee joining date'
+            });
+          }
+        }
+      }
+    }
+
+    Object.assign(offboarding, req.body);
+    await offboarding.save();
+
     res.status(200).json({ success: true, message: 'Offboarding updated successfully', data: offboarding });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
