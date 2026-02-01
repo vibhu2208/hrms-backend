@@ -8,6 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
+const s3Service = require('../services/awsS3Service');
 
 const { getTenantConnection } = require('../config/database.config');
 
@@ -216,8 +217,6 @@ exports.uploadDocument = async (req, res) => {
     const uploadToken = await CandidateDocumentUploadToken.findOne({ token });
     
     if (!uploadToken || !uploadToken.isValid()) {
-      // Delete uploaded file
-      await fs.unlink(req.file.path);
       return res.status(400).json({
         success: false,
         message: 'Invalid or expired upload link'
@@ -234,7 +233,6 @@ exports.uploadDocument = async (req, res) => {
       docConfig = defaultConfigs.find(config => config.documentType === documentType);
       
       if (!docConfig) {
-        await fs.unlink(req.file.path);
         return res.status(400).json({
           success: false,
           message: 'Invalid document type'
@@ -245,7 +243,6 @@ exports.uploadDocument = async (req, res) => {
     // Validate file format
     const fileExt = path.extname(req.file.originalname).toLowerCase().replace('.', '');
     if (!docConfig.allowedFormats.includes(fileExt)) {
-      await fs.unlink(req.file.path);
       return res.status(400).json({
         success: false,
         message: `Invalid file format. Allowed formats: ${docConfig.allowedFormats.join(', ')}`
@@ -255,7 +252,6 @@ exports.uploadDocument = async (req, res) => {
     // Validate file size
     const fileSizeMB = req.file.size / (1024 * 1024);
     if (fileSizeMB > docConfig.maxFileSizeMB) {
-      await fs.unlink(req.file.path);
       return res.status(400).json({
         success: false,
         message: `File size exceeds maximum allowed size of ${docConfig.maxFileSizeMB}MB`
@@ -309,7 +305,22 @@ exports.uploadDocument = async (req, res) => {
       }
     }
     
-    // Create document record
+    // Upload to S3 with structured folder path
+    const candidateFolder = `${s3Service.sanitizeForPath(uploadToken.candidateName)}-${uploadToken.candidateId}`;
+    const s3Folder = `documents/${candidateFolder}`;
+    
+    let s3Result;
+    try {
+      s3Result = await s3Service.uploadFile(req.file, s3Folder);
+    } catch (s3Error) {
+      console.error('❌ S3 upload failed:', s3Error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload file to cloud storage'
+      });
+    }
+
+    // Create document record with S3 metadata
     const ip = req.ip || req.connection.remoteAddress;
     const userAgent = req.headers['user-agent'];
     
@@ -319,12 +330,15 @@ exports.uploadDocument = async (req, res) => {
       candidateName: uploadToken.candidateName,
       documentType,
       documentName: docConfig.displayName,
-      fileName: req.file.filename,
+      fileName: req.file.originalname,
       originalFileName: req.file.originalname,
-      filePath: req.file.path,
-      fileUrl: `/uploads/candidate-documents/${req.file.filename}`,
+      filePath: s3Result.key,
+      fileUrl: s3Result.url,
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
+      storageProvider: 's3',
+      s3Key: s3Result.key,
+      s3Bucket: s3Result.bucket,
       uploadToken: token,
       uploadIp: ip,
       uploadUserAgent: userAgent,
@@ -407,15 +421,6 @@ exports.uploadDocument = async (req, res) => {
     });
   } catch (error) {
     console.error('Error uploading document:', error);
-    
-    // Clean up file if error
-    if (req.file) {
-      try {
-        await fs.unlink(req.file.path);
-      } catch (unlinkError) {
-        console.error('Error deleting file:', unlinkError);
-      }
-    }
     
     res.status(500).json({
       success: false,

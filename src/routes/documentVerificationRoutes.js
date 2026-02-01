@@ -15,6 +15,7 @@ const {
   unverifyDocument,
   bulkVerifyDocuments,
   downloadDocument,
+  getDocumentViewUrl,
   getVerificationStats
 } = require('../controllers/documentVerificationController');
 const { generateUploadToken: generateToken } = require('../controllers/publicDocumentUploadController');
@@ -43,6 +44,9 @@ router.post('/documents/bulk-verify', bulkVerifyDocuments);
 
 // Download document
 router.get('/documents/:documentId/download', downloadDocument);
+
+// Get document view URL (for preview)
+router.get('/documents/:documentId/view-url', getDocumentViewUrl);
 
 // Get verification statistics
 router.get('/stats', getVerificationStats);
