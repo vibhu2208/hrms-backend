@@ -365,6 +365,7 @@ exports.bulkVerifyDocuments = async (req, res) => {
  */
 const path = require('path');
 const fs = require('fs');
+const s3Service = require('../services/awsS3Service');
 
 exports.downloadDocument = async (req, res) => {
   try {
@@ -380,8 +381,33 @@ exports.downloadDocument = async (req, res) => {
         message: 'Document not found'
       });
     }
-    
-    // Resolve absolute file path. filePath is stored relative to backend root (e.g. "uploads/...").
+
+    // Handle S3-stored files
+    if (document.storageProvider === 's3' && document.s3Key) {
+      try {
+        // Stream S3 object to client
+        const s3Object = await s3Service.s3.getObject({
+          Bucket: document.s3Bucket,
+          Key: document.s3Key
+        }).promise();
+        
+        res.set({
+          'Content-Type': s3Object.ContentType,
+          'Content-Length': s3Object.ContentLength,
+          'Content-Disposition': `attachment; filename="${document.originalFileName}"`
+        });
+        
+        return res.send(s3Object.Body);
+      } catch (s3Error) {
+        console.error('❌ Failed to stream S3 object:', s3Error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to access file from cloud storage'
+        });
+      }
+    }
+
+    // Fallback to local file storage for backward compatibility
     const absolutePath = path.isAbsolute(document.filePath)
       ? document.filePath
       : path.join(__dirname, '..', '..', document.filePath);
@@ -400,6 +426,85 @@ exports.downloadDocument = async (req, res) => {
     res.download(absolutePath, document.originalFileName);
   } catch (error) {
     console.error('Error downloading document:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get document view URL (signed URL for S3 or local path)
+ */
+exports.getDocumentViewUrl = async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const tenantConnection = req.tenant.connection;
+    
+    const CandidateDocument = getTenantModel(tenantConnection, 'CandidateDocument');
+    
+    const document = await CandidateDocument.findById(documentId);
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document not found'
+      });
+    }
+
+    // Handle S3-stored files
+    if (document.storageProvider === 's3' && document.s3Key) {
+      try {
+        // Generate signed URL for viewing (inline disposition)
+        const signedUrl = s3Service.generateSignedUrl(document.s3Key, 3600); // 1 hour expiry
+        
+        return res.status(200).json({
+          success: true,
+          data: {
+            viewUrl: signedUrl,
+            fileName: document.originalFileName,
+            mimeType: document.mimeType
+          }
+        });
+      } catch (s3Error) {
+        console.error('❌ Failed to generate S3 signed URL:', s3Error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to access file from cloud storage'
+        });
+      }
+    }
+
+    // Fallback to local file storage for backward compatibility
+    const absolutePath = path.isAbsolute(document.filePath)
+      ? document.filePath
+      : path.join(__dirname, '..', '..', document.filePath);
+
+    if (!fs.existsSync(absolutePath)) {
+      console.error('View error: file not found on disk', {
+        filePath: document.filePath,
+        resolvedPath: absolutePath
+      });
+      return res.status(404).json({
+        success: false,
+        message: 'File not found on server'
+      });
+    }
+
+    // For local files, we'll need to serve them via a different endpoint
+    // For now, return the file path (frontend will need to handle this)
+    const backendBaseUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+    const viewUrl = `${backendBaseUrl}/document-verification/documents/${documentId}/view-local`;
+    
+    return res.status(200).json({
+      success: true,
+      data: {
+        viewUrl,
+        fileName: document.originalFileName,
+        mimeType: document.mimeType
+      }
+    });
+  } catch (error) {
+    console.error('Error getting document view URL:', error);
     res.status(500).json({
       success: false,
       message: error.message

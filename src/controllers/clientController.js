@@ -67,7 +67,7 @@ exports.createClient = async (req, res) => {
     const client = await Client.create(req.body);
     res.status(201).json({ success: true, message: 'Client created successfully', data: client });
   } catch (error) {
-    console.error('Error creating client:', error);
+    console.error('Error creating client:', error);   
     res.status(500).json({ success: false, message: error.message });
   }
 };

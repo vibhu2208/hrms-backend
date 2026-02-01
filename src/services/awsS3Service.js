@@ -8,6 +8,19 @@ const fs = require('fs');
 const path = require('path');
 const { promisify } = require('util');
 
+const sanitizeForPath = (value, fallback = 'candidate') => {
+  if (!value) return fallback;
+
+  const sanitized = value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return sanitized || fallback;
+};
+
 class AWSS3Service {
   constructor() {
     // Configure AWS
@@ -26,6 +39,25 @@ class AWSS3Service {
       console.warn('⚠️  AWS credentials not found. Resume upload to S3 will not work.');
     }
   }
+
+  /**
+   * Sanitize string for use in S3 path/folder names
+   * @param {String} value - Value to sanitize
+   * @param {String} fallback - Fallback value if input is empty
+   * @returns {String} Sanitized string
+   */
+  sanitizeForPath = (value, fallback = 'candidate') => {
+    if (!value) return fallback;
+
+    const sanitized = value
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    return sanitized || fallback;
+  };
 
   /**
    * Upload resume file to S3
@@ -122,7 +154,6 @@ class AWSS3Service {
         Key: s3Key,
         Body: fileBuffer,
         ContentType: file.mimetype,
-        ACL: 'private',
         Metadata: {
           originalName: file.originalname,
           uploadedAt: new Date().toISOString(),

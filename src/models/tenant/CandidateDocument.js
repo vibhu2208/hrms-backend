@@ -65,6 +65,18 @@ const candidateDocumentSchema = new mongoose.Schema({
   fileUrl: {
     type: String
   },
+  storageProvider: {
+    type: String,
+    enum: ['local', 's3'],
+    default: 'local',
+    index: true
+  },
+  s3Key: {
+    type: String
+  },
+  s3Bucket: {
+    type: String
+  },
   fileSize: {
     type: Number,
     required: true
