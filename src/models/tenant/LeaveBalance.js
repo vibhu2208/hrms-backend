@@ -36,7 +36,8 @@ const leaveBalanceSchema = new mongoose.Schema({
   },
   available: {
     type: Number,
-    default: 0
+    default: 0,
+    min: 0 // Prevent negative available balance
   },
   accrued: {
     type: Number,
@@ -72,9 +73,9 @@ const leaveBalanceSchema = new mongoose.Schema({
 // Calculate available before saving
 leaveBalanceSchema.pre('save', function(next) {
   // Total = accrued + carriedForward (initial allocation)
-  // Available = total - consumed
+  // Available = total - consumed, but never negative
   this.total = (this.accrued || 0) + (this.carriedForward || 0);
-  this.available = this.total - (this.consumed || 0);
+  this.available = Math.max(0, this.total - (this.consumed || 0));
   next();
 });
 

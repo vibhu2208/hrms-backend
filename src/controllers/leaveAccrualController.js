@@ -35,7 +35,6 @@ exports.getAccrualPolicies = async (req, res) => {
     if (leaveType) query.leaveType = leaveType;
 
     const policies = await LeaveAccrualPolicy.find(query)
-      .populate('departments', 'name')
       .populate('createdBy', 'firstName lastName email')
       .sort({ leaveType: 1 });
 
@@ -77,7 +76,6 @@ exports.getAccrualPolicy = async (req, res) => {
     const LeaveAccrualPolicy = tenantConnection.model('LeaveAccrualPolicy', LeaveAccrualPolicySchema);
 
     const policy = await LeaveAccrualPolicy.findById(id)
-      .populate('departments', 'name')
       .populate('createdBy', 'firstName lastName email');
 
     if (!policy) {
@@ -194,7 +192,7 @@ exports.updateAccrualPolicy = async (req, res) => {
       id,
       updateData,
       { new: true, runValidators: true }
-    ).populate('departments', 'name');
+    ).populate('createdBy', 'firstName lastName email');
 
     if (!policy) {
       if (tenantConnection) await tenantConnection.close();

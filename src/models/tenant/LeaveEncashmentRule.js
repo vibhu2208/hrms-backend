@@ -93,6 +93,27 @@ const leaveEncashmentRuleSchema = new mongoose.Schema({
     default: 1,
     min: 1
   },
+  isAutomatic: {
+    type: Boolean,
+    default: false
+  },
+  automaticTrigger: {
+    type: String,
+    enum: ['year_end', 'employment_end', 'specific_date', 'leave_balance_threshold'],
+    default: 'year_end'
+  },
+  automaticTriggerDate: {
+    type: Date // For specific_date trigger
+  },
+  automaticTriggerThreshold: {
+    type: Number // For leave_balance_threshold trigger
+  },
+  automaticEncashmentPercentage: {
+    type: Number, // Percentage of eligible days to auto-encash
+    default: 100,
+    min: 0,
+    max: 100
+  },
   isActive: {
     type: Boolean,
     default: true

@@ -148,6 +148,16 @@ const leaveEncashmentRequestSchema = new mongoose.Schema({
   appliedOn: {
     type: Date,
     default: Date.now
+  },
+  // Automatic encashment fields
+  isAutomatic: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  automaticTrigger: {
+    type: String,
+    enum: ['year_end', 'employment_end', 'specific_date', 'leave_balance_threshold']
   }
 }, {
   timestamps: true
@@ -157,6 +167,7 @@ const leaveEncashmentRequestSchema = new mongoose.Schema({
 leaveEncashmentRequestSchema.index({ employeeId: 1, status: 1 });
 leaveEncashmentRequestSchema.index({ status: 1, slaDeadline: 1 });
 leaveEncashmentRequestSchema.index({ payrollProcessed: 1 });
+leaveEncashmentRequestSchema.index({ isAutomatic: 1, automaticTrigger: 1 });
 
 module.exports = leaveEncashmentRequestSchema;
 

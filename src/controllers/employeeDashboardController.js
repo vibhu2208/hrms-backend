@@ -13,9 +13,14 @@ const TenantUserSchema = require('../models/tenant/TenantUser');
  * @access Private (Employee)
  */
 exports.getDashboardOverview = async (req, res) => {
+  let tenantConnection = null;
+
   try {
     const user = req.user;
+    const companyId = req.companyId;
     const today = new Date();
+    const startOfToday = new Date(today);
+    startOfToday.setHours(0, 0, 0, 0);
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
 
@@ -45,23 +50,50 @@ exports.getDashboardOverview = async (req, res) => {
     const todayAttendance = null;
     const totalAvailable = 15;
     const totalConsumed = 5;
-    
-    const upcomingHolidays = [
-      {
-        _id: 'holiday_1',
-        name: 'Christmas',
-        date: new Date(currentYear, 11, 25),
-        type: 'public',
-        description: 'Christmas Day'
-      },
-      {
-        _id: 'holiday_2',
-        name: 'New Year',
-        date: new Date(currentYear + 1, 0, 1),
-        type: 'public',
-        description: 'New Year Day'
+
+    let upcomingHolidays = [];
+    try {
+      if (!companyId) {
+        throw new Error('Company ID not available');
       }
-    ];
+
+      tenantConnection = await getTenantConnection(companyId);
+      const HolidayModel = tenantConnection.model('Holiday', require('../models/Holiday').schema);
+
+      const holidayResults = await HolidayModel.find({
+        isActive: true,
+        date: { $gte: startOfToday }
+      })
+      .sort({ date: 1 })
+      .limit(5)
+      .lean();
+
+      upcomingHolidays = holidayResults.map((holiday) => ({
+        _id: holiday._id,
+        name: holiday.name,
+        date: holiday.date,
+        type: holiday.type || 'public',
+        description: holiday.description
+      }));
+    } catch (holidayError) {
+      console.warn('Falling back to default upcoming holidays:', holidayError.message);
+      upcomingHolidays = [
+        {
+          _id: 'holiday_1',
+          name: 'Christmas',
+          date: new Date(currentYear, 11, 25),
+          type: 'public',
+          description: 'Christmas Day'
+        },
+        {
+          _id: 'holiday_2',
+          name: 'New Year',
+          date: new Date(currentYear + 1, 0, 1),
+          type: 'public',
+          description: 'New Year Day'
+        }
+      ];
+    }
 
     const teamOnLeave = [];
     const birthdays = [];
@@ -94,13 +126,7 @@ exports.getDashboardOverview = async (req, res) => {
         status: todayAttendance.status,
         workHours: todayAttendance.workHours
       } : null,
-      upcomingHolidays: upcomingHolidays.map(h => ({
-        _id: h._id,
-        name: h.name,
-        date: h.date,
-        type: h.type || 'public',
-        description: h.description
-      })),
+      upcomingHolidays,
       offThisWeek: teamOnLeave.map(leave => ({
         employee: {
           name: `${leave.employee.firstName} ${leave.employee.lastName}`,
@@ -151,6 +177,10 @@ exports.getDashboardOverview = async (req, res) => {
       success: false,
       message: error.message || 'Failed to fetch dashboard overview'
     });
+  } finally {
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
   }
 };
 

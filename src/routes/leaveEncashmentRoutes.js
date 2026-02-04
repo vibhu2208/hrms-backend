@@ -8,7 +8,9 @@ const {
   createEncashmentRequest,
   getEncashmentRequests,
   approveEncashmentRequest,
-  processForPayroll
+  processForPayroll,
+  processAutomaticEncashment,
+  getAutomaticSettings
 } = require('../controllers/leaveEncashmentController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
@@ -34,6 +36,10 @@ router.route('/requests')
 
 router.post('/requests/:id/approve', authorize('admin', 'hr', 'manager'), approveEncashmentRequest);
 router.post('/requests/:id/payroll', authorize('admin', 'hr'), processForPayroll);
+
+// Automatic Encashment
+router.post('/automatic/process', authorize('admin', 'hr'), processAutomaticEncashment);
+router.get('/automatic/settings', authorize('admin', 'hr'), getAutomaticSettings);
 
 module.exports = router;
 
