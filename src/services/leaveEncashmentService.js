@@ -369,7 +369,7 @@ class LeaveEncashmentService {
 
       if (leaveBalance) {
         leaveBalance.consumed += request.numberOfDays;
-        leaveBalance.available = leaveBalance.total - leaveBalance.consumed;
+        // Let the pre-save middleware handle the available calculation
         await leaveBalance.save();
       }
 

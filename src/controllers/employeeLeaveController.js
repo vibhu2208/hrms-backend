@@ -38,18 +38,18 @@ exports.getLeaveBalance = async (req, res) => {
       year: year
     });
 
+    // Filter to only show specific leave types: Comp-Offs, Personal Leave (Annual), Sick Leave
+    const allowedLeaveTypes = ['Comp Offs', 'Personal Leave', 'Sick Leave'];
+    balances = balances.filter(balance => allowedLeaveTypes.includes(balance.leaveType));
+
     // If no balances found, initialize with default values
     if (balances.length === 0) {
       console.log(`📊 Initializing leave balances for ${user.email} - Year ${year}`);
       
       const defaultLeaveTypes = [
         { type: 'Comp Offs', total: 5 },
-        { type: 'Floater Leave', total: 2 },
-        { type: 'Marriage Leave', total: 3 },
-        { type: 'Maternity Leave', total: 90 },
         { type: 'Personal Leave', total: 12 },
-        { type: 'Sick Leave', total: 7 },
-        { type: 'Unpaid Leave', total: 0 }
+        { type: 'Sick Leave', total: 7 }
       ];
 
       const balancePromises = defaultLeaveTypes.map(lt => {

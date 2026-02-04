@@ -551,6 +551,60 @@ exports.getPendingLeaves = async (req, res) => {
   }
 };
 
+// @desc    Get approval history for manager
+// @route   GET /api/manager/approval-history
+// @access  Private (Manager only)
+exports.getApprovalHistory = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const managerEmail = req.user.email;
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    console.log(`📊 Fetching approval history for manager: ${managerEmail}, company: ${companyId}`);
+
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+
+    // Find all leave requests approved or rejected by this manager
+    const approvedRequests = await LeaveRequest.find({
+      $or: [
+        { approvedByEmail: managerEmail },
+        { rejectedByEmail: managerEmail }
+      ],
+      status: { $in: ['approved', 'rejected'] }
+    })
+    .sort({ approvedOn: -1, rejectedOn: -1 })
+    .lean();
+
+    console.log(`✅ Found ${approvedRequests.length} approved/rejected requests for manager ${managerEmail}`);
+
+    res.status(200).json({
+      success: true,
+      count: approvedRequests.length,
+      data: approvedRequests
+    });
+  } catch (error) {
+    console.error('Error fetching approval history:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  } finally {
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
+  }
+};
+
 // @desc    Approve leave request
 // @route   PUT /api/manager/leave/:id/approve
 // @access  Private (Manager only)
@@ -614,7 +668,7 @@ exports.approveLeave = async (req, res) => {
 
     if (leaveBalance) {
       leaveBalance.consumed += leaveRequest.numberOfDays;
-      leaveBalance.available = leaveBalance.total - leaveBalance.consumed;
+      // Let the pre-save middleware handle the available calculation
       await leaveBalance.save();
       console.log(`📊 Updated balance: ${leaveRequest.leaveType} - Consumed: ${leaveBalance.consumed}/${leaveBalance.total}`);
     }

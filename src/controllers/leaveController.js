@@ -52,21 +52,99 @@ exports.createLeave = async (req, res) => {
       req.body.employee = req.user.employeeId;
     }
 
+    // Validate dates before creating
+    const { startDate, endDate } = req.body;
+    if (startDate && endDate) {
+      try {
+        const validation = Leave.validateLeaveDates(startDate, endDate);
+        if (!validation.isValid) {
+          return res.status(400).json({ 
+            success: false, 
+            message: validation.error || 'Invalid date range' 
+          });
+        }
+        
+        // Auto-calculate numberOfDays based on validation
+        if (!req.body.numberOfDays || req.body.numberOfDays <= 0) {
+          req.body.numberOfDays = req.body.halfDay ? 0.5 : validation.businessDays;
+        }
+      } catch (validationError) {
+        return res.status(400).json({ 
+          success: false, 
+          message: validationError.message 
+        });
+      }
+    }
+
     const leave = await Leave.create(req.body);
     res.status(201).json({ success: true, message: 'Leave application submitted successfully', data: leave });
   } catch (error) {
+    console.error('Leave creation error:', error);
+    
+    // Handle validation errors specifically
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed', 
+        errors 
+      });
+    }
+    
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.updateLeave = async (req, res) => {
   try {
-    const leave = await Leave.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    // Validate dates if they're being updated
+    const { startDate, endDate } = req.body;
+    if (startDate && endDate) {
+      try {
+        const validation = Leave.validateLeaveDates(startDate, endDate);
+        if (!validation.isValid) {
+          return res.status(400).json({ 
+            success: false, 
+            message: validation.error || 'Invalid date range' 
+          });
+        }
+        
+        // Auto-calculate numberOfDays based on validation
+        if (!req.body.numberOfDays || req.body.numberOfDays <= 0) {
+          const existingLeave = await Leave.findById(req.params.id);
+          req.body.numberOfDays = req.body.halfDay ? 0.5 : validation.businessDays;
+        }
+      } catch (validationError) {
+        return res.status(400).json({ 
+          success: false, 
+          message: validationError.message 
+        });
+      }
+    }
+
+    const leave = await Leave.findByIdAndUpdate(req.params.id, req.body, { 
+      new: true, 
+      runValidators: true 
+    });
+    
     if (!leave) {
       return res.status(404).json({ success: false, message: 'Leave not found' });
     }
+    
     res.status(200).json({ success: true, message: 'Leave updated successfully', data: leave });
   } catch (error) {
+    console.error('Leave update error:', error);
+    
+    // Handle validation errors specifically
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed', 
+        errors 
+      });
+    }
+    
     res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -44,7 +44,6 @@ exports.getHolidays = async (req, res) => {
     }
 
     const holidays = await Holiday.find(query)
-      .populate('departments', 'name')
       .sort({ date: 1 });
 
     res.status(200).json({
@@ -226,7 +225,6 @@ exports.getHolidaysByLocation = async (req, res) => {
     }
 
     const holidays = await Holiday.find(query)
-      .populate('departments', 'name')
       .sort({ date: 1 });
 
     res.status(200).json({

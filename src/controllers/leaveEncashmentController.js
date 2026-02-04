@@ -7,6 +7,7 @@ const { getTenantConnection } = require('../config/database.config');
 const LeaveEncashmentRuleSchema = require('../models/tenant/LeaveEncashmentRule');
 const LeaveEncashmentRequestSchema = require('../models/tenant/LeaveEncashmentRequest');
 const leaveEncashmentService = require('../services/leaveEncashmentService');
+const automaticLeaveEncashmentService = require('../services/automaticLeaveEncashmentService');
 const approvalWorkflowService = require('../services/approvalWorkflowService');
 
 /**
@@ -34,7 +35,6 @@ exports.getEncashmentRules = async (req, res) => {
     if (leaveType) query.leaveType = leaveType;
 
     const rules = await LeaveEncashmentRule.find(query)
-      .populate('eligibilityCriteria.allowedDepartments', 'name')
       .populate('createdBy', 'firstName lastName email')
       .sort({ leaveType: 1 });
 
@@ -145,7 +145,7 @@ exports.updateEncashmentRule = async (req, res) => {
       id,
       updateData,
       { new: true, runValidators: true }
-    ).populate('eligibilityCriteria.allowedDepartments', 'name');
+    ).populate('createdBy', 'firstName lastName email');
 
     if (!rule) {
       if (tenantConnection) await tenantConnection.close();
@@ -414,6 +414,81 @@ exports.processForPayroll = async (req, res) => {
     });
   } catch (error) {
     console.error('Error processing for payroll:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Process automatic encashment
+ */
+exports.processAutomaticEncashment = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const { triggerType } = req.body;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    const result = await automaticLeaveEncashmentService.processCompanyAutomaticEncashment(
+      companyId,
+      triggerType || 'year_end'
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      processed: result.processed
+    });
+  } catch (error) {
+    console.error('Error processing automatic encashment:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get automatic encashment settings
+ */
+exports.getAutomaticSettings = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveEncashmentRule = tenantConnection.model('LeaveEncashmentRule', LeaveEncashmentRuleSchema);
+
+    const automaticRules = await LeaveEncashmentRule.find({
+      isAutomatic: true,
+      isActive: true
+    }).populate('createdBy', 'firstName lastName email');
+
+    if (tenantConnection) await tenantConnection.close();
+
+    res.status(200).json({
+      success: true,
+      count: automaticRules.length,
+      data: automaticRules
+    });
+  } catch (error) {
+    console.error('Error fetching automatic settings:', error);
+    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message

@@ -6,6 +6,7 @@ const {
   getPendingLeaves,
   approveLeave,
   rejectLeave,
+  getApprovalHistory,
   getManagerProjects,
   getManagerProjectDetails,
   assignProject,
@@ -36,6 +37,7 @@ router.post('/meetings', createTeamMeeting);
 
 // Leave management routes
 router.get('/pending-leaves', getPendingLeaves);
+router.get('/approval-history', getApprovalHistory);
 router.put('/leave/:id/approve', approveLeave);
 router.put('/leave/:id/reject', rejectLeave);
 
