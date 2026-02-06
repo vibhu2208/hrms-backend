@@ -603,14 +603,14 @@ exports.updateOnboardingStatus = async (req, res) => {
     const { status, notes } = req.body;
     const hrUserId = req.user.id;
 
-    // Define allowed state transitions
+    // Define allowed state transitions - NOTE: Document verification should NOT block progression
     const allowedTransitions = {
       'preboarding': ['pending_approval', 'offer_sent', 'rejected'], // Can request approval or send offer (if approved)
       'pending_approval': ['preboarding', 'approval_rejected'], // Admin can approve (returns to preboarding) or reject
       'approval_rejected': ['pending_approval', 'rejected'], // HR can re-request or reject candidate
       'offer_sent': ['offer_accepted', 'rejected'],
-      'offer_accepted': ['docs_pending', 'rejected'],
-      'docs_pending': ['docs_verified', 'rejected'],
+      'offer_accepted': ['docs_pending', 'ready_for_joining', 'rejected'], // Can skip docs verification
+      'docs_pending': ['docs_verified', 'ready_for_joining', 'rejected'], // Can skip docs verification
       'docs_verified': ['ready_for_joining', 'rejected'],
       'ready_for_joining': ['completed', 'rejected'],
       'completed': [], // Terminal state
@@ -987,11 +987,13 @@ exports.setJoiningDateAndNotify = async (req, res) => {
       });
     }
 
-    // Validate status
-    if (onboarding.status !== 'docs_verified') {
+    // Validate status - NOTE: Allow setting joining date even if docs not fully verified
+    // Document verification should not block the employment process
+    const allowedStatuses = ['docs_verified', 'docs_pending', 'offer_accepted'];
+    if (!allowedStatuses.includes(onboarding.status)) {
       return res.status(400).json({
         success: false,
-        message: `Cannot set joining date. Current status: ${onboarding.status}. Required: docs_verified`
+        message: `Cannot set joining date. Current status: ${onboarding.status}. Required: ${allowedStatuses.join(' or ')}`
       });
     }
 
@@ -1013,7 +1015,7 @@ exports.setJoiningDateAndNotify = async (req, res) => {
       action: 'joining_date_set',
       description: `Joining date set to ${joinDate.toDateString()}`,
       performedBy: hrUserId,
-      previousStatus: 'docs_verified',
+      previousStatus: onboarding.status, // Use current status instead of hardcoded docs_verified
       newStatus: 'ready_for_joining',
       metadata: { joiningDate, notifyTeams },
       timestamp: new Date()

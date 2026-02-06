@@ -136,12 +136,16 @@ const protect = async (req, res, next) => {
     }
 
     // Attach user and company info to request
+    console.log('🔍 Auth middleware - User fetched from DB:', JSON.stringify(user, null, 2));
     req.user = user;
     if (decoded.companyId) {
+      req.user.companyId = decoded.companyId;
       req.companyId = decoded.companyId;
       req.companyCode = decoded.companyCode;
       req.databaseName = decoded.databaseName;
     }
+    
+    console.log('🔍 Auth middleware - Final req.user:', JSON.stringify(req.user, null, 2));
     
     next();
   } catch (error) {

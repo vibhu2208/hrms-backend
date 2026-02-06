@@ -24,7 +24,7 @@ router.put('/theme', updateThemePreference);
 router.get('/profile', getUserProfile);
 
 // Admin and Company Admin - Get all users for current tenant
-router.get('/all', authorize('admin', 'company_admin'), getAllUsers);
+router.get('/all', authorize('admin', 'company_admin', 'manager', 'hr'), getAllUsers);
 
 // Admin and Company Admin - Create new user
 router.post('/create', authorize('admin', 'company_admin'), createUser);

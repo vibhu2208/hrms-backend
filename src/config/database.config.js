@@ -7,6 +7,7 @@
  */
 
 const mongoose = require('mongoose');
+require('dotenv').config();
 
 // Global database connection (for super admin and company registry)
 let globalConnection = null;
@@ -65,6 +66,11 @@ const connectGlobalDB = async () => {
  */
 const getTenantConnection = async (companyIdOrDbName) => {
   try {
+    // Validate input parameter
+    if (!companyIdOrDbName) {
+      throw new Error('Company ID or database name is required for tenant connection');
+    }
+    
     // Determine the actual database name
     // If it already starts with 'tenant_', use it as-is
     // Otherwise, add the 'tenant_' prefix
@@ -103,7 +109,7 @@ const getTenantConnection = async (companyIdOrDbName) => {
     console.log(`✅ Connected to Tenant Database: ${tenantDbName}`);
     return connection;
   } catch (error) {
-    console.error(`❌ Tenant DB Connection Error for ${companyId}:`, error);
+    console.error(`❌ Tenant DB Connection Error for ${companyIdOrDbName}:`, error);
     throw error;
   }
 };
@@ -187,6 +193,8 @@ const initializeTenantDatabase = async (companyId) => {
       'recruitment',
       'onboarding',
       'projects',
+      'projectassignments',  // SPC project assignments
+      'teamassignments',    // SPC team assignments
       'assets',
       'notifications',
       'timesheets',

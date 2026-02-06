@@ -15,9 +15,12 @@ const {
   getTeamMeetings
 } = require('../controllers/managerController');
 const { protect } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // Protect all routes - require authentication
 router.use(protect);
+// Apply tenant middleware for database connection
+router.use(tenantMiddleware);
 
 // Team management routes
 router.get('/team-members', getTeamMembers);

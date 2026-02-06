@@ -223,11 +223,11 @@ exports.createUser = async (req, res) => {
     }
 
     // Validate role
-    const validRoles = ['hr', 'admin', 'company_admin', 'employee'];
+    const validRoles = ['hr', 'admin', 'company_admin', 'manager', 'employee'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid role. Must be one of: hr, admin, company_admin, employee'
+        message: 'Invalid role. Must be one of: hr, admin, company_admin, manager, employee'
       });
     }
 
