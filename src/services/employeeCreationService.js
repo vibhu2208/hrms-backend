@@ -67,11 +67,13 @@ class EmployeeCreationService {
         throw new Error('This onboarding has already been completed');
       }
 
-      // Check if all documents are verified (if documents exist)
+      // Check documents - NOTE: Document verification should NOT block employee creation
+      // Candidates should be moved to employees after onboarding completion regardless of document status
       if (onboarding.documents && onboarding.documents.length > 0) {
         const unverifiedDocs = onboarding.documents.filter(doc => doc.status !== 'verified');
         if (unverifiedDocs.length > 0) {
-          throw new Error(`All documents must be verified before completing onboarding. ${unverifiedDocs.length} document(s) still pending verification.`);
+          console.log(`⚠️ ${unverifiedDocs.length} document(s) not verified, but proceeding with employee creation`);
+          // Add warning but don't block - documents can be verified post-employment
         }
       }
 
@@ -644,11 +646,12 @@ class EmployeeCreationService {
       }
     }
 
-    // Check documents
+    // Check documents - NOTE: Document verification should NOT block employee creation
+    // Documents can be verified post-employment, so this should only be a warning
     if (onboarding.documents && onboarding.documents.length > 0) {
       const unverifiedDocs = onboarding.documents.filter(doc => doc.status !== 'verified');
       if (unverifiedDocs.length > 0) {
-        errors.push(`${unverifiedDocs.length} document(s) not verified`);
+        warnings.push(`${unverifiedDocs.length} document(s) not verified - will be processed post-employment`);
       }
     } else {
       warnings.push('No documents uploaded');

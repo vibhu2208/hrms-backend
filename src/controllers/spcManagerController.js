@@ -1,9 +1,6 @@
-const Employee = require('../models/Employee');
-const User = require('../models/User');
-const Department = require('../models/Department');
-const Leave = require('../models/Leave');
-const Project = require('../models/Project');
-const Client = require('../models/Client');
+const { getTenantModel } = require('../utils/tenantModels');
+const TenantUserSchema = require('../models/tenant/TenantUser');
+const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
 const { protect, authorize } = require('../middlewares/auth');
 
 // @desc    Get team members reporting to SPC manager
@@ -12,15 +9,18 @@ const { protect, authorize } = require('../middlewares/auth');
 exports.getTeamMembers = async (req, res) => {
   try {
     const managerEmail = req.user.email;
+    const tenantConnection = req.tenant.connection;
 
     console.log(`📊 Fetching SPC team members for manager: ${managerEmail}`);
 
-    // Find all employees reporting to this manager
-    const teamMembers = await Employee.find({
+    // Get tenant user model
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    // Find all users reporting to this manager
+    const teamMembers = await TenantUser.find({
       reportingManager: managerEmail,
       isActive: true
     })
-    .populate('department', 'name')
     .select('-password')
     .sort({ firstName: 1 });
 
@@ -44,11 +44,16 @@ exports.getTeamMembers = async (req, res) => {
 exports.getTeamStats = async (req, res) => {
   try {
     const managerEmail = req.user.email;
+    const tenantConnection = req.tenant.connection;
 
     console.log(`📊 Fetching SPC team stats for manager: ${managerEmail}`);
 
+    // Get tenant user and leave request models
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+
     // Get total team members
-    const totalMembers = await Employee.countDocuments({
+    const totalMembers = await TenantUser.countDocuments({
       reportingManager: managerEmail,
       isActive: true
     });
@@ -56,18 +61,18 @@ exports.getTeamStats = async (req, res) => {
     // Get present today (mock for now - would integrate with attendance)
     const present = Math.floor(totalMembers * 0.8); // 80% attendance rate
 
+    // Get pending leave requests
+    const pendingApprovals = await LeaveRequest.countDocuments({
+      reportingManager: managerEmail,
+      status: 'pending'
+    });
+
     // Get on leave today
-    const onLeave = await Leave.countDocuments({
-      employee: { $in: await Employee.find({ reportingManager: managerEmail }).distinct('_id') },
+    const onLeave = await LeaveRequest.countDocuments({
+      reportingManager: managerEmail,
       status: 'approved',
       startDate: { $lte: new Date() },
       endDate: { $gte: new Date() }
-    });
-
-    // Get pending leave requests
-    const pendingApprovals = await Leave.countDocuments({
-      employee: { $in: await Employee.find({ reportingManager: managerEmail }).distinct('_id') },
-      status: 'pending'
     });
 
     const stats = {
@@ -245,8 +250,14 @@ exports.getManagerProjects = async (req, res) => {
   try {
     const managerId = req.user._id || req.user.id;
     const managerEmail = req.user.email;
+    const tenantConnection = req.tenant.connection;
 
     console.log(`📊 Fetching SPC projects for manager: ${managerEmail}`);
+
+    // Get tenant models
+    const Project = getTenantModel(tenantConnection, 'Project');
+    const Client = getTenantModel(tenantConnection, 'Client');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
 
     // Find projects where manager is projectManager or team member
     const projects = await Project.find({
