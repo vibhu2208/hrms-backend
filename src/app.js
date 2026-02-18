@@ -168,7 +168,7 @@ app.use('/api/departments', departmentRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/leave-accrual', leaveAccrualRoutes);
 app.use('/api/leave-management', leaveManagementRoutes);
-app.use('/api/approval', approvalWorkflowRoutes);
+app.use('/api/approval-workflow', approvalWorkflowRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/employee/profile', employeeProfileRoutes);
 app.use('/api/leave-encashment', leaveEncashmentRoutes);

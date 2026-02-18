@@ -13,6 +13,35 @@ const emailService = require('./emailService');
 
 class ApprovalWorkflowService {
   /**
+   * Normalize workflow for runtime execution.
+   * Keeps backward compatibility by deriving legacy `levels[]` from new `steps[]` when needed.
+   */
+  normalizeWorkflowForExecution(workflow) {
+    if (!workflow) return workflow;
+    const wf = typeof workflow.toObject === 'function' ? workflow.toObject() : { ...workflow };
+
+    const hasLegacyLevels = Array.isArray(wf.levels) && wf.levels.length > 0;
+    const hasNewSteps = Array.isArray(wf.steps) && wf.steps.length > 0;
+
+    if (!hasLegacyLevels && hasNewSteps) {
+      const sortedSteps = [...wf.steps].sort((a, b) => (a.order || 0) - (b.order || 0));
+      wf.levels = sortedSteps.map((s, idx) => ({
+        level: idx + 1,
+        approverType: s.role, // 'hr' | 'manager' | 'admin' (supported by resolver)
+        approverId: null,
+        approverRole: s.role,
+        approverEmail: null,
+        isRequired: true,
+        canDelegate: s.permissions?.canDelegate !== false,
+        slaMinutes: s.sla?.timeLimitMinutes || 1440
+      }));
+      wf.slaMinutes = wf.levels.reduce((sum, l) => sum + (l.slaMinutes || 1440), 0);
+    }
+
+    return wf;
+  }
+
+  /**
    * Get applicable workflow for an entity
    */
   async getApplicableWorkflow(companyId, entityType, entityData) {
@@ -20,6 +49,8 @@ class ApprovalWorkflowService {
       const tenantConnection = await getTenantConnection(companyId);
       const ApprovalWorkflow = tenantConnection.model('ApprovalWorkflow', ApprovalWorkflowSchema);
       const ApprovalMatrix = tenantConnection.model('ApprovalMatrix', ApprovalMatrixSchema);
+
+      const requesterRole = entityData?.requesterRole;
 
       // First, try to find matching approval matrix
       const matrices = await ApprovalMatrix.find({
@@ -46,6 +77,20 @@ class ApprovalWorkflowService {
         }
       }
 
+      // Next, try to find an explicit workflow match (v2): entityType + requesterRole
+      // Allows defining different workflows per requester role.
+      if (requesterRole) {
+        const roleMatchedWorkflow = await ApprovalWorkflow.findOne({
+          entityType: entityType,
+          requesterRole: requesterRole,
+          status: 'active'
+        }).sort({ priority: -1, updatedAt: -1 });
+
+        if (roleMatchedWorkflow) {
+          return this.normalizeWorkflowForExecution(roleMatchedWorkflow);
+        }
+      }
+
       // Fallback to default workflow
       const defaultWorkflow = await ApprovalWorkflow.findOne({
         entityType: entityType,
@@ -54,7 +99,7 @@ class ApprovalWorkflowService {
       });
 
       if (defaultWorkflow) {
-        return defaultWorkflow;
+        return this.normalizeWorkflowForExecution(defaultWorkflow);
       }
 
       // Return null if no workflow found
@@ -134,6 +179,7 @@ class ApprovalWorkflowService {
       // Get applicable workflow
       const workflow = await this.getApplicableWorkflow(companyId, entityType, {
         ...entityData,
+        requesterRole: employee?.role,
         departmentId: employee.departmentId,
         designation: employee.designation
       });

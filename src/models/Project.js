@@ -35,6 +35,28 @@ const projectSchema = new mongoose.Schema({
     enum: ['planning', 'active', 'on-hold', 'completed', 'cancelled'],
     default: 'planning'
   },
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'approved'
+  },
+  submittedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  submittedAt: {
+    type: Date
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvedAt: {
+    type: Date
+  },
+  rejectionReason: {
+    type: String
+  },
   priority: {
     type: String,
     enum: ['low', 'medium', 'high'],

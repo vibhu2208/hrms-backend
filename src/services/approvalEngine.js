@@ -15,8 +15,25 @@ class ApprovalEngine {
     const ApprovalWorkflow = tenantConnection.model('ApprovalWorkflow', ApprovalWorkflowSchema);
 
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H2', location: 'hrms-backend/src/services/approvalEngine.js:createApprovalInstance:entry', message: 'createApprovalInstance called', data: { requestType: requestData?.requestType, requestId: requestData?.requestId ? String(requestData.requestId) : null, requestedBy: requestData?.requestedBy ? String(requestData.requestedBy) : null, requesterRole: requestData?.requesterRole || null, hasMetadata: Boolean(requestData?.metadata) }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
+      const TenantUserSchema = require('../models/tenant/TenantUser');
+      const TenantUser = tenantConnection.model('User', TenantUserSchema);
+      const requester = requestData?.requestedBy ? await TenantUser.findById(requestData.requestedBy) : null;
+
       // Find applicable workflow
-      const workflow = await this.findApplicableWorkflow(requestData, tenantConnection);
+      const workflow = await this.findApplicableWorkflow(
+        {
+          ...requestData,
+          requesterRole: requestData?.requesterRole || requester?.role
+        },
+        tenantConnection
+      );
+
+      // #region agent log
+      fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H2', location: 'hrms-backend/src/services/approvalEngine.js:createApprovalInstance:workflowSelected', message: 'Applicable workflow resolved', data: { requestType: requestData?.requestType, workflowFound: Boolean(workflow), workflowId: workflow?._id ? String(workflow._id) : null, isActive: workflow?.isActive, hasSteps: Array.isArray(workflow?.steps) ? workflow.steps.length : null, hasLegacyApprovalSteps: Array.isArray(workflow?.approvalSteps) ? workflow.approvalSteps.length : null }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
       
       if (!workflow) {
         throw new Error(`No approval workflow found for ${requestData.requestType}`);
@@ -24,6 +41,14 @@ class ApprovalEngine {
 
       // Build approval chain based on workflow
       const approvalChain = await this.buildApprovalChain(workflow, requestData, tenantConnection);
+
+      // #region agent log
+      fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H2', location: 'hrms-backend/src/services/approvalEngine.js:createApprovalInstance:chainBuilt', message: 'Approval chain built', data: { chainLen: Array.isArray(approvalChain) ? approvalChain.length : null, nullApproverCount: Array.isArray(approvalChain) ? approvalChain.filter(s => !s?.approverId).length : null, approverTypes: Array.isArray(approvalChain) ? approvalChain.map(s => s?.approverType).filter(Boolean) : null }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
+
+      if (!approvalChain || approvalChain.length === 0) {
+        throw new Error(`Approval workflow '${workflow?.name || workflow?._id}' has no approval steps configured`);
+      }
 
       // Calculate SLA dates
       const slaStatus = this.calculateSLA(workflow, approvalChain);
@@ -68,9 +93,14 @@ class ApprovalEngine {
     const workflows = await ApprovalWorkflow.find({
       requestType: requestData.requestType,
       isActive: true
-    }).sort({ priority: -1 });
+    }).sort({ priority: -1, updatedAt: -1 });
+
+    const requesterRole = requestData?.requesterRole;
 
     for (const workflow of workflows) {
+      if (requesterRole && workflow.requesterRole && workflow.requesterRole !== requesterRole) {
+        continue;
+      }
       if (await this.evaluateWorkflowConditions(workflow, requestData)) {
         return workflow;
       }
@@ -145,17 +175,25 @@ class ApprovalEngine {
    */
   async buildApprovalChain(workflow, requestData, tenantConnection) {
     const chain = [];
-    const TenantUserSchema = require('../models/tenant/TenantUser');
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
 
-    for (let i = 0; i < workflow.approvalSteps.length; i++) {
-      const step = workflow.approvalSteps[i];
-      
+    const legacySteps = Array.isArray(workflow?.approvalSteps) ? workflow.approvalSteps : [];
+    const v2Steps = Array.isArray(workflow?.steps)
+      ? [...workflow.steps].sort((a, b) => (a.order || 0) - (b.order || 0))
+      : [];
+
+    const effectiveSteps = legacySteps.length
+      ? legacySteps.map((s) => ({ approverType: s.approverType, raw: s }))
+      : v2Steps.map((s) => ({ approverType: s.role, raw: s }));
+
+    for (let i = 0; i < effectiveSteps.length; i++) {
+      const step = effectiveSteps[i];
+      const stepRaw = step.raw || step;
+
       // Find approver based on type
       const approverId = await this.findApprover(step.approverType, requestData, tenantConnection);
       
       // Calculate SLA for this step
-      const sla = this.calculateStepSLA(step, i === 0 ? new Date() : null);
+      const sla = this.calculateStepSLA(stepRaw, i === 0 ? new Date() : null);
 
       chain.push({
         level: i + 1,
@@ -186,6 +224,9 @@ class ApprovalEngine {
       const employee = await Employee.findOne({ userId: requester._id });
 
       switch (approverType) {
+        case 'employee':
+          return requestData.requestedBy || null;
+
         case 'manager':
           if (requester.reportingManager) {
             const manager = await TenantUser.findOne({ email: requester.reportingManager });
@@ -202,6 +243,10 @@ class ApprovalEngine {
         case 'hr':
           const hr = await TenantUser.findOne({ role: 'hr', isActive: true });
           return hr?._id;
+
+        case 'admin':
+          // Prefer explicit admin role; fall back to company_admin if needed
+          return (await TenantUser.findOne({ role: { $in: ['admin', 'company_admin'] }, isActive: true }))?._id;
 
         case 'department_head':
           if (requester.department) {
@@ -294,14 +339,14 @@ class ApprovalEngine {
     }
 
     // Update current step
-    currentApprover.status = action;
+    currentApprover.status = action === 'approve' ? 'approved' : 'rejected';
     currentApprover.actionDate = new Date();
     currentApprover.comments = comments;
 
     // Add to history
     instance.addHistory(action.toUpperCase(), approverId, { comments, level: instance.currentLevel });
 
-    if (action === 'approved') {
+    if (action === 'approve') {
       // Move to next level or complete
       if (instance.currentLevel < instance.totalLevels) {
         instance.currentLevel += 1;
@@ -313,7 +358,7 @@ class ApprovalEngine {
         instance.slaStatus.actualCompletionDate = new Date();
         await this.notifyRequester(instance, 'approved', tenantConnection);
       }
-    } else if (action === 'rejected') {
+    } else if (action === 'reject') {
       instance.status = 'rejected';
       instance.slaStatus.actualCompletionDate = new Date();
       await this.notifyRequester(instance, 'rejected', tenantConnection);

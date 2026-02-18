@@ -52,6 +52,27 @@ router.put('/profile', employeeDashboardController.updateEmployeeProfile);
 router.get('/leaves/summary', employeeDashboardController.getLeaveSummary);
 
 /**
+ * @route   GET /api/employee/leaves/types
+ * @desc    Get available leave types
+ * @access  Private (Employee)
+ */
+router.get('/leaves/types', employeeLeaveController.getAvailableLeaveTypes);
+
+/**
+ * @route   POST /api/employee/leaves/fix-negative
+ * @desc    Fix all negative leave balances
+ * @access  Private (Employee)
+ */
+router.post('/leaves/fix-negative', employeeLeaveController.fixNegativeBalances);
+
+/**
+ * @route   POST /api/employee/leaves/refresh
+ * @desc    Refresh leave balances to match current admin configuration
+ * @access  Private (Employee)
+ */
+router.post('/leaves/refresh', employeeLeaveController.refreshLeaveBalances);
+
+/**
  * @route   GET /api/employee/leaves/balance
  * @desc    Get leave balance
  * @access  Private (Employee)

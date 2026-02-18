@@ -3,6 +3,7 @@ const { getTenantModel } = require('../utils/tenantModels');
 const TenantUserSchema = require('../models/tenant/TenantUser');
 const LeaveRequestSchema = require('../models/tenant/LeaveRequest');
 const LeaveBalanceSchema = require('../models/tenant/LeaveBalance');
+const emailService = require('../config/email.config');
 
 // @desc    Get team members reporting to manager
 // @route   GET /api/manager/team-members
@@ -317,6 +318,10 @@ exports.assignProject = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Company ID not found' });
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H1', location: 'hrms-backend/src/controllers/managerController.js:assignProject:entry', message: 'Manager assignProject called', data: { companyId, managerId: String(managerId), hasTenantConn: Boolean(req?.tenant?.connection), selectedEmployeesCount: Array.isArray(selectedEmployees) ? selectedEmployees.length : null, hasClientId: Boolean(clientId), hasProjectName: Boolean(projectName) }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+
     if (!projectName || !description || !startDate || !clientId || !location) {
       return res.status(400).json({
         success: false,
@@ -380,7 +385,10 @@ exports.assignProject = async (req, res) => {
       location,
       startDate: start,
       endDate: end,
-      status: 'active',
+      status: 'planning',
+      approvalStatus: 'pending',
+      submittedBy: managerId,
+      submittedAt: new Date(),
       priority,
       projectManager: managerId,
       teamMembers: teamMembers.map(member => ({
@@ -390,6 +398,65 @@ exports.assignProject = async (req, res) => {
         isActive: true
       }))
     });
+
+    // #region agent log
+    fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H1', location: 'hrms-backend/src/controllers/managerController.js:assignProject:projectCreated', message: 'Project created (pending)', data: { companyId, projectId: String(newProject?._id), approvalStatus: newProject?.approvalStatus, status: newProject?.status }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
+
+    // Create approval instance using the approval engine
+    try {
+      console.log('🔍 Creating approval instance for project:', {
+        requestType: 'project',
+        requestId: newProject._id,
+        requestedBy: managerId,
+        companyId: req.companyId
+      });
+      
+      const approvalEngine = require('../services/approvalEngine');
+
+      // #region agent log
+      fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H1', location: 'hrms-backend/src/controllers/managerController.js:assignProject:createApprovalInstance:before', message: 'Creating approval instance for project', data: { requestType: 'project', requestId: String(newProject?._id), requestedBy: String(managerId) }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
+      
+      const approvalInstance = await approvalEngine.createApprovalInstance({
+        requestType: 'project',
+        requestId: newProject._id,
+        requestedBy: managerId,
+        companyId: req.companyId,
+        metadata: {
+          projectName: projectName,
+          projectCode: projectCode,
+          client: client.name,
+          priority: priority,
+          estimatedDuration: end ? Math.ceil((end - start) / (1000 * 60 * 60 * 24)) : null
+        }
+      }, req.tenant.connection);
+
+      // #region agent log
+      fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H1', location: 'hrms-backend/src/controllers/managerController.js:assignProject:createApprovalInstance:after', message: 'Approval instance created for project', data: { instanceId: String(approvalInstance?._id), instanceStatus: approvalInstance?.status, currentLevel: approvalInstance?.currentLevel, totalLevels: approvalInstance?.totalLevels, firstApproverId: approvalInstance?.approvalChain?.[0]?.approverId ? String(approvalInstance.approvalChain[0].approverId) : null }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
+      
+      console.log(`✅ Project approval instance created: ${approvalInstance._id}`);
+      console.log('Approval instance details:', {
+        id: approvalInstance._id,
+        status: approvalInstance.status,
+        currentLevel: approvalInstance.currentLevel,
+        totalLevels: approvalInstance.totalLevels,
+        approvalChain: approvalInstance.approvalChain
+      });
+      
+      // Update project with approval instance reference
+      newProject.approvalInstanceId = approvalInstance._id;
+      await newProject.save();
+      
+    } catch (approvalError) {
+      console.error('Failed to create project approval instance:', approvalError);
+      console.error('Stack trace:', approvalError.stack);
+      // #region agent log
+      fetch('http://127.0.0.1:7246/ingest/55260818-aa6f-4194-8f1a-a7b791aff845', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: 'baseline', hypothesisId: 'H1', location: 'hrms-backend/src/controllers/managerController.js:assignProject:createApprovalInstance:error', message: 'Approval instance creation failed', data: { errorMessage: String(approvalError?.message || approvalError) }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
+      // Don't fail the project creation if approval workflow fails
+    }
 
     // Attempt to set current project for assigned employees (best effort)
     try {
@@ -409,9 +476,42 @@ exports.assignProject = async (req, res) => {
       .populate('teamMembers.employee', 'firstName lastName email employeeCode designation')
       .lean();
 
+    // Send notification to admins about pending project
+    try {
+      // Find admin users to notify
+      const adminUsers = await TenantUser.find({
+        role: { $in: ['admin', 'hr'] },
+        isActive: true
+      }).select('email firstName lastName').lean();
+
+      if (adminUsers.length > 0) {
+        const projectDetails = {
+          ...populatedProject,
+          submittedBy: {
+            firstName: req.user.firstName,
+            lastName: req.user.lastName
+          }
+        };
+
+        // Send notifications to all admins
+        const notificationPromises = adminUsers.map(admin => 
+          emailService.sendProjectSubmissionNotification(
+            admin.email,
+            projectDetails,
+            req.tenant?.companyName || 'HRMS System'
+          ).catch(err => console.warn('Failed to send email to admin:', admin.email, err.message))
+        );
+
+        await Promise.allSettled(notificationPromises);
+        console.log(`📧 Sent project submission notifications to ${adminUsers.length} admins`);
+      }
+    } catch (emailError) {
+      console.warn('Failed to send project submission notifications:', emailError.message);
+    }
+
     return res.status(201).json({
       success: true,
-      message: 'Project assigned successfully',
+      message: 'Project submitted for approval successfully',
       data: populatedProject
     });
   } catch (error) {
@@ -641,9 +741,20 @@ exports.approveLeave = async (req, res) => {
 
     // Verify it's for this manager's team
     if (leaveRequest.reportingManager !== managerEmail) {
+      console.log(`🚫 Security check failed: Manager ${managerEmail} trying to approve leave for ${leaveRequest.employeeEmail}, reported to ${leaveRequest.reportingManager}`);
       return res.status(403).json({
         success: false,
         message: 'You are not authorized to approve this leave request'
+      });
+    }
+
+    // Prevent self-approval
+    if (leaveRequest.employeeEmail === managerEmail) {
+      console.log(`🚫 Self-approval blocked: ${managerEmail} trying to approve own leave`);
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot approve your own leave request',
+        code: 'SELF_APPROVAL_FORBIDDEN'
       });
     }
 
@@ -655,6 +766,24 @@ exports.approveLeave = async (req, res) => {
     leaveRequest.approvalComments = comments || '';
 
     await leaveRequest.save();
+
+    // Update approval workflow if exists
+    if (leaveRequest.approvalInstanceId) {
+      try {
+        const approvalEngine = require('../services/approvalEngine');
+        await approvalEngine.processApproval(
+          leaveRequest.approvalInstanceId,
+          managerEmail,
+          'approved',
+          comments,
+          tenantConnection
+        );
+        console.log(`✅ Approval workflow updated: ${leaveRequest.approvalInstanceId}`);
+      } catch (approvalError) {
+        console.error('⚠️  Error updating approval workflow:', approvalError.message);
+        // Don't fail the approval if workflow update fails
+      }
+    }
 
     // Update leave balance - deduct consumed days
     const LeaveBalance = tenantConnection.model('LeaveBalance', LeaveBalanceSchema);
@@ -799,6 +928,8 @@ exports.getManagerProjects = async (req, res) => {
     })
     .populate('client', 'name clientCode')
     .populate('projectManager', 'firstName lastName email')
+    .populate('submittedBy', 'firstName lastName email')
+    .populate('approvedBy', 'firstName lastName email')
     .populate('teamMembers.employee', 'firstName lastName email employeeCode designation')
     .sort({ createdAt: -1 })
     .lean();
@@ -813,22 +944,31 @@ exports.getManagerProjects = async (req, res) => {
       return {
         ...project,
         managerRole: isProjectManager ? 'Project Manager' : teamMemberInfo?.role || 'Team Member',
-        isCurrentProject: project.status === 'active',
+        isCurrentProject: project.status === 'active' && project.approvalStatus === 'approved',
+        approvalStatus: project.approvalStatus,
+        canEdit: isProjectManager && project.approvalStatus === 'pending',
         myStartDate: teamMemberInfo?.startDate,
         myEndDate: teamMemberInfo?.endDate,
-        teamSize: project.teamMembers?.filter(tm => tm.isActive).length || 0
+        teamSize: project.teamMembers?.filter(tm => tm.isActive).length || 0,
+        submittedAt: project.submittedAt,
+        approvedAt: project.approvedAt,
+        rejectionReason: project.rejectionReason
       };
     });
 
-    // Separate current and past projects
+    // Separate projects by status
     const currentProjects = enrichedProjects.filter(p => p.isCurrentProject);
-    const pastProjects = enrichedProjects.filter(p => !p.isCurrentProject);
+    const pendingProjects = enrichedProjects.filter(p => p.approvalStatus === 'pending');
+    const rejectedProjects = enrichedProjects.filter(p => p.approvalStatus === 'rejected');
+    const pastProjects = enrichedProjects.filter(p => !p.isCurrentProject && p.approvalStatus !== 'pending' && p.approvalStatus !== 'rejected');
 
     res.status(200).json({
       success: true,
       count: enrichedProjects.length,
       data: {
         current: currentProjects,
+        pending: pendingProjects,
+        rejected: rejectedProjects,
         past: pastProjects,
         all: enrichedProjects
       }
