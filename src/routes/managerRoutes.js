@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 const {
   getTeamMembers,
   getTeamStats,
@@ -15,10 +17,11 @@ const {
   createTeamMeeting,
   getTeamMeetings
 } = require('../controllers/managerController');
-const { protect } = require('../middlewares/auth');
 
-// Protect all routes - require authentication
+// Apply authentication and tenant middleware to all routes
 router.use(protect);
+router.use(tenantMiddleware);
+router.use(authorize('manager', 'hr', 'company_admin'));
 
 // Team management routes
 router.get('/team-members', getTeamMembers);

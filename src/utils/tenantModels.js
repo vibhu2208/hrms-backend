@@ -27,6 +27,11 @@ const JobDescription = require('../models/JobDescription');
 
 // Import tenant-specific models
 const TenantUser = require('../models/tenant/TenantUser');
+const LeaveAccrualPolicy = require('../models/tenant/LeaveAccrualPolicy');
+const LeaveBalance = require('../models/tenant/LeaveBalance');
+const LeaveRequest = require('../models/tenant/LeaveRequest');
+const ApprovalWorkflow = require('../models/tenant/ApprovalWorkflow');
+const ApprovalInstance = require('../models/tenant/ApprovalInstance');
 
 // Import offboarding related models (if they exist)
 let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
@@ -171,6 +176,11 @@ function getTenantModels(tenantConnection) {
   
   // Tenant-specific models
   models.TenantUser = createTenantModel('TenantUser', TenantUser);
+  models.LeaveAccrualPolicy = createTenantModel('LeaveAccrualPolicy', LeaveAccrualPolicy);
+  models.LeaveBalance = createTenantModel('LeaveBalance', LeaveBalance);
+  models.LeaveRequest = createTenantModel('LeaveRequest', LeaveRequest);
+  models.ApprovalWorkflow = createTenantModel('ApprovalWorkflow', ApprovalWorkflow);
+  models.ApprovalInstance = createTenantModel('ApprovalInstance', ApprovalInstance);
 
   // Tenant-specific offboarding models (only if they exist)
   if (OffboardingRequest) models.OffboardingRequest = createTenantModel('OffboardingRequest', OffboardingRequest);

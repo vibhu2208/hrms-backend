@@ -11,6 +11,356 @@ const LeaveBalanceSchema = require('../models/tenant/LeaveBalance');
  */
 
 /**
+ * Fix all negative leave balances for all employees
+ */
+exports.fixNegativeBalances = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveBalance = tenantConnection.model('LeaveBalance', LeaveBalanceSchema);
+    
+    const currentYear = new Date().getFullYear();
+    
+    // Find all balances with negative available days
+    const negativeBalances = await LeaveBalance.find({
+      year: currentYear,
+      available: { $lt: 0 }
+    });
+
+    console.log(`🔍 Found ${negativeBalances.length} negative balances to fix`);
+
+    let fixedCount = 0;
+    const fixPromises = negativeBalances.map(async (balance) => {
+      const oldAvailable = balance.available;
+      // Set available to 0 (minimum)
+      balance.available = 0;
+      
+      console.log(`🔧 Fixed ${balance.employeeEmail} - ${balance.leaveType}: ${oldAvailable} → 0`);
+      fixedCount++;
+      
+      return balance.save();
+    });
+    
+    await Promise.all(fixPromises);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Fixed ${fixedCount} negative leave balances`,
+      data: { fixedCount, totalFound: negativeBalances.length }
+    });
+  } catch (error) {
+    console.error('Error fixing negative balances:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
+
+/**
+ * Force refresh leave balances to match current admin configuration
+ */
+exports.refreshLeaveBalances = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const companyId = req.companyId;
+    const user = req.user;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveBalance = tenantConnection.model('LeaveBalance', LeaveBalanceSchema);
+    
+    // Get current admin configuration
+    const { getTenantModel } = require('../utils/tenantModels');
+    
+    let policies = [];
+    try {
+      const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+      policies = await LeaveAccrualPolicy.find({ isActive: true });
+    } catch (policyError) {
+      console.error('Error fetching leave policies:', policyError);
+    }
+    
+    if (policies.length === 0) {
+      // Create default leave policies if none exist
+      console.log('📝 No active leave policies found, creating default policies...');
+      
+      try {
+        const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+        
+        const defaultPolicies = [
+          {
+            leaveType: 'Personal Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 12,
+            yearlyAllocation: 12,
+            carryForwardEnabled: true,
+            maxCarryForward: 6,
+            isActive: true,
+            description: 'Annual personal leave for employees'
+          },
+          {
+            leaveType: 'Sick Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 7,
+            yearlyAllocation: 7,
+            carryForwardEnabled: true,
+            maxCarryForward: 3,
+            isActive: true,
+            description: 'Sick leave for medical reasons'
+          },
+          {
+            leaveType: 'Casual Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 8,
+            yearlyAllocation: 8,
+            carryForwardEnabled: false,
+            maxCarryForward: 0,
+            isActive: true,
+            description: 'Casual leave for personal needs'
+          },
+          {
+            leaveType: 'Comp Offs',
+            accrualFrequency: 'yearly',
+            accrualAmount: 5,
+            yearlyAllocation: 5,
+            carryForwardEnabled: true,
+            maxCarryForward: 2,
+            isActive: true,
+            description: 'Compensatory off for overtime work'
+          },
+          {
+            leaveType: 'Floater Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 2,
+            yearlyAllocation: 2,
+            carryForwardEnabled: false,
+            maxCarryForward: 0,
+            isActive: true,
+            description: 'Floating holidays for personal use'
+          },
+          {
+            leaveType: 'Marriage Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 5,
+            yearlyAllocation: 5,
+            carryForwardEnabled: false,
+            maxCarryForward: 0,
+            isActive: true,
+            description: 'Leave for marriage'
+          },
+          {
+            leaveType: 'Maternity Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 90,
+            yearlyAllocation: 90,
+            carryForwardEnabled: false,
+            maxCarryForward: 0,
+            isActive: true,
+            description: 'Maternity leave for new mothers'
+          },
+          {
+            leaveType: 'Paternity Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 15,
+            yearlyAllocation: 15,
+            carryForwardEnabled: false,
+            maxCarryForward: 0,
+            isActive: true,
+            description: 'Paternity leave for new fathers'
+          },
+          {
+            leaveType: 'Unpaid Leave',
+            accrualFrequency: 'yearly',
+            accrualAmount: 0,
+            yearlyAllocation: 0,
+            carryForwardEnabled: false,
+            maxCarryForward: 0,
+            isActive: true,
+            description: 'Unpaid leave for extended time off'
+          }
+        ];
+
+        const createdPolicies = await LeaveAccrualPolicy.insertMany(defaultPolicies);
+        policies = createdPolicies;
+        console.log(`✅ Created ${createdPolicies.length} default leave policies`);
+        
+        return res.status(200).json({
+          success: true,
+          message: `Created ${createdPolicies.length} default leave policies. Please try again.`,
+          data: []
+        });
+        
+      } catch (createError) {
+        console.error('Error creating default policies:', createError);
+        return res.status(500).json({
+          success: false,
+          message: 'No active leave policies found and failed to create defaults. Please contact administrator.'
+        });
+      }
+    }
+
+    const currentYear = new Date().getFullYear();
+    
+    // Update all leave balances for this employee to match current admin config
+    const balances = await LeaveBalance.find({
+      employeeEmail: user.email,
+      year: currentYear
+    });
+
+    let updatedCount = 0;
+    const updatePromises = balances.map(async (balance) => {
+      const policy = policies.find(p => p.leaveType === balance.leaveType);
+      if (policy) {
+        const newTotal = policy.yearlyAllocation || 0;
+        const consumed = balance.consumed || 0;
+        const oldTotal = balance.total;
+        
+        // Preserve consumed days but update total to current admin config
+        balance.total = newTotal;
+        // Ensure available is never negative
+        balance.available = Math.max(0, newTotal - consumed);
+        
+        if (oldTotal !== newTotal) {
+          console.log(`📝 Refreshed ${balance.leaveType}: ${oldTotal} → ${newTotal} total, ${consumed} consumed, ${balance.available} available`);
+          updatedCount++;
+        }
+        
+        return balance.save();
+      }
+      return balance;
+    });
+    
+    await Promise.all(updatePromises);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Refreshed ${updatedCount} leave balances to current admin configuration`,
+      data: balances 
+    });
+  } catch (error) {
+    console.error('Error refreshing leave balances:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
+
+/**
+ * Get available leave types for employee
+ */
+exports.getAvailableLeaveTypes = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { year } = req.query;
+    const user = req.user;
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    // Get tenant connection
+    tenantConnection = await getTenantConnection(companyId);
+    
+    // Try to get leave types from admin configuration
+    let availableLeaveTypes = [
+      'Personal Leave',
+      'Sick Leave',
+      'Casual Leave',
+      'Comp Offs',
+      'Floater Leave',
+      'Marriage Leave',
+      'Maternity Leave',
+      'Paternity Leave',
+      'Unpaid Leave'
+    ];
+
+    try {
+      const { getTenantModel } = require('../utils/tenantModels');
+      
+      let policies = [];
+      try {
+        const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+        policies = await LeaveAccrualPolicy.find({ isActive: true });
+      } catch (policyError) {
+        console.error('Error fetching leave policies for types:', policyError);
+      }
+      
+      if (policies.length === 0) {
+          // Create default leave policies if none exist
+          console.log('📝 No active leave policies found, creating default policies...');
+          
+          try {
+            const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+            
+            const defaultPolicies = [
+              { leaveType: 'Personal Leave', accrualFrequency: 'yearly', accrualAmount: 12, yearlyAllocation: 12, isActive: true },
+              { leaveType: 'Sick Leave', accrualFrequency: 'yearly', accrualAmount: 7, yearlyAllocation: 7, isActive: true },
+              { leaveType: 'Casual Leave', accrualFrequency: 'yearly', accrualAmount: 8, yearlyAllocation: 8, isActive: true },
+              { leaveType: 'Comp Offs', accrualFrequency: 'yearly', accrualAmount: 5, yearlyAllocation: 5, isActive: true },
+              { leaveType: 'Floater Leave', accrualFrequency: 'yearly', accrualAmount: 2, yearlyAllocation: 2, isActive: true },
+              { leaveType: 'Marriage Leave', accrualFrequency: 'yearly', accrualAmount: 5, yearlyAllocation: 5, isActive: true },
+              { leaveType: 'Maternity Leave', accrualFrequency: 'yearly', accrualAmount: 90, yearlyAllocation: 90, isActive: true },
+              { leaveType: 'Paternity Leave', accrualFrequency: 'yearly', accrualAmount: 15, yearlyAllocation: 15, isActive: true },
+              { leaveType: 'Unpaid Leave', accrualFrequency: 'yearly', accrualAmount: 0, yearlyAllocation: 0, isActive: true }
+            ];
+
+            const createdPolicies = await LeaveAccrualPolicy.insertMany(defaultPolicies);
+            policies = createdPolicies;
+            console.log(`✅ Created ${createdPolicies.length} default leave policies`);
+            
+          } catch (createError) {
+            console.error('Error creating default policies:', createError);
+          }
+        }
+        
+        if (policies.length > 0) {
+          availableLeaveTypes = policies.map(policy => policy.leaveType);
+          console.log(`📋 Found ${availableLeaveTypes.length} configured leave types`);
+        }
+    } catch (configError) {
+      console.log('⚠️  Could not fetch admin configuration, using defaults');
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      data: availableLeaveTypes 
+    });
+  } catch (error) {
+    console.error('Error fetching available leave types:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
+
+/**
  * Get leave balance
  */
 exports.getLeaveBalance = async (req, res) => {
@@ -38,19 +388,73 @@ exports.getLeaveBalance = async (req, res) => {
       year: year
     });
 
-    // Filter to only show specific leave types: Comp-Offs, Personal Leave (Annual), Sick Leave
-    const allowedLeaveTypes = ['Comp Offs', 'Personal Leave', 'Sick Leave'];
-    balances = balances.filter(balance => allowedLeaveTypes.includes(balance.leaveType));
+    // Don't filter - show all available leave types from admin configuration
+    // This ensures consistency between balance display and apply form
 
-    // If no balances found, initialize with default values
+    // If no balances found, initialize with all available leave types from admin configuration
     if (balances.length === 0) {
       console.log(`📊 Initializing leave balances for ${user.email} - Year ${year}`);
       
-      const defaultLeaveTypes = [
+      // Try to get leave types from admin configuration
+      let defaultLeaveTypes = [
         { type: 'Comp Offs', total: 5 },
         { type: 'Personal Leave', total: 12 },
         { type: 'Sick Leave', total: 7 }
       ];
+
+      try {
+        // Import here to avoid circular dependency
+        const { getTenantModel } = require('../utils/tenantModels');
+        
+        let policies = [];
+        try {
+          const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+          policies = await LeaveAccrualPolicy.find({ isActive: true });
+        } catch (policyError) {
+          console.error('Error fetching leave policies:', policyError);
+        }
+        
+        if (policies.length === 0) {
+          // Create default leave policies if none exist
+          console.log('📝 No active leave policies found, creating default policies...');
+          
+          try {
+            const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+            
+            const defaultPolicies = [
+              { leaveType: 'Personal Leave', accrualFrequency: 'yearly', accrualAmount: 12, yearlyAllocation: 12, isActive: true },
+              { leaveType: 'Sick Leave', accrualFrequency: 'yearly', accrualAmount: 7, yearlyAllocation: 7, isActive: true },
+              { leaveType: 'Casual Leave', accrualFrequency: 'yearly', accrualAmount: 8, yearlyAllocation: 8, isActive: true },
+              { leaveType: 'Comp Offs', accrualFrequency: 'yearly', accrualAmount: 5, yearlyAllocation: 5, isActive: true },
+              { leaveType: 'Floater Leave', accrualFrequency: 'yearly', accrualAmount: 2, yearlyAllocation: 2, isActive: true },
+              { leaveType: 'Marriage Leave', accrualFrequency: 'yearly', accrualAmount: 5, yearlyAllocation: 5, isActive: true },
+              { leaveType: 'Maternity Leave', accrualFrequency: 'yearly', accrualAmount: 90, yearlyAllocation: 90, isActive: true },
+              { leaveType: 'Paternity Leave', accrualFrequency: 'yearly', accrualAmount: 15, yearlyAllocation: 15, isActive: true },
+              { leaveType: 'Unpaid Leave', accrualFrequency: 'yearly', accrualAmount: 0, yearlyAllocation: 0, isActive: true }
+            ];
+
+            const createdPolicies = await LeaveAccrualPolicy.insertMany(defaultPolicies);
+            policies = createdPolicies;
+            console.log(`✅ Created ${createdPolicies.length} default leave policies`);
+            
+            defaultLeaveTypes = policies.map(policy => ({
+              type: policy.leaveType,
+              total: policy.yearlyAllocation || 0
+            }));
+            
+          } catch (createError) {
+            console.error('Error creating default policies:', createError);
+          }
+        } else {
+          defaultLeaveTypes = policies.map(policy => ({
+            type: policy.leaveType,
+            total: policy.yearlyAllocation || 0
+          }));
+          console.log(`📋 Using ${defaultLeaveTypes.length} leave types from admin configuration`);
+        }
+      } catch (configError) {
+        console.log('⚠️  Could not fetch admin configuration, using defaults');
+      }
 
       const balancePromises = defaultLeaveTypes.map(lt => {
         const balance = new LeaveBalance({
@@ -60,22 +464,59 @@ exports.getLeaveBalance = async (req, res) => {
           leaveType: lt.type,
           total: lt.total,
           consumed: 0,
-          available: lt.total
+          available: lt.total // Ensure available starts as total
         });
         return balance.save();
       });
 
       balances = await Promise.all(balancePromises);
       console.log(`✅ Initialized ${balances.length} leave types`);
+    } else {
+      // Update existing balances to match current admin configuration (without pro-rating for existing balances)
+      console.log(`📊 Updating existing leave balances for ${user.email} - Year ${year}`);
+      
+      try {
+        const { getTenantModel } = require('../utils/tenantModels');
+        
+        let policies = [];
+        try {
+          const LeaveAccrualPolicy = getTenantModel(tenantConnection, 'LeaveAccrualPolicy');
+          policies = await LeaveAccrualPolicy.find({ isActive: true });
+        } catch (policyError) {
+          console.error('Error fetching leave policies for update:', policyError);
+        }
+        
+        if (policies.length > 0) {
+          const updatePromises = balances.map(async (balance) => {
+            const policy = policies.find(p => p.leaveType === balance.leaveType);
+            if (policy) {
+              const newTotal = policy.yearlyAllocation || 0;
+              const consumed = balance.consumed || 0;
+              // Preserve consumed days but update total to current admin config
+              balance.total = newTotal;
+              // Ensure available is never negative
+              balance.available = Math.max(0, newTotal - consumed);
+              console.log(`📝 Updated ${balance.leaveType}: ${newTotal} total, ${consumed} consumed, ${balance.available} available`);
+              return balance.save();
+            }
+            return balance;
+          });
+          
+          await Promise.all(updatePromises);
+          console.log(`✅ Updated ${balances.length} existing leave balances to current admin configuration`);
+        }
+      } catch (configError) {
+        console.log('⚠️  Could not update with admin configuration, keeping existing values');
+      }
     }
 
-    // Close connection
-    if (tenantConnection) await tenantConnection.close();
+    // Don't close connection manually - let connection pooling handle it
+    // Mongoose will manage the connection pool automatically
 
     res.status(200).json({ success: true, data: balances });
   } catch (error) {
     console.error('Error fetching leave balance:', error);
-    if (tenantConnection) await tenantConnection.close();
+    // Don't close connection manually on error either
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -122,13 +563,12 @@ exports.getLeaveApplications = async (req, res) => {
 
     console.log(`📋 Found ${leaveApplications.length} leave applications for ${user.email}`);
 
-    // Close connection
-    if (tenantConnection) await tenantConnection.close();
+    // Don't close connection manually - let connection pooling handle it
     
     res.status(200).json({ success: true, data: leaveApplications });
   } catch (error) {
     console.error('Error fetching leave applications:', error);
-    if (tenantConnection) await tenantConnection.close();
+    // Don't close connection manually on error either
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -222,6 +662,7 @@ exports.applyLeave = async (req, res) => {
     tenantConnection = await getTenantConnection(companyId);
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
     const LeaveRequest = tenantConnection.model('LeaveRequest', LeaveRequestSchema);
+    const LeaveBalance = tenantConnection.model('LeaveBalance', LeaveBalanceSchema);
 
     // Get employee details with reporting manager
     const employee = await TenantUser.findById(user._id).select('firstName lastName email reportingManager');
@@ -235,6 +676,38 @@ exports.applyLeave = async (req, res) => {
     }
 
     console.log(`📝 Leave application from: ${employee.email}, Manager: ${employee.reportingManager || 'None'}`);
+
+    // Check leave balance (skip for unpaid leave)
+    if (leaveType !== 'Unpaid Leave') {
+      const currentYear = new Date().getFullYear();
+      const balance = await LeaveBalance.findOne({
+        employeeId: employee._id,
+        employeeEmail: employee.email,
+        year: currentYear,
+        leaveType: leaveType
+      });
+
+      if (!balance) {
+        return res.status(400).json({
+          success: false,
+          message: `No balance found for ${leaveType}. Please contact HR.`
+        });
+      }
+
+      if (balance.available <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient balance for ${leaveType}. Available: ${balance.available} days.`
+        });
+      }
+
+      if (numberOfDays > balance.available) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient balance for ${leaveType}. Requested: ${numberOfDays} days, Available: ${balance.available} days.`
+        });
+      }
+    }
 
     // Create leave request
     const leaveRequest = new LeaveRequest({
@@ -284,8 +757,7 @@ exports.applyLeave = async (req, res) => {
       // The leave can still be approved manually
     }
 
-    // Close connection
-    if (tenantConnection) await tenantConnection.close();
+    // Don't close connection manually - let connection pooling handle it
 
     res.status(201).json({
       success: true,
@@ -294,7 +766,7 @@ exports.applyLeave = async (req, res) => {
     });
   } catch (error) {
     console.error('Error applying for leave:', error);
-    if (tenantConnection) await tenantConnection.close();
+    // Don't close connection manually on error either
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to apply for leave'

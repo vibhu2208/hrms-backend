@@ -89,20 +89,21 @@ class TokenBlacklistService {
 
   /**
    * Check if token is blacklisted
-   * @param {String} token - JWT token to check
+   * @param {String} tokenId - JWT token to check
    * @returns {Boolean}
    */
-  async isBlacklisted(token) {
+  async isBlacklisted(tokenId) {
     if (!this.isConnected) {
-      await this.connect();
+      // Skip Redis check if not configured
+      console.log('⚠️  Redis not configured - token blacklisting disabled (tokens will remain valid until expiry)');
+      return false;
     }
 
     try {
-      const result = await this.client.get(`blacklist:${token}`);
-      return result === 'revoked';
+      const result = await this.client.get(`blacklist:${tokenId}`);
+      return result !== null;
     } catch (error) {
       console.error('Error checking token blacklist:', error);
-      // Fail open - if Redis is down, allow the request
       return false;
     }
   }
@@ -150,13 +151,13 @@ class TokenBlacklistService {
   }
 
   /**
-   * Check if all user tokens are blacklisted
-   * @param {String} userId - User ID
-   * @returns {Boolean}
+   * Check if user is blacklisted
    */
   async isUserBlacklisted(userId) {
     if (!this.isConnected) {
-      await this.connect();
+      // Skip Redis check if not configured
+      console.log('⚠️  Redis not configured - user blacklist check skipped');
+      return false;
     }
 
     try {
