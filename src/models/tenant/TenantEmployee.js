@@ -83,6 +83,11 @@ const tenantEmployeeSchema = new mongoose.Schema({
 
   // Salary Information
   salary: {
+    currency: {
+      type: String,
+      enum: ['USD', 'INR', 'AED'],
+      default: 'INR'
+    },
     basic: {
       type: Number,
       default: 0

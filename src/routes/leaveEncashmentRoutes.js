@@ -4,6 +4,7 @@ const {
   getEncashmentRules,
   createEncashmentRule,
   updateEncashmentRule,
+  deleteEncashmentRule,
   checkEligibility,
   createEncashmentRequest,
   getEncashmentRequests,
@@ -24,7 +25,8 @@ router.route('/rules')
   .post(authorize('admin', 'hr'), createEncashmentRule);
 
 router.route('/rules/:id')
-  .put(authorize('admin', 'hr'), updateEncashmentRule);
+  .put(authorize('admin', 'hr'), updateEncashmentRule)
+  .delete(authorize('admin', 'hr'), deleteEncashmentRule);
 
 // Eligibility Check
 router.post('/check-eligibility', authorize('admin', 'hr', 'manager', 'employee'), checkEligibility);

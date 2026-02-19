@@ -423,6 +423,7 @@ exports.getTemplate = async (req, res) => {
         joiningDate: '2024-01-01',
         employmentType: 'full-time',
         status: 'active',
+        currency: 'INR',
         basicSalary: '50000',
         hra: '10000',
         allowances: '5000',
