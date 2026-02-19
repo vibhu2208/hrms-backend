@@ -456,6 +456,70 @@ exports.processAutomaticEncashment = async (req, res) => {
 };
 
 /**
+ * Delete encashment rule
+ */
+exports.deleteEncashmentRule = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const companyId = req.companyId;
+    const { id } = req.params;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found'
+      });
+    }
+
+    tenantConnection = await getTenantConnection(companyId);
+    const LeaveEncashmentRule = tenantConnection.model('LeaveEncashmentRule', LeaveEncashmentRuleSchema);
+    const LeaveEncashmentRequest = tenantConnection.model('LeaveEncashmentRequest', LeaveEncashmentRequestSchema);
+
+    // Check if rule exists
+    const rule = await LeaveEncashmentRule.findById(id);
+    if (!rule) {
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(404).json({
+        success: false,
+        message: 'Encashment rule not found'
+      });
+    }
+
+    // Check if there are any pending or approved requests using this rule
+    const existingRequests = await LeaveEncashmentRequest.findOne({
+      leaveType: rule.leaveType,
+      status: { $in: ['pending', 'approved'] }
+    });
+
+    if (existingRequests) {
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete rule: There are existing encashment requests using this rule'
+      });
+    }
+
+    // Delete the rule
+    await LeaveEncashmentRule.findByIdAndDelete(id);
+
+    if (tenantConnection) await tenantConnection.close();
+
+    res.status(200).json({
+      success: true,
+      message: 'Encashment rule deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting encashment rule:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
  * Get automatic encashment settings
  */
 exports.getAutomaticSettings = async (req, res) => {

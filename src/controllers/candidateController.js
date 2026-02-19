@@ -10,6 +10,7 @@ const {
 const onboardingAutomationService = require('../services/onboardingAutomationService');
 const reductoService = require('../services/reductoService');
 const awsS3Service = require('../services/awsS3Service');
+const googleMeetService = require('../services/googleMeetService');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -796,7 +797,17 @@ exports.moveToStage = async (req, res) => {
 exports.scheduleInterview = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
-    const { interviewType, round, scheduledDate, scheduledTime, meetingLink, meetingPlatform, interviewer } = req.body;
+    const { 
+      interviewType, 
+      round, 
+      scheduledDate, 
+      scheduledTime, 
+      meetingLink, 
+      meetingPlatform, 
+      interviewer,
+      createGoogleMeet = false // New flag to trigger Google Meet creation
+    } = req.body;
+    
     const candidate = await Candidate.findById(req.params.id)
       .populate('appliedFor', 'title')
       .populate('interviews.interviewer', 'firstName lastName');
@@ -805,18 +816,93 @@ exports.scheduleInterview = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
-    // Note: Email will be sent after scheduling the interview
-    // Removed the requirement for email to be sent before scheduling
+    let finalMeetingLink = meetingLink;
+    let googleMeetData = null;
+    let calendarEventData = null;
+
+    // Create Google Meet if requested and platform is Google Meet
+    if (createGoogleMeet && meetingPlatform === 'Google Meet') {
+      try {
+        console.log('🚀 Creating real Google Meet for interview...');
+        
+        // Get current user's Google access token
+        const currentUser = req.user;
+        if (currentUser && currentUser.googleAccessToken) {
+          console.log('🔐 Setting user credentials for Google Meet');
+          googleMeetService.setUserCredentials(currentUser.googleAccessToken);
+        } else {
+          console.log('⚠️ No Google access token found for user');
+          return res.status(400).json({
+            success: false,
+            message: 'User must authenticate with Google to create Google Meet meetings'
+          });
+        }
+        
+        // Get interviewer emails for calendar invitation
+        const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+        const interviewerEmails = [];
+        
+        if (interviewer && interviewer.length > 0) {
+          const interviewerDocs = await TenantEmployee.find({ 
+            _id: { $in: interviewer } 
+          }).select('email firstName lastName');
+          
+          interviewerEmails.push(...interviewerDocs.map(emp => emp.email));
+        }
+
+        // Create complete interview meeting (space + calendar event)
+        const meetingResult = await googleMeetService.createInterviewMeeting({
+          candidateName: `${candidate.firstName} ${candidate.lastName}`,
+          candidateEmail: candidate.email,
+          interviewType: interviewType || 'Technical',
+          scheduledDate,
+          scheduledTime,
+          interviewers: interviewerEmails,
+          position: candidate.appliedFor?.title,
+          companyName: req.body.companyName || 'TechThrive System'
+        });
+
+        if (meetingResult.success) {
+          finalMeetingLink = meetingResult.meetingLink;
+          googleMeetData = meetingResult.meetingSpace;
+          calendarEventData = meetingResult.calendarEvent;
+          
+          console.log('✅ Google Meet created successfully:', finalMeetingLink);
+          
+          // Add warning if calendar event creation failed
+          if (meetingResult.warning) {
+            console.warn('⚠️', meetingResult.warning);
+          }
+        } else {
+          console.error('❌ Failed to create Google Meet:', meetingResult.error);
+          // Don't fail the entire process, just log the error and continue with manual link
+          return res.status(400).json({ 
+            success: false, 
+            message: `Failed to create Google Meet: ${meetingResult.error}`,
+            error: meetingResult.error 
+          });
+        }
+      } catch (meetError) {
+        console.error('❌ Google Meet creation error:', meetError.message);
+        return res.status(500).json({ 
+          success: false, 
+          message: `Google Meet creation failed: ${meetError.message}` 
+        });
+      }
+    }
 
     const interviewData = {
       interviewType: interviewType || 'Technical',
       round,
       scheduledDate,
       scheduledTime,
-      meetingLink,
+      meetingLink: finalMeetingLink,
       meetingPlatform: meetingPlatform || 'Google Meet',
       interviewer: Array.isArray(interviewer) ? interviewer : [interviewer],
-      status: 'scheduled'
+      status: 'scheduled',
+      // Store Google Meet metadata for future reference
+      googleMeetData: googleMeetData,
+      calendarEventData: calendarEventData
     };
 
     candidate.interviews.push(interviewData);
@@ -827,7 +913,14 @@ exports.scheduleInterview = async (req, res) => {
       action: 'Interview Scheduled',
       description: `${interviewType || 'Technical'} interview scheduled for ${new Date(scheduledDate).toLocaleDateString()}`,
       performedBy: req.user?._id,
-      metadata: { interviewType, round, scheduledDate }
+      metadata: { 
+        interviewType, 
+        round, 
+        scheduledDate,
+        meetingPlatform,
+        googleMeetCreated: !!googleMeetData,
+        calendarEventCreated: !!calendarEventData
+      }
     });
 
     await candidate.save();
@@ -840,13 +933,13 @@ exports.scheduleInterview = async (req, res) => {
       console.log('📧 Sending interview notification email to:', candidate.email);
       console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
       
-      await sendInterviewNotification({
+      await sendInterviewScheduledEmail({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
         interviewType: interviewType || 'Technical',
         interviewDate: scheduledDate,
         interviewTime: scheduledTime,
-        meetingLink: meetingLink,
+        meetingLink: finalMeetingLink,
         meetingPlatform: meetingPlatform || 'Google Meet',
         interviewerName: null, // Will be populated if interviewer data available
         position: candidate.appliedFor?.title || 'Position',
@@ -862,7 +955,9 @@ exports.scheduleInterview = async (req, res) => {
         performedBy: req.user?._id,
         metadata: { 
           interviewId: newInterview._id,
-          emailSent: true
+          emailSent: true,
+          googleMeetCreated: !!googleMeetData,
+          calendarEventCreated: !!calendarEventData
         }
       });
       
@@ -878,8 +973,19 @@ exports.scheduleInterview = async (req, res) => {
       // Don't fail the interview scheduling if email fails
     }
 
-    res.status(200).json({ success: true, message: 'Interview scheduled successfully and notification sent', data: candidate });
+    const responseMessage = googleMeetData 
+      ? 'Interview scheduled successfully with Google Meet integration and notification sent'
+      : 'Interview scheduled successfully and notification sent';
+
+    res.status(200).json({ 
+      success: true, 
+      message: responseMessage, 
+      data: candidate,
+      googleMeetData: googleMeetData,
+      calendarEventData: calendarEventData
+    });
   } catch (error) {
+    console.error('❌ Error in scheduleInterview:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

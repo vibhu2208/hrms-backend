@@ -100,6 +100,11 @@ const employeeSchema = new mongoose.Schema({
     ref: 'Employee'
   },
   salary: {
+    currency: {
+      type: String,
+      enum: ['USD', 'INR', 'AED'],
+      default: 'INR'
+    },
     basic: String,  // Encrypted
     hra: String,    // Encrypted
     allowances: String,  // Encrypted
