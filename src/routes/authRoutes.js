@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { register, login, getMe, updatePassword, googleLogin, adminResetPassword, getActiveCompanies, unlockAccount, refreshToken, logout, logoutAll, forgotPassword, resetPassword, checkGoogleAuthStatus, handleGoogleCallback } = require('../controllers/authController');
+const { register, login, getMe, updatePassword, googleLogin, adminResetPassword, getActiveCompanies, unlockAccount, refreshToken, logout, logoutAll, forgotPassword, resetPassword } = require('../controllers/authController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 const { forgotPasswordLimiter, loginLimiter, generalLimiter } = require('../middleware/rateLimiter');
@@ -11,8 +11,6 @@ router.use(generalLimiter);
 router.post('/register', register);
 router.post('/login', loginLimiter, login);
 router.post('/google', googleLogin);
-router.get('/google/callback', protect, tenantMiddleware, handleGoogleCallback);
-router.get('/google-status', protect, tenantMiddleware, checkGoogleAuthStatus);
 router.post('/refresh-token', refreshToken);
 router.get('/me', protect, getMe);
 router.put('/updatepassword', protect, updatePassword);

@@ -485,92 +485,12 @@ exports.adminResetPassword = async (req, res) => {
   }
 };
 
-// @desc    Handle Google OAuth2 callback for additional scopes
-// @route   GET /api/auth/google/callback
-// @access  Private
-exports.handleGoogleCallback = async (req, res) => {
-  try {
-    const { code, state } = req.query;
-
-    if (!code) {
-      return res.status(400).json({
-        success: false,
-        message: 'Authorization code is required'
-      });
-    }
-
-    // Exchange authorization code for access tokens
-    const { OAuth2Client } = require('google-auth-library');
-    const client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
-
-    const { tokens } = await client.getToken(code);
-    
-    // Store tokens in user's record
-    const User = getTenantModel(req.tenant.connection, 'TenantUser');
-    const user = await User.findById(req.user.userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    user.googleAccessToken = tokens.access_token;
-    if (tokens.refresh_token) {
-      user.googleRefreshToken = tokens.refresh_token;
-    }
-    await user.save();
-
-    // Redirect back to frontend with success
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard?google-auth=success`);
-  } catch (error) {
-    console.error('Google callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard?google-auth=error`);
-  }
-};
-
-// @desc    Check Google authentication status
-// @route   GET /api/auth/google-status
-// @access  Private
-exports.checkGoogleAuthStatus = async (req, res) => {
-  try {
-    const User = getTenantModel(req.tenant.connection, 'TenantUser');
-    const user = await User.findById(req.user.userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    const hasGoogleAccess = !!(user.googleAccessToken && user.authProvider === 'google');
-
-    res.json({
-      success: true,
-      hasGoogleAccess,
-      message: hasGoogleAccess ? 'Google access available' : 'Google authentication required'
-    });
-  } catch (error) {
-    console.error('Google auth status error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
 // @desc    Google OAuth Login
 // @route   POST /api/auth/google
 // @access  Public
 exports.googleLogin = async (req, res) => {
   try {
-    const { credential, accessToken, refreshToken } = req.body;
+    const { credential } = req.body;
 
     if (!credential) {
       return res.status(400).json({
@@ -609,19 +529,11 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
-    // User exists - update Google info and tokens
+    // User exists - update Google info if needed
     if (!user.googleId) {
       user.googleId = googleId;
       user.authProvider = 'google';
       user.profilePicture = picture;
-    }
-    
-    // Store Google access tokens for Google Meet API
-    if (accessToken) {
-      user.googleAccessToken = accessToken;
-    }
-    if (refreshToken) {
-      user.googleRefreshToken = refreshToken;
     }
     
     // Check if user is active
@@ -640,13 +552,8 @@ exports.googleLogin = async (req, res) => {
     }
     await user.save();
 
-    // Generate token with proper payload
-    const tokenPayload = {
-      companyId: '696823363d45cbf69fd4b689', // TTS Company ID
-      email: user.email,
-      role: user.role
-    };
-    const token = generateToken(user._id, tokenPayload);
+    // Generate token
+    const token = generateToken(user._id);
 
     return res.status(200).json({
       success: true,

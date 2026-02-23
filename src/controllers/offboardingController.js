@@ -4,20 +4,22 @@ exports.getOffboardingList = async (req, res) => {
   try {
     // Get tenant-specific models
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const TenantUser = getTenantModel(req.tenant.connection, 'User');
-    
-    const { 
-      status, 
-      stage, 
-      page = 1, 
-      limit = 10, 
+    const TenantUser = getTenantModel(req.tenant.connection, 'TenantUser');
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+    const Department = getTenantModel(req.tenant.connection, 'Department');
+
+    const {
+      status,
+      stage,
+      page = 1,
+      limit = 10,
       search,
       sortBy = 'createdAt',
       sortOrder = 'desc',
       startDate,
       endDate
     } = req.query;
-    
+
     let query = {};
 
     // Filter by status
@@ -37,21 +39,22 @@ exports.getOffboardingList = async (req, res) => {
       if (endDate) query.lastWorkingDate.$lte = new Date(endDate);
     }
 
-    // Search functionality - search by employee name/email
-    if (search) {
-      // First, find employees matching the search
-      const employeeIds = await TenantUser.find({
-        role: 'employee',
+    // Search functionality - search by employee name/email/code (Offboarding refs Employee)
+    if (search && TenantEmployee) {
+      const employees = await TenantEmployee.find({
         $or: [
           { firstName: { $regex: search, $options: 'i' } },
           { lastName: { $regex: search, $options: 'i' } },
           { email: { $regex: search, $options: 'i' } },
           { employeeCode: { $regex: search, $options: 'i' } }
         ]
-      }).select('_id');
-      
-      const employeeIdArray = employeeIds.map(emp => emp._id);
-      query.employee = { $in: employeeIdArray };
+      }).select('_id').lean();
+      const employeeIdArray = (employees || []).map(emp => emp._id);
+      if (employeeIdArray.length > 0) {
+        query.employee = { $in: employeeIdArray };
+      } else {
+        query.employee = { $in: [] }; // no matches -> return empty list
+      }
     }
 
     // Build sort object
@@ -72,10 +75,6 @@ exports.getOffboardingList = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
-    
-    // Get tenant models for auto-fix and population
-    const Department = getTenantModel(req.tenant.connection, 'Department');
-    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
     
     // Auto-fix: Process completed offboardings that haven't been processed yet
     for (const offboarding of offboardingList) {
@@ -193,7 +192,7 @@ exports.getOffboardingList = async (req, res) => {
 exports.getOffboarding = async (req, res) => {
   try {
     const Offboarding = getTenantModel(req.tenant.connection, 'Offboarding');
-    const TenantUser = getTenantModel(req.tenant.connection, 'User');
+    const TenantUser = getTenantModel(req.tenant.connection, 'TenantUser');
     const Department = getTenantModel(req.tenant.connection, 'Department');
     
     let offboarding = await Offboarding.findById(req.params.id)

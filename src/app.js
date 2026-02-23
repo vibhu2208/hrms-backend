@@ -78,7 +78,6 @@ const publicDocumentUploadRoutes = require('./routes/publicDocumentUploadRoutes'
 const documentVerificationRoutes = require('./routes/documentVerificationRoutes');
 const hrActivityHistoryRoutes = require('./routes/hrActivityHistoryRoutes');
 const contractRoutes = require('./routes/contractRoutes');
-const googleMeetRoutes = require('./routes/googleMeetRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -110,6 +109,15 @@ app.get('/health', (req, res) => {
     success: true,
     message: 'HRMS API is running',
     timestamp: new Date().toISOString()
+  });
+});
+
+// Config routes
+app.get('/api/config/zoom-status', (req, res) => {
+  const zoomOAuthService = require('./services/zoomOAuthService');
+  res.status(200).json({
+    success: true,
+    configured: zoomOAuthService.isEnabled()
   });
 });
 
@@ -210,7 +218,6 @@ app.use('/api/resume-pool', resumePoolRoutes);
 app.use('/api/document-verification', documentVerificationRoutes);
 app.use('/api/contracts', contractRoutes);
 app.use('/api/hr-activity-history', hrActivityHistoryRoutes);
-app.use('/api/google-meet', googleMeetRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
