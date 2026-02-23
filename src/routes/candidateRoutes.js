@@ -12,6 +12,7 @@ const {
   moveToOnboarding,
   deleteCandidate,
   updateInterviewFeedback,
+  updateMeetingLink,
   sendNotification,
   updateHRCall,
   getCandidateTimeline,
@@ -68,6 +69,7 @@ router.post('/:id/send-to-onboarding', sendToOnboarding);
 // New timeline and notification routes
 router.get('/:id/timeline', getCandidateTimeline);
 router.put('/:candidateId/interview/:interviewId/feedback', updateInterviewFeedback);
+router.patch('/:candidateId/interview/:interviewId', updateMeetingLink);
 router.post('/:id/notification', sendNotification);
 router.put('/:id/hr-call', updateHRCall);
 

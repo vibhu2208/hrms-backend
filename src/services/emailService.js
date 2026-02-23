@@ -830,6 +830,8 @@ const sendInterviewScheduledEmail = async ({
   interviewTime,
   interviewType,
   interviewLocation,
+  meetingLink,
+  meetingPlatform,
   interviewerName,
   companyName = 'Our Company'
 }) => {
@@ -880,6 +882,21 @@ const sendInterviewScheduledEmail = async ({
         <div class="detail-value">${interviewType}</div>
       </div>
       ${interviewLocation ? `<div class="detail-item"><div class="detail-label">📍 Location:</div><div class="detail-value">${interviewLocation}</div></div>` : ''}
+      ${meetingPlatform ? `<div class="detail-item"><div class="detail-label">💻 Platform:</div><div class="detail-value">${meetingPlatform}</div></div>` : ''}
+      ${meetingLink ? `
+      <div class="detail-item" style="background: #e8f5e8; border-left: 4px solid #28a745;">
+        <div class="detail-label">🔗 Meeting Link:</div>
+        <div class="detail-value">
+          <a href="${meetingLink}" 
+             style="display: inline-block; background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; margin-top: 10px;"
+             target="_blank">
+            🎥 Join Meeting
+          </a>
+          <br>
+          <small style="color: #666; margin-top: 8px; display: block;">Click the button above to join the interview</small>
+        </div>
+      </div>
+      ` : ''}
       ${interviewerName ? `<div class="detail-item"><div class="detail-label">👤 Interviewer:</div><div class="detail-value">${interviewerName}</div></div>` : ''}
       <p><strong>Please arrive 10 minutes early and bring:</strong></p>
       <ul>

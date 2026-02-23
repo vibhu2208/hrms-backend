@@ -32,14 +32,6 @@ const tenantUserSchema = new mongoose.Schema({
     type: String,
     sparse: true
   },
-  googleAccessToken: {
-    type: String,
-    sparse: true
-  },
-  googleRefreshToken: {
-    type: String,
-    sparse: true
-  },
   firstName: {
     type: String,
     required: true,

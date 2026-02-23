@@ -1,6 +1,6 @@
 const { getTenantModel } = require('../utils/tenantModels');
 const {
-  sendInterviewNotification,
+  sendInterviewScheduledEmail,
   sendApplicationReceivedEmail,
   sendShortlistedEmail,
   sendInterviewCompletedEmail,
@@ -10,7 +10,7 @@ const {
 const onboardingAutomationService = require('../services/onboardingAutomationService');
 const reductoService = require('../services/reductoService');
 const awsS3Service = require('../services/awsS3Service');
-const googleMeetService = require('../services/googleMeetService');
+const zoomOAuthService = require('../services/zoomOAuthService');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -797,17 +797,7 @@ exports.moveToStage = async (req, res) => {
 exports.scheduleInterview = async (req, res) => {
   try {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
-    const { 
-      interviewType, 
-      round, 
-      scheduledDate, 
-      scheduledTime, 
-      meetingLink, 
-      meetingPlatform, 
-      interviewer,
-      createGoogleMeet = false // New flag to trigger Google Meet creation
-    } = req.body;
-    
+    const { interviewType, round, scheduledDate, scheduledTime, meetingLink, meetingPlatform, interviewer } = req.body;
     const candidate = await Candidate.findById(req.params.id)
       .populate('appliedFor', 'title')
       .populate('interviews.interviewer', 'firstName lastName');
@@ -816,79 +806,78 @@ exports.scheduleInterview = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
+    // Note: Email will be sent after scheduling the interview
+    // Removed the requirement for email to be sent before scheduling
+
+    // Zoom meeting creation - auto-create if Zoom is selected and no meeting link provided
     let finalMeetingLink = meetingLink;
-    let googleMeetData = null;
-    let calendarEventData = null;
+    let zoomMeetingCreated = false;
+    let zoomMeetingId = null;
+    let zoomMeetingDetails = null;
 
-    // Create Google Meet if requested and platform is Google Meet
-    if (createGoogleMeet && meetingPlatform === 'Google Meet') {
+    if (meetingPlatform === 'Zoom' && !meetingLink && zoomOAuthService.isEnabled()) {
       try {
-        console.log('🚀 Creating real Google Meet for interview...');
+        console.log('🔷 Creating Zoom meeting for interview...');
         
-        // Get current user's Google access token
-        const currentUser = req.user;
-        if (currentUser && currentUser.googleAccessToken) {
-          console.log('🔐 Setting user credentials for Google Meet');
-          googleMeetService.setUserCredentials(currentUser.googleAccessToken);
-        } else {
-          console.log('⚠️ No Google access token found for user');
-          return res.status(400).json({
-            success: false,
-            message: 'User must authenticate with Google to create Google Meet meetings'
-          });
-        }
+        // Prepare meeting topic
+        const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+        const meetingTopic = `${interviewType || 'Technical'} Interview - ${candidateName}${round ? ` - ${round}` : ''}`;
         
-        // Get interviewer emails for calendar invitation
-        const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
-        const interviewerEmails = [];
-        
-        if (interviewer && interviewer.length > 0) {
-          const interviewerDocs = await TenantEmployee.find({ 
-            _id: { $in: interviewer } 
-          }).select('email firstName lastName');
+        // Combine date and time into ISO format
+        let startTimeISO;
+        if (scheduledDate && scheduledTime) {
+          // Parse date and time, combine into ISO string
+          const dateTimeString = `${scheduledDate}T${scheduledTime}:00`;
+          const dateTime = new Date(dateTimeString);
           
-          interviewerEmails.push(...interviewerDocs.map(emp => emp.email));
-        }
-
-        // Create complete interview meeting (space + calendar event)
-        const meetingResult = await googleMeetService.createInterviewMeeting({
-          candidateName: `${candidate.firstName} ${candidate.lastName}`,
-          candidateEmail: candidate.email,
-          interviewType: interviewType || 'Technical',
-          scheduledDate,
-          scheduledTime,
-          interviewers: interviewerEmails,
-          position: candidate.appliedFor?.title,
-          companyName: req.body.companyName || 'TechThrive System'
-        });
-
-        if (meetingResult.success) {
-          finalMeetingLink = meetingResult.meetingLink;
-          googleMeetData = meetingResult.meetingSpace;
-          calendarEventData = meetingResult.calendarEvent;
-          
-          console.log('✅ Google Meet created successfully:', finalMeetingLink);
-          
-          // Add warning if calendar event creation failed
-          if (meetingResult.warning) {
-            console.warn('⚠️', meetingResult.warning);
+          // Check if date is valid
+          if (isNaN(dateTime.getTime())) {
+            throw new Error('Invalid date/time format');
           }
+          
+          startTimeISO = dateTime.toISOString();
         } else {
-          console.error('❌ Failed to create Google Meet:', meetingResult.error);
-          // Don't fail the entire process, just log the error and continue with manual link
-          return res.status(400).json({ 
-            success: false, 
-            message: `Failed to create Google Meet: ${meetingResult.error}`,
-            error: meetingResult.error 
-          });
+          throw new Error('Date and time are required for Zoom meeting');
         }
-      } catch (meetError) {
-        console.error('❌ Google Meet creation error:', meetError.message);
-        return res.status(500).json({ 
-          success: false, 
-          message: `Google Meet creation failed: ${meetError.message}` 
+
+        // Create Zoom meeting
+        const zoomResult = await zoomOAuthService.createMeeting({
+          topic: meetingTopic,
+          startTime: startTimeISO,
+          duration: 30, // Default 30 minutes
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          settings: {
+            join_before_host: true,
+            waiting_room: false,
+            host_video: true,
+            participant_video: true
+          }
         });
+
+        if (zoomResult.success && zoomResult.meetingLink) {
+          finalMeetingLink = zoomResult.meetingLink;
+          zoomMeetingCreated = true;
+          zoomMeetingId = zoomResult.meetingId;
+          zoomMeetingDetails = {
+            meetingId: zoomResult.meetingId,
+            topic: zoomResult.topic,
+            startTime: zoomResult.startTime,
+            duration: zoomResult.duration
+          };
+          console.log('✅ Zoom meeting created successfully:', zoomResult.meetingId);
+        } else {
+          console.warn('⚠️ Zoom meeting creation failed:', zoomResult.error);
+          if (zoomResult.details) {
+            console.warn('📋 Zoom API Details:', JSON.stringify(zoomResult.details, null, 2));
+          }
+          // Continue with interview scheduling - user can enter link manually
+        }
+      } catch (zoomError) {
+        console.error('❌ Error creating Zoom meeting:', zoomError.message);
+        // Don't fail the interview scheduling - allow manual link entry
       }
+    } else if (meetingPlatform === 'Zoom' && !zoomOAuthService.isEnabled()) {
+      console.warn('⚠️ Zoom platform selected but Zoom OAuth API is not configured');
     }
 
     const interviewData = {
@@ -900,9 +889,8 @@ exports.scheduleInterview = async (req, res) => {
       meetingPlatform: meetingPlatform || 'Google Meet',
       interviewer: Array.isArray(interviewer) ? interviewer : [interviewer],
       status: 'scheduled',
-      // Store Google Meet metadata for future reference
-      googleMeetData: googleMeetData,
-      calendarEventData: calendarEventData
+      ...(zoomMeetingId && { zoomMeetingId }), // Add zoomMeetingId if available
+      ...(zoomMeetingCreated && { zoomMeetingDetails }) // Add meeting details if created
     };
 
     candidate.interviews.push(interviewData);
@@ -913,14 +901,7 @@ exports.scheduleInterview = async (req, res) => {
       action: 'Interview Scheduled',
       description: `${interviewType || 'Technical'} interview scheduled for ${new Date(scheduledDate).toLocaleDateString()}`,
       performedBy: req.user?._id,
-      metadata: { 
-        interviewType, 
-        round, 
-        scheduledDate,
-        meetingPlatform,
-        googleMeetCreated: !!googleMeetData,
-        calendarEventCreated: !!calendarEventData
-      }
+      metadata: { interviewType, round, scheduledDate }
     });
 
     await candidate.save();
@@ -955,9 +936,7 @@ exports.scheduleInterview = async (req, res) => {
         performedBy: req.user?._id,
         metadata: { 
           interviewId: newInterview._id,
-          emailSent: true,
-          googleMeetCreated: !!googleMeetData,
-          calendarEventCreated: !!calendarEventData
+          emailSent: true
         }
       });
       
@@ -973,19 +952,26 @@ exports.scheduleInterview = async (req, res) => {
       // Don't fail the interview scheduling if email fails
     }
 
-    const responseMessage = googleMeetData 
-      ? 'Interview scheduled successfully with Google Meet integration and notification sent'
+    // Prepare response with zoom meeting details if created
+    const responseData = {
+      ...candidate.toObject(),
+      zoomMeetingCreated,
+      ...(zoomMeetingDetails && { zoomMeetingDetails })
+    };
+
+    const responseMessage = meetingPlatform === 'Zoom' && !zoomOAuthService.isEnabled() && !finalMeetingLink
+      ? 'Interview scheduled successfully. Note: Zoom OAuth API is not configured - please add meeting link manually.'
       : 'Interview scheduled successfully and notification sent';
 
     res.status(200).json({ 
       success: true, 
       message: responseMessage, 
-      data: candidate,
-      googleMeetData: googleMeetData,
-      calendarEventData: calendarEventData
+      data: responseData,
+      zoomMeetingCreated,
+      zoomApiConfigured: zoomOAuthService.isEnabled(),
+      ...(zoomMeetingDetails && { zoomMeetingDetails })
     });
   } catch (error) {
-    console.error('❌ Error in scheduleInterview:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -1314,6 +1300,44 @@ exports.updateInterviewFeedback = async (req, res) => {
       }
     }
     res.status(200).json({ success: true, message: 'Interview feedback updated successfully', data: candidate });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Update meeting link for an interview
+exports.updateMeetingLink = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const { candidateId, interviewId } = req.params;
+    const { meetingLink } = req.body;
+
+    const candidate = await Candidate.findById(candidateId);
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    const interview = candidate.interviews.id(interviewId);
+    if (!interview) {
+      return res.status(404).json({ success: false, message: 'Interview not found' });
+    }
+
+    // Update meeting link
+    interview.meetingLink = meetingLink;
+
+    await candidate.save();
+
+    // Add to timeline
+    candidate.timeline.push({
+      action: 'Meeting Link Updated',
+      description: `Meeting link updated for ${interview.interviewType} interview`,
+      performedBy: req.user?._id,
+      timestamp: new Date()
+    });
+
+    await candidate.save();
+
+    res.status(200).json({ success: true, message: 'Meeting link updated successfully', data: candidate });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2066,7 +2090,7 @@ exports.sendInterviewEmail = async (req, res) => {
         meetingPlatform: interview.meetingPlatform
       });
       
-      const emailResult = await sendInterviewNotification({
+      const emailResult = await sendInterviewScheduledEmail({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
         interviewType: interview.interviewType || 'Interview',
