@@ -2170,6 +2170,7 @@ module.exports = {
   sendEmail, // Generic email function
   sendOnboardingEmail,
   sendHRNotification,
+  sendInterviewNotification,
   sendInterviewScheduledEmail,
   sendInterviewReminderEmail,
   sendInterviewCancelledEmail,
@@ -2177,11 +2178,8 @@ module.exports = {
   sendInterviewCompletedEmail,
   sendOfferExtendedEmail,
   sendRejectionEmail,
-  sendOfferLetterWithDocumentLink,
-  sendWelcomeEmail,
-  sendDocumentRequestEmail,
-  sendDocumentRejectionEmail,
-  sendCompanyAdminCredentials,
+  sendApplicationReceivedEmail,
   verifyEmailConfig,
-  sendApplicationReceivedEmail
+  sendDocumentRejectionEmail,
+  sendCompanyAdminCredentials
 };

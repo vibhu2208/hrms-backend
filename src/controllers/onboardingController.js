@@ -34,7 +34,7 @@ const createTransporter = () => {
 };
 
 const { generatePassword, generateEmployeeId } = require('../utils/passwordGenerator');
-const { sendOnboardingEmail, sendHRNotification, sendOfferEmail, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink } = require('../services/emailService');
+const { sendOnboardingEmail, sendHRNotification, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink } = require('../services/emailService');
 
 /**
  * Helper function to update candidate's applicationHistory when onboarding is created/updated
@@ -833,9 +833,28 @@ exports.sendOffer = async (req, res) => {
 
     // Get candidate details
     const candidate = await Candidate.findById(onboarding.candidateId);
+    
+    if (!candidate) {
+      console.error('❌ Candidate not found for ID:', onboarding.candidateId);
+    } else {
+      console.log('✅ Found candidate:', {
+        id: candidate._id,
+        name: `${candidate.firstName} ${candidate.lastName}`,
+        email: candidate.email
+      });
+    }
 
     // Send offer email to candidate
     try {
+      console.log('📧 Attempting to send offer email to candidate...');
+      console.log('📧 Candidate details:', {
+        name: `${candidate.firstName} ${candidate.lastName}`,
+        email: candidate.email,
+        position: designation,
+        joiningDate: startDate
+      });
+      console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
+      
       await sendOfferExtendedEmail({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
@@ -846,6 +865,7 @@ exports.sendOffer = async (req, res) => {
       console.log(`✅ Offer email sent to ${candidate.email}`);
     } catch (emailError) {
       console.error('⚠️ Failed to send offer email:', emailError.message);
+      console.error('⚠️ Full email error:', emailError);
       // Don't fail the request if email fails
     }
 
