@@ -149,29 +149,35 @@ exports.getOffboardingList = async (req, res) => {
     for (const offboarding of offboardingList) {
       if (offboarding.status === 'completed' && offboarding.currentStage === 'success') {
         if (offboarding.employee && TenantEmployee) {
-          TenantEmployee.findById(offboarding.employee)
-            .then(employee => {
-              if (employee && !employee.isExEmployee) {
-                // Process this offboarding
-                const offboardingWorkflow = require('../services/offboardingWorkflow');
-                const mockOffboardingRequest = {
-                  employeeId: offboarding.employee,
-                  reason: offboarding.reason || 'Offboarding completed',
-                  reasonDetails: offboarding.reason || '',
-                  lastWorkingDay: offboarding.lastWorkingDate || new Date(),
-                  status: 'closed',
-                  isCompleted: true,
-                  save: async function() { return this; }
-                };
-                offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest)
-                  .then(() => {
-                  })
-                  .catch(err => {
-                    console.error(`Auto-fix failed for offboarding ${offboarding._id}:`, err);
-                  });
-              }
-            })
-            .catch(err => console.warn(`Could not check employee for auto-fix:`, err));
+          try {
+            const employee = await TenantEmployee.findById(offboarding.employee);
+            if (employee && !employee.isExEmployee) {
+              console.log(`🔄 Auto-fix: Processing ex-employee logic for employee: ${employee.employeeCode}`);
+              
+              // Process this offboarding
+              const offboardingWorkflow = require('../services/offboardingWorkflow');
+              const offboardingRequest = {
+                _id: offboarding._id,
+                employeeId: offboarding.employee,
+                reason: offboarding.reason || 'Offboarding completed',
+                reasonDetails: offboarding.reason || '',
+                lastWorkingDay: offboarding.lastWorkingDate || new Date(),
+                status: 'closed',
+                isCompleted: true,
+                save: async function() { 
+                  await this.save();
+                  return this;
+                }
+              };
+              
+              await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
+              console.log(`✅ Auto-fix: Successfully processed ex-employee logic for ${employee.employeeCode}`);
+            } else if (employee && employee.isExEmployee) {
+              console.log(`ℹ️ Auto-fix: Employee ${employee.employeeCode} is already marked as ex-employee`);
+            }
+          } catch (err) {
+            console.error(`❌ Auto-fix failed for offboarding ${offboarding._id}:`, err);
+          }
         }
       }
     }
@@ -577,7 +583,53 @@ exports.updateOffboarding = async (req, res) => {
     }
 
     Object.assign(offboarding, req.body);
+    
+    // Check if offboarding is being marked as completed
+    const wasCompleted = offboarding.status === 'completed';
+    const isNowCompleted = req.body.status === 'completed' || req.body.currentStage === 'success';
+    
     await offboarding.save();
+    
+    // If offboarding is being marked as completed, process ex-employee logic
+    if (!wasCompleted && isNowCompleted) {
+      console.log(`🔄 Offboarding marked as completed, processing ex-employee logic for employee: ${offboarding.employee}`);
+      
+      try {
+        const offboardingWorkflow = require('../services/offboardingWorkflow');
+        const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+        
+        // Get the employee to verify they exist and are not already ex-employee
+        const employee = await TenantEmployee.findById(offboarding.employee);
+        if (employee && !employee.isExEmployee) {
+          console.log(`🔄 Processing ex-employee logic for employee: ${employee.employeeCode}`);
+          
+          // Create a proper offboardingRequest object for the workflow
+          const offboardingRequest = {
+            _id: offboarding._id,
+            employeeId: offboarding.employee,
+            reason: offboarding.reason || 'Offboarding completed',
+            reasonDetails: offboarding.reason || '',
+            lastWorkingDay: offboarding.lastWorkingDate || new Date(),
+            status: 'closed',
+            isCompleted: true,
+            save: async function() { 
+              await this.save();
+              return this;
+            }
+          };
+          
+          await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
+          console.log(`✅ Successfully processed ex-employee logic for ${employee.employeeCode}`);
+        } else if (employee && employee.isExEmployee) {
+          console.log(`ℹ️ Employee ${employee.employeeCode} is already marked as ex-employee`);
+        } else {
+          console.warn(`⚠️ Employee not found for ID: ${offboarding.employee}`);
+        }
+      } catch (exEmployeeError) {
+        console.error('❌ Error processing ex-employee:', exEmployeeError);
+        // Don't fail the update if ex-employee processing fails
+      }
+    }
 
     res.status(200).json({ success: true, message: 'Offboarding updated successfully', data: offboarding });
   } catch (error) {
@@ -605,36 +657,46 @@ exports.advanceStage = async (req, res) => {
       offboarding.currentStage = offboarding.stages[currentIndex + 1];
       console.log('🔍 advanceStage: New stage:', offboarding.currentStage);
 
-      // If reached success stage, mark as completed and process ex-employee logic
-      if (offboarding.currentStage === 'success') {
+      // If reached success stage OR if status is being set to completed, mark as completed and process ex-employee logic
+      if (offboarding.currentStage === 'success' || offboarding.status === 'completed') {
+        // Ensure status is set to completed
         offboarding.status = 'completed';
         offboarding.completedAt = Date.now();
         
         // Process ex-employee logic using the workflow service
         try {
           const offboardingWorkflow = require('../services/offboardingWorkflow');
-          const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
+          const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
           
-          // Convert old offboarding format to new format for completeOffboarding
+          // Get the employee to verify they exist and are not already ex-employee
           const employee = await TenantEmployee.findById(offboarding.employee);
           if (employee && !employee.isExEmployee) {
+            console.log(`🔄 Processing ex-employee logic for employee: ${employee.employeeCode} (stage: ${offboarding.currentStage}, status: ${offboarding.status})`);
             
-            // Create a mock offboardingRequest object for the workflow
-            const mockOffboardingRequest = {
+            // Create a proper offboardingRequest object for the workflow
+            const offboardingRequest = {
+              _id: offboarding._id,
               employeeId: offboarding.employee,
               reason: offboarding.reason || 'Offboarding completed',
               reasonDetails: offboarding.reason || '',
               lastWorkingDay: offboarding.lastWorkingDate || new Date(),
               status: 'closed',
               isCompleted: true,
-              save: async function() { return this; }
+              save: async function() { 
+                await this.save();
+                return this;
+              }
             };
             
-            await offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest);
+            await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
+            console.log(`✅ Successfully processed ex-employee logic for ${employee.employeeCode}`);
           } else if (employee && employee.isExEmployee) {
+            console.log(`ℹ️ Employee ${employee.employeeCode} is already marked as ex-employee`);
+          } else {
+            console.warn(`⚠️ Employee not found for ID: ${offboarding.employee}`);
           }
         } catch (exEmployeeError) {
-          console.error('Error processing ex-employee:', exEmployeeError);
+          console.error('❌ Error processing ex-employee:', exEmployeeError);
           // Don't fail the stage advancement if ex-employee processing fails
         }
       }

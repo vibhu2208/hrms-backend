@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getEmployees,
   getEmployee,
+  getEmployeesForOffboarding,
   createEmployee,
   updateEmployee,
   resetEmployeePassword,
@@ -36,6 +37,7 @@ router.get('/google-sheets/auth-url', authorize('admin', 'hr'), getAuthUrl);
 router.get('/google-sheets/callback', handleOAuthCallback);
 
 router.get('/stats', authorize('admin', 'hr'), getEmployeeStats);
+router.get('/for-offboarding', authorize('admin', 'hr'), getEmployeesForOffboarding);
 router.route('/')
   .get(getEmployees)
   .post(authorize('admin', 'hr'), createEmployee);

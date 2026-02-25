@@ -43,7 +43,6 @@ router.route('/')
 
 // Legacy routes (keep for backward compatibility)
 router.post('/:id/advance', advanceStage);
-router.put('/:id/advance-stage', advanceStage); // Add PUT route for advance-stage
 router.post('/:id/joining', setJoiningDate);
 router.post('/:id/tasks', addTask);
 router.put('/:id/tasks/:taskId/complete', completeTask);
