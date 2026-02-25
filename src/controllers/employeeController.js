@@ -6,6 +6,89 @@ const { getTenantModel } = require('../middlewares/tenantMiddleware');
 // @desc    Get all employees
 // @route   GET /api/employees
 // @access  Private
+exports.getEmployeesForOffboarding = async (req, res) => {
+  try {
+    // Get tenant connection from middleware
+    const tenantConnection = req.tenant.connection;
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const Offboarding = getTenantModel(tenantConnection, 'Offboarding', require('../models/Offboarding'));
+
+    const { status, department, search } = req.query;
+    
+    // Get all employees who are active and not ex-employees
+    let employeeQuery = {
+      isActive: true,
+      status: { $ne: 'terminated' }, // Exclude terminated employees
+      $or: [
+        { isExEmployee: { $exists: false } },
+        { isExEmployee: null },
+        { isExEmployee: false }
+      ]
+    };
+
+    // Filter by department if specified
+    if (department) employeeQuery.department = department;
+
+    // Search functionality
+    if (search) {
+      employeeQuery.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { employeeCode: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const employees = await TenantEmployee.find(employeeQuery)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Get all employees who are currently in offboarding process
+    const activeOffboardings = await Offboarding.find({
+      status: { $in: ['in-progress', 'initiated'] }
+    }).select('employee').lean();
+
+    const offboardingEmployeeIds = activeOffboardings.map(o => o.employee.toString());
+
+    // Filter out employees who are already in offboarding
+    const availableEmployees = employees.filter(emp => {
+      const employeeId = emp._id.toString();
+      return !offboardingEmployeeIds.includes(employeeId);
+    });
+
+    // Populate department information manually
+    const populatedEmployees = await Promise.all(
+      availableEmployees.map(async (employee) => {
+        // Try to get department from departmentId first, then from department field
+        let departmentInfo = null;
+        
+        if (employee.departmentId) {
+          try {
+            const Department = getTenantModel(tenantConnection, 'Department', Department.schema);
+            departmentInfo = await Department.findById(employee.departmentId).select('name').lean();
+          } catch (deptError) {
+            console.warn('Could not fetch department by ID:', deptError.message);
+          }
+        }
+
+        return {
+          ...employee,
+          department: departmentInfo?.name || employee.department || 'Not Assigned'
+        };
+      })
+    );
+
+    res.status(200).json({ 
+      success: true, 
+      data: populatedEmployees,
+      count: populatedEmployees.length
+    });
+  } catch (error) {
+    console.error('Error in getEmployeesForOffboarding:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.getEmployees = async (req, res) => {
   try {
     // Get tenant connection from middleware
@@ -13,10 +96,12 @@ exports.getEmployees = async (req, res) => {
     const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
     const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
 
-    const { status, department, search } = req.query;
-    // Build base query - explicitly exclude ex-employees and inactive employees
+    const { status, department, search, forOffboarding } = req.query;
+    
+    // Build base query - explicitly exclude ex-employees, inactive employees, and terminated employees
     let query = {
       isActive: { $ne: false }, // Exclude where isActive is explicitly false
+      status: { $ne: 'terminated' }, // Exclude terminated employees
       $or: [
         { isExEmployee: { $exists: false } }, // Field doesn't exist (old records)
         { isExEmployee: null }, // Field is null
@@ -24,6 +109,27 @@ exports.getEmployees = async (req, res) => {
         { isExEmployee: { $ne: true } } // Field is not true (covers undefined, etc.)
       ]
     };
+
+    // If specifically requested for offboarding, apply additional filters
+    if (forOffboarding === 'true') {
+      try {
+        const Offboarding = getTenantModel(tenantConnection, 'Offboarding', require('../models/Offboarding'));
+        
+        // Get all employees who are currently in offboarding process
+        const activeOffboardings = await Offboarding.find({
+          status: { $in: ['in-progress', 'initiated'] }
+        }).select('employee').lean();
+
+        const offboardingEmployeeIds = activeOffboardings.map(o => o.employee.toString());
+        
+        // Add filter to exclude employees already in offboarding
+        if (offboardingEmployeeIds.length > 0) {
+          query._id = { $nin: offboardingEmployeeIds };
+        }
+      } catch (offboardingError) {
+        console.warn('Could not filter by offboarding status:', offboardingError.message);
+      }
+    }
 
     // Filter by department if specified
     if (department) query.department = department;

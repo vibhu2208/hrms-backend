@@ -1974,6 +1974,414 @@ This is an automated email from the HRMS system. Please do not reply to this ema
 };
 
 /**
+ * Send joining date confirmation email to candidate
+ * @param {Object} options - Email options
+ * @param {string} options.candidateName - Full name of the candidate
+ * @param {string} options.candidateEmail - Email address of the candidate
+ * @param {string} options.position - Position/role
+ * @param {string} options.joiningDate - Joining date
+ * @param {string} options.companyName - Company name (optional)
+ * @returns {Promise<Object>} Email send result
+ */
+const sendJoiningDateConfirmationEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  joiningDate,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      throw new Error('Email transporter not configured');
+    }
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .header {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+    .content {
+      padding: 30px;
+    }
+    .info-box {
+      background: #d1fae5;
+      border-left: 4px solid #10b981;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .date-box {
+      background: #f8f9fa;
+      border-left: 4px solid #10b981;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .date-display {
+      font-size: 24px;
+      font-weight: bold;
+      color: #10b981;
+      margin: 10px 0;
+    }
+    .footer {
+      background: #f8f9fa;
+      padding: 20px;
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+    }
+    .emoji {
+      font-size: 24px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="emoji">🎉</div>
+      <h1>Joining Date Confirmed!</h1>
+    </div>
+    
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      
+      <p>We are delighted to confirm your joining details for the <strong>${position}</strong> position at ${companyName}.</p>
+      
+      <div class="info-box">
+        <p><strong>✅ Your onboarding process is almost complete!</strong></p>
+        <p>We look forward to welcoming you to our team.</p>
+      </div>
+      
+      <div class="date-box">
+        <h3>📅 Your Joining Date</h3>
+        <div class="date-display">${new Date(joiningDate).toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        })}</div>
+      </div>
+      
+      <p><strong>What to expect on your first day:</strong></p>
+      <ul>
+        <li>Orientation and introduction to the team</li>
+        <li>IT setup and account access</li>
+        <li>Documentation verification</li>
+        <li>Office and facilities tour</li>
+      </ul>
+      
+      <p><strong>What to bring:</strong></p>
+      <ul>
+        <li>Original documents for verification</li>
+        <li>ID proof (Aadhar/PAN/Passport)</li>
+        <li>Passport-size photographs</li>
+      </ul>
+      
+      <p>If you have any questions or need to reschedule, please contact our HR team immediately.</p>
+      
+      <p style="margin-top: 30px;">
+        Best regards,<br>
+        <strong>HR Team</strong><br>
+        ${companyName}
+      </p>
+    </div>
+    
+    <div class="footer">
+      <p>This is an automated email from the HRMS system. Please do not reply to this email.</p>
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const mailOptions = {
+      from: {
+        name: `${companyName} - HRMS`,
+        address: process.env.EMAIL_USER
+      },
+      to: candidateEmail,
+      subject: `🎉 Joining Date Confirmed - ${position} at ${companyName}`,
+      text: `
+Joining Date Confirmed - ${companyName}
+
+Dear ${candidateName},
+
+We are delighted to confirm your joining details for the ${position} position at ${companyName}.
+
+Your onboarding process is almost complete! We look forward to welcoming you to our team.
+
+📅 Your Joining Date: ${new Date(joiningDate).toLocaleDateString()}
+
+What to expect on your first day:
+- Orientation and introduction to the team
+- IT setup and account access
+- Documentation verification
+- Office and facilities tour
+
+What to bring:
+- Original documents for verification
+- ID proof (Aadhar/PAN/Passport)
+- Passport-size photographs
+
+If you have any questions or need to reschedule, please contact our HR team immediately.
+
+Best regards,
+HR Team
+${companyName}
+      `,
+      html: htmlContent,
+      priority: 'high'
+    };
+
+    const info = await sendEmailWithRetry(transporter, mailOptions);
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      recipient: candidateEmail
+    };
+
+  } catch (error) {
+    console.error('❌ Error sending joining date confirmation email:', error);
+    throw new Error(`Failed to send joining date confirmation email: ${error.message}`);
+  }
+};
+
+/**
+ * Send IT notification for new employee setup
+ * @param {Object} options - Email options
+ * @param {string} options.employeeName - Full name of the employee
+ * @param {string} options.employeeEmail - Email address of the employee
+ * @param {string} options.position - Position/role
+ * @param {string} options.department - Department name
+ * @param {string} options.joiningDate - Joining date
+ * @param {string} options.itEmail - IT department email (optional)
+ * @param {string} options.companyName - Company name (optional)
+ * @returns {Promise<Object>} Email send result
+ */
+const sendITNotification = async ({
+  employeeName,
+  employeeEmail,
+  position,
+  department,
+  joiningDate,
+  itEmail,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      console.warn('Email transporter not configured, skipping IT notification');
+      return { success: false, message: 'Email not configured' };
+    }
+
+    const recipientEmail = itEmail || process.env.IT_EMAIL || process.env.EMAIL_USER;
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 20px auto; padding: 20px; background: #f9f9f9; border-radius: 8px; }
+    .header { background: #3b82f6; color: white; padding: 20px; text-align: center; border-radius: 5px; }
+    .content { padding: 20px; background: white; margin-top: 20px; border-radius: 5px; }
+    .info-item { margin: 10px 0; padding: 8px; background: #f8f9fa; border-radius: 3px; }
+    .urgent { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>🔧 IT Setup Required - New Employee</h2>
+    </div>
+    <div class="content">
+      <p>A new employee will be joining soon and requires IT setup.</p>
+      <div class="urgent">
+        <strong>⚠️ Action Required:</strong> Please prepare the following IT resources before the joining date.
+      </div>
+      <div class="info-item"><strong>Employee Name:</strong> ${employeeName}</div>
+      <div class="info-item"><strong>Email:</strong> ${employeeEmail}</div>
+      <div class="info-item"><strong>Position:</strong> ${position}</div>
+      <div class="info-item"><strong>Department:</strong> ${department}</div>
+      <div class="info-item"><strong>Joining Date:</strong> ${new Date(joiningDate).toLocaleDateString()}</div>
+      
+      <h3>IT Setup Checklist:</h3>
+      <ul>
+        <li>Create user accounts and email</li>
+        <li>Prepare laptop/desktop and accessories</li>
+        <li>Configure system access and permissions</li>
+        <li>Set up development tools and software</li>
+        <li>Prepare network credentials</li>
+        <li>Configure communication tools (Slack, Teams, etc.)</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const mailOptions = {
+      from: {
+        name: 'HRMS System',
+        address: process.env.EMAIL_USER
+      },
+      to: recipientEmail,
+      subject: `🔧 IT Setup Required - ${employeeName} joining on ${new Date(joiningDate).toLocaleDateString()}`,
+      html: htmlContent
+    };
+
+    const info = await sendEmailWithRetry(transporter, mailOptions);
+    
+    return {
+      success: true,
+      messageId: info.messageId
+    };
+
+  } catch (error) {
+    console.error('❌ Error sending IT notification:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Send Facilities notification for new employee
+ * @param {Object} options - Email options
+ * @param {string} options.employeeName - Full name of the employee
+ * @param {string} options.position - Position/role
+ * @param {string} options.department - Department name
+ * @param {string} options.joiningDate - Joining date
+ * @param {string} options.facilitiesEmail - Facilities department email (optional)
+ * @param {string} options.companyName - Company name (optional)
+ * @returns {Promise<Object>} Email send result
+ */
+const sendFacilitiesNotification = async ({
+  employeeName,
+  position,
+  department,
+  joiningDate,
+  facilitiesEmail,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      console.warn('Email transporter not configured, skipping Facilities notification');
+      return { success: false, message: 'Email not configured' };
+    }
+
+    const recipientEmail = facilitiesEmail || process.env.FACILITIES_EMAIL || process.env.EMAIL_USER;
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 20px auto; padding: 20px; background: #f9f9f9; border-radius: 8px; }
+    .header { background: #8b5cf6; color: white; padding: 20px; text-align: center; border-radius: 5px; }
+    .content { padding: 20px; background: white; margin-top: 20px; border-radius: 5px; }
+    .info-item { margin: 10px 0; padding: 8px; background: #f8f9fa; border-radius: 3px; }
+    .urgent { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>🏢 Facilities Setup Required - New Employee</h2>
+    </div>
+    <div class="content">
+      <p>A new employee will be joining soon and requires facilities setup.</p>
+      <div class="urgent">
+        <strong>⚠️ Action Required:</strong> Please prepare the following facilities before the joining date.
+      </div>
+      <div class="info-item"><strong>Employee Name:</strong> ${employeeName}</div>
+      <div class="info-item"><strong>Position:</strong> ${position}</div>
+      <div class="info-item"><strong>Department:</strong> ${department}</div>
+      <div class="info-item"><strong>Joining Date:</strong> ${new Date(joiningDate).toLocaleDateString()}</div>
+      
+      <h3>Facilities Setup Checklist:</h3>
+      <ul>
+        <li>Allocate workspace/desk</li>
+        <li>Prepare chair and ergonomic setup</li>
+        <li>Arrange access card/ID badge</li>
+        <li>Prepare welcome kit and stationery</li>
+        <li>Coordinate parking/access permissions</li>
+        <li>Set up locker and storage if needed</li>
+        <li>Prepare induction materials</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const mailOptions = {
+      from: {
+        name: 'HRMS System',
+        address: process.env.EMAIL_USER
+      },
+      to: recipientEmail,
+      subject: `🏢 Facilities Setup Required - ${employeeName} joining on ${new Date(joiningDate).toLocaleDateString()}`,
+      html: htmlContent
+    };
+
+    const info = await sendEmailWithRetry(transporter, mailOptions);
+    
+    return {
+      success: true,
+      messageId: info.messageId
+    };
+
+  } catch (error) {
+    console.error('❌ Error sending Facilities notification:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
  * Send document rejection/re-submission email
  */
 const sendDocumentRejectionEmail = async ({
@@ -2731,915 +3139,6 @@ const sendDocumentationStageEmail = async ({
   }
 };
 
-/**
- * Send onboarding stage 1 (interview1) email
- */
-const sendOnboardingInterview1Email = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendOnboardingInterview1Email: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #ecfdf5; border-left: 4px solid #10b981; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🎉 Welcome to the Onboarding Process!</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>🚀 Onboarding Stage 1: Initial Interview</strong></p>
-        <p>Congratulations! Your onboarding process has begun. You are now in the first stage of our onboarding journey.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Initial Interview & Assessment</p>
-      
-      <p><strong>What to Expect:</strong></p>
-      <ul>
-        <li>Welcome call with HR team</li>
-        <li>Initial assessment and documentation review</li>
-        <li>Company culture and values discussion</li>
-        <li>Role expectations and team introduction</li>
-      </ul>
-      
-      <p><strong>Next Steps:</strong></p>
-      <ul>
-        <li>Schedule your initial interview with HR</li>
-        <li>Prepare necessary identification documents</li>
-        <li>Review company policies and handbook</li>
-      </ul>
-      
-      <p>We're excited to have you join our team! This initial stage helps us ensure a smooth transition into your new role.</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Welcome to Onboarding - Stage 1: Initial Interview - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendOnboardingInterview1Email: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending onboarding interview1 email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send onboarding HR discussion email
- */
-const sendOnboardingHRDiscussionEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendOnboardingHRDiscussionEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>💼 HR Discussion Stage</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>🤝 Onboarding Stage 2: HR Discussion</strong></p>
-        <p>You've progressed to the HR discussion stage! We'll discuss your employment terms, benefits, and complete necessary paperwork.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> HR Discussion & Paperwork</p>
-      
-      <p><strong>Discussion Topics:</strong></p>
-      <ul>
-        <li>Employment contract and terms</li>
-        <li>Salary and compensation details</li>
-        <li>Benefits and perks overview</li>
-        <li>Company policies and procedures</li>
-        <li>Work schedule and expectations</li>
-      </ul>
-      
-      <p><strong>Documents Needed:</strong></p>
-      <ul>
-        <li>Government-issued ID</li>
-        <li>Previous employment documents</li>
-        <li>Educational certificates</li>
-        <li>Bank account details for salary</li>
-      </ul>
-      
-      <p>Please come prepared with any questions you may about your role, compensation, or company policies.</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Onboarding Stage 2: HR Discussion - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendOnboardingHRDiscussionEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending onboarding HR discussion email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send onboarding documentation stage email
- */
-const sendOnboardingDocumentationEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  uploadUrl,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendOnboardingDocumentationEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #f3e8ff; border-left: 4px solid #8b5cf6; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .upload-btn { background: #8b5cf6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; font-weight: bold; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>📋 Documentation Stage</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>📄 Onboarding Stage 3: Documentation</strong></p>
-        <p>Welcome to the documentation stage! Please upload all required documents to complete your onboarding process.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Document Submission & Verification</p>
-      
-      <p><strong>Required Documents:</strong></p>
-      <ul>
-        <li>Resume/CV</li>
-        <li>Government ID (Aadhar, PAN, Passport)</li>
-        <li>Educational Certificates</li>
-        <li>Previous Employment Letters</li>
-        <li>Bank Account Details</li>
-        <li>Photographs (Passport size)</li>
-        <li>Address Proof</li>
-      </ul>
-      
-      <p style="text-align: center;">
-        <a href="${uploadUrl}" class="upload-btn">📤 Upload Documents Now</a>
-      </p>
-      
-      <p><strong>Important Notes:</strong></p>
-      <ul>
-        <li>All documents should be clear and readable</li>
-        <li>File formats accepted: PDF, JPG, PNG</li>
-        <li>Maximum file size: 5MB per document</li>
-        <li>Please upload all documents before your joining date</li>
-      </ul>
-      
-      <p>Once your documents are verified, we'll proceed with the final onboarding steps. If you have any issues with the upload, please contact our HR team.</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Onboarding Stage 3: Document Submission - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendOnboardingDocumentationEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending onboarding documentation email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send onboarding completion email
- */
-const sendOnboardingCompletedEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendOnboardingCompletedEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .success-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🎉 Onboarding Completed!</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="success-box">
-        <p><strong>✅ Congratulations! Onboarding Complete</strong></p>
-        <p>You have successfully completed all stages of the onboarding process. We're thrilled to welcome you to our team!</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Status:</strong> Onboarding Completed Successfully</p>
-      
-      <p><strong>What's Next:</strong></p>
-      <ul>
-        <li>You'll receive your employee ID and login credentials</li>
-        <li>IT team will contact you for system setup</li>
-        <li>Your manager will schedule your first day orientation</li>
-        <li>You'll be added to team communication channels</li>
-      </ul>
-      
-      <p><strong>Your First Day:</strong></p>
-      <ul>
-        <li>Arrive 30 minutes early for orientation</li>
-        <li>Bring original documents for verification</li>
-        <li>Dress code: Business casual</li>
-        <li>Parking and access information will be provided</li>
-      </ul>
-      
-      <p>We're excited to have you join our team! If you have any questions before your start date, please don't hesitate to reach out to the HR team.</p>
-      
-      <p style="margin-top: 30px;">Welcome aboard!<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Onboarding Completed - Welcome to ${companyName}!`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendOnboardingCompletedEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending onboarding completed email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send pre-boarding email
- */
-const sendPreBoardingEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendPreBoardingEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #eef2ff; border-left: 4px solid #6366f1; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🚀 Pre-boarding Stage</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>🎯 Welcome to Pre-boarding!</strong></p>
-        <p>Congratulations! You've been selected for the position. We're excited to begin the onboarding process with you.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Pre-boarding</p>
-      
-      <p><strong>What's Next:</strong></p>
-      <ul>
-        <li>You'll receive the official offer letter shortly</li>
-        <li>Review the offer details and terms</li>
-        <li>Prepare for the offer acceptance process</li>
-        <li>Gather necessary documents for the next stages</li>
-      </ul>
-      
-      <p><strong>Documents to Prepare:</strong></p>
-      <ul>
-        <li>Updated Resume/CV</li>
-        <li>Government-issued ID</li>
-        <li>Educational certificates</li>
-        <li>Previous employment documents</li>
-      </ul>
-      
-      <p>Our HR team will contact you soon with the formal offer letter and further instructions.</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Pre-boarding Stage - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendPreBoardingEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending pre-boarding email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send offer sent email
- */
-const sendOfferSentEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendOfferSentEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #ecfdf5; border-left: 4px solid #10b981; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>📧 Offer Sent!</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>🎉 Offer Letter Sent!</strong></p>
-        <p>We're pleased to inform you that your offer letter has been sent to your email. Please review it carefully.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Offer Sent</p>
-      
-      <p><strong>What to Do:</strong></p>
-      <ul>
-        <li>Check your email for the offer letter</li>
-        <li>Review all terms and conditions carefully</li>
-        <li>Note the joining date and reporting time</li>
-        <li>Verify compensation and benefits details</li>
-      </ul>
-      
-      <p><strong>Important:</strong></p>
-      <ul>
-        <li>Please respond within the specified timeframe</li>
-        <li>Contact HR if you have any questions about the offer</li>
-        <li>Keep the offer letter for your records</li>
-      </ul>
-      
-      <p>We look forward to your positive response and welcoming you to our team!</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Offer Letter Sent - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendOfferSentEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending offer sent email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send offer accepted email
- */
-const sendOfferAcceptedEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendOfferAcceptedEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🎊 Offer Accepted!</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>✅ Welcome Aboard! Offer Accepted!</strong></p>
-        <p>Thank you for accepting our offer! We're thrilled to have you join our team. Let's move forward with the onboarding process.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Offer Accepted</p>
-      
-      <p><strong>Next Steps:</strong></p>
-      <ul>
-        <li>You'll receive document submission instructions</li>
-        <li>Prepare required documents for verification</li>
-        <li>Complete any pre-joining formalities</li>
-        <li>Get ready for background verification (if applicable)</li>
-      </ul>
-      
-      <p><strong>Documents Needed:</strong></p>
-      <ul>
-        <li>Government ID (Aadhar, PAN, Passport)</li>
-        <li>Educational certificates</li>
-        <li>Previous employment documents</li>
-        <li>Bank account details</li>
-        <li>Address proof</li>
-      </ul>
-      
-      <p>Our HR team will guide you through each step of the remaining onboarding process.</p>
-      
-      <p style="margin-top: 30px;">We're excited to have you with us!<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Offer Accepted - Welcome to ${companyName}!`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendOfferAcceptedEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending offer accepted email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send documents pending email
- */
-const sendDocumentsPendingEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  uploadUrl,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendDocumentsPendingEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #fee2e2; border-left: 4px solid #ef4444; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .upload-btn { background: #ef4444; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; font-weight: bold; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>📄 Documents Pending</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>⏳ Action Required: Documents Pending</strong></p>
-        <p>We're waiting for your documents to complete the verification process. Please upload them as soon as possible.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Documents Pending</p>
-      
-      <p><strong>Required Documents:</strong></p>
-      <ul>
-        <li>Resume/CV</li>
-        <li>Government ID (Aadhar, PAN, Passport)</li>
-        <li>Educational Certificates</li>
-        <li>Previous Employment Letters</li>
-        <li>Bank Account Details</li>
-        <li>Photographs (Passport size)</li>
-        <li>Address Proof</li>
-      </ul>
-      
-      <p style="text-align: center;">
-        <a href="${uploadUrl}" class="upload-btn">📤 Upload Documents Now</a>
-      </p>
-      
-      <p><strong>Important Notes:</strong></p>
-      <ul>
-        <li>All documents should be clear and readable</li>
-        <li>File formats: PDF, JPG, PNG</li>
-        <li>Maximum file size: 5MB per document</li>
-        <li>Please upload before your joining date</li>
-      </ul>
-      
-      <p>Your onboarding cannot proceed until all documents are submitted and verified.</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Action Required: Documents Pending - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendDocumentsPendingEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending documents pending email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send documents verified email
- */
-const sendDocumentsVerifiedEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendDocumentsVerifiedEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #dcfce7; border-left: 4px solid #22c55e; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>✅ Documents Verified!</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>🎉 Great News! Documents Verified</strong></p>
-        <p>Your documents have been successfully verified. You're now ready for the final steps before joining.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Current Stage:</strong> Documents Verified</p>
-      
-      <p><strong>Verification Complete:</strong></p>
-      <ul>
-        <li>✅ All documents received</li>
-        <li>✅ Document verification completed</li>
-        <li>✅ Background check cleared (if applicable)</li>
-        <li>✅ Ready for joining formalities</li>
-      </ul>
-      
-      <p><strong>What's Next:</strong></p>
-      <ul>
-        <li>You'll receive joining instructions shortly</li>
-        <li>IT setup and account creation in progress</li>
-        <li>Your manager will reach out for team introduction</li>
-        <li>Prepare for your first day orientation</li>
-      </ul>
-      
-      <p>You're almost there! We're excited to have you join our team soon.</p>
-      
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Documents Verified - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendDocumentsVerifiedEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending documents verified email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send ready for joining email
- */
-const sendReadyForJoiningEmail = async ({
-  candidateName,
-  candidateEmail,
-  position,
-  joiningDate,
-  companyName = 'Our Company'
-}) => {
-  try {
-    console.log('📧 sendReadyForJoiningEmail: Sending email to', candidateEmail);
-    
-    const transporter = createTransporter();
-    if (!transporter) throw new Error('Email transporter not configured');
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .stage-box { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🚀 Ready for Joining!</h1>
-    </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="stage-box">
-        <p><strong>🎊 You're All Set! Ready to Join!</strong></p>
-        <p>Congratulations! All your onboarding formalities are complete. We're ready to welcome you to the team.</p>
-      </div>
-      
-      <p><strong>Position:</strong> ${position}</p>
-      <p><strong>Joining Date:</strong> ${joiningDate || 'To be confirmed'}</p>
-      <p><strong>Current Stage:</strong> Ready for Joining</p>
-      
-      <p><strong>What's Ready for You:</strong></p>
-      <ul>
-        <li>✅ Employee account and credentials</li>
-        <li>✅ IT equipment and workspace setup</li>
-        <li>✅ Team introduction scheduled</li>
-        <li>✅ First day orientation planned</li>
-      </ul>
-      
-      <p><strong>Your First Day:</strong></p>
-      <ul>
-        <li>Report to reception at 9:00 AM</li>
-        <li>Bring original documents for verification</li>
-        <li>Dress code: Business casual</li>
-        <li>Parking information will be provided</li>
-        <li>Lunch will be arranged</li>
-      </ul>
-      
-      <p><strong>What to Bring:</strong></p>
-      <ul>
-        <li>Original ID documents</li>
-        <li>PAN card and bank account details</li>
-        <li>Passport size photographs</li>
-        <li>Laptop and personal items (optional)</li>
-      </ul>
-      
-      <p>We're incredibly excited to have you join our team. See you on your joining day!</p>
-      
-      <p style="margin-top: 30px;">Get ready for an amazing journey!<br><strong>HR Team</strong><br>${companyName}</p>
-    </div>
-    <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    await sendEmailWithRetry(transporter, {
-      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
-      to: candidateEmail,
-      subject: `Ready for Joining - ${companyName}`,
-      html: htmlContent,
-      priority: 'high'
-    });
-
-    console.log('✅ sendReadyForJoiningEmail: Email sent successfully to', candidateEmail);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error sending ready for joining email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
 module.exports = {
   sendEmail, // Generic email function
   sendOnboardingEmail,
@@ -3652,6 +3151,10 @@ module.exports = {
   sendInterviewCompletedEmail,
   sendOfferExtendedEmail,
   sendOfferLetterWithDocumentLink,
+  sendDocumentRequestEmail,
+  sendJoiningDateConfirmationEmail,
+  sendITNotification,
+  sendFacilitiesNotification,
   sendRejectionEmail,
   sendApplicationReceivedEmail,
   verifyEmailConfig,
@@ -3664,13 +3167,5 @@ module.exports = {
   sendClearanceProcessEmail,
   sendFinalSettlementEmail,
   sendOffboardingCompletedEmail,
-  sendDocumentationStageEmail,
-  // Onboarding stage email functions (Updated for correct stages)
-  sendPreBoardingEmail,
-  sendOfferSentEmail,
-  sendOfferAcceptedEmail,
-  sendDocumentsPendingEmail,
-  sendDocumentsVerifiedEmail,
-  sendReadyForJoiningEmail,
-  sendOnboardingCompletedEmail
+  sendDocumentationStageEmail
 };

@@ -34,25 +34,7 @@ const createTransporter = () => {
 };
 
 const { generatePassword, generateEmployeeId } = require('../utils/passwordGenerator');
-const { 
-  sendOnboardingEmail, 
-  sendHRNotification, 
-  sendDocumentRequestEmail, 
-  sendITNotification, 
-  sendFacilitiesNotification, 
-  sendOfferExtendedEmail, 
-  sendOfferLetterWithDocumentLink,
-  sendPreBoardingEmail,
-  sendOfferSentEmail,
-  sendOfferAcceptedEmail,
-  sendDocumentsPendingEmail,
-  sendDocumentsVerifiedEmail,
-  sendReadyForJoiningEmail,
-  sendOnboardingCompletedEmail
-} = require('../services/emailService');
-
-// Debug: Onboarding controller restart trigger
-console.log('🔍 Onboarding controller: Email functions loaded successfully');
+const { sendOnboardingEmail, sendHRNotification, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink, sendJoiningDateConfirmationEmail } = require('../services/emailService');
 
 /**
  * Helper function to update candidate's applicationHistory when onboarding is created/updated
@@ -173,52 +155,11 @@ exports.sendToOnboarding = async (req, res) => {
       });
     }
 
-    // Check if department exists in job posting, if not try to assign a default
-    let departmentId = candidate.appliedFor.department;
-    
-    if (!departmentId) {
-      console.warn(`⚠️ Job posting ${candidate.appliedFor._id} missing department, trying to assign default`);
-      
-      // Try to get a default department
-      const Department = getTenantModel(req.tenant.connection, 'Department');
-      if (Department) {
-        try {
-          const defaultDept = await Department.findOne({ isActive: true }).sort({ createdAt: 1 });
-          if (defaultDept) {
-            departmentId = defaultDept._id;
-            console.log(`✅ Assigned default department ${defaultDept.name} for onboarding`);
-            
-            // Update the job posting with the default department to prevent future issues
-            const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
-            if (JobPosting) {
-              try {
-                await JobPosting.findByIdAndUpdate(candidate.appliedFor._id, { 
-                  department: defaultDept._id 
-                });
-                console.log(`✅ Updated job posting ${candidate.appliedFor._id} with default department`);
-              } catch (updateError) {
-                console.warn('⚠️ Could not update job posting with department:', updateError.message);
-              }
-            }
-          } else {
-            return res.status(400).json({
-              success: false,
-              message: 'No departments available in the system. Please create at least one department before proceeding with onboarding.'
-            });
-          }
-        } catch (deptError) {
-          console.error('❌ Error finding default department:', deptError);
-          return res.status(400).json({
-            success: false,
-            message: 'Department information is missing from job posting and no default department could be assigned'
-          });
-        }
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: 'Department information is missing from job posting'
-        });
-      }
+    if (!candidate.appliedFor.department) {
+      return res.status(400).json({
+        success: false,
+        message: 'Department information is missing from job posting'
+      });
     }
 
     // If existing onboarding exists but not completed, update it
@@ -230,7 +171,7 @@ exports.sendToOnboarding = async (req, res) => {
       existingOnboarding.candidateName = `${candidate.firstName} ${candidate.lastName}`;
       existingOnboarding.candidatePhone = candidate.phone;
       existingOnboarding.position = candidate.appliedFor.title;
-      existingOnboarding.department = departmentId; // Use resolved departmentId
+      existingOnboarding.department = candidate.appliedFor.department; // This is already an ObjectId
       existingOnboarding.status = 'preboarding';
       existingOnboarding.createdBy = hrUserId;
       existingOnboarding.assignedHR = hrUserId;
@@ -266,7 +207,7 @@ exports.sendToOnboarding = async (req, res) => {
         candidateEmail: candidate.email,
         candidatePhone: candidate.phone,
         position: candidate.appliedFor.title,
-        department: departmentId, // Use resolved departmentId
+        department: candidate.appliedFor.department, // This is already an ObjectId, not ._id
         status: 'preboarding',
         createdBy: hrUserId,
         assignedHR: hrUserId,
@@ -515,34 +456,10 @@ exports.createOnboarding = async (req, res) => {
       candidatePhone: req.body.candidatePhone,
       position,
       department,
-      stages: ['pre-boarding', 'offer-sent', 'offer-accepted', 'documents-pending', 'documents-verified', 'ready-for-joining', 'completed'],
-      currentStage: 'pre-boarding',
+      stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
+      currentStage: 'interview1',
       status: 'in-progress'
     });
-
-    // Send pre-boarding email
-    try {
-      const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company';
-      console.log('📧 createOnboarding: About to send pre-boarding email');
-      console.log('📧 createOnboarding: Candidate email:', candidateEmail);
-      console.log('📧 createOnboarding: Candidate name:', candidateName);
-      console.log('📧 createOnboarding: Position:', position);
-      console.log('📧 createOnboarding: Company name:', companyName);
-      console.log('📧 createOnboarding: sendPreBoardingEmail function type:', typeof sendPreBoardingEmail);
-      
-      const result = await sendPreBoardingEmail({
-        candidateName,
-        candidateEmail,
-        position,
-        companyName
-      });
-      console.log('✅ createOnboarding: Pre-boarding email result:', result);
-      console.log(`📧 Pre-boarding email sent to ${candidateEmail}`);
-    } catch (emailError) {
-      console.error('❌ createOnboarding: Failed to send pre-boarding email:', emailError.message);
-      console.error('❌ createOnboarding: Full email error:', emailError);
-      // Don't fail the request if email fails
-    }
 
     res.status(201).json({ success: true, message: 'Onboarding process initiated', data: onboarding });
   } catch (error) {
@@ -572,113 +489,16 @@ exports.advanceStage = async (req, res) => {
     }
 
     const currentIndex = onboarding.stages.indexOf(onboarding.currentStage);
-    console.log('🔍 advanceStage: Current stage:', onboarding.currentStage);
-    console.log('🔍 advanceStage: All stages:', onboarding.stages);
-    console.log('🔍 advanceStage: Current index:', currentIndex);
-    
     if (currentIndex < onboarding.stages.length - 1) {
-      const previousStage = onboarding.currentStage;
       onboarding.currentStage = onboarding.stages[currentIndex + 1];
-      console.log('🔍 advanceStage: New stage:', onboarding.currentStage);
       
-      // If reached completed stage, mark as completed
-      if (onboarding.currentStage === 'completed') {
+      // If reached success stage, mark as completed
+      if (onboarding.currentStage === 'success') {
         onboarding.status = 'completed';
         onboarding.completedAt = Date.now();
       }
       
       await onboarding.save();
-
-      // Send stage-specific email notifications
-      try {
-        const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company';
-        const candidateName = onboarding.candidateName;
-        const candidateEmail = onboarding.candidateEmail;
-        const position = onboarding.position;
-
-        console.log('📧 advanceStage: Attempting to send stage email for stage:', onboarding.currentStage);
-
-        switch (onboarding.currentStage) {
-          case 'pre-boarding':
-            await sendPreBoardingEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              companyName
-            });
-            console.log(`📧 Pre-boarding stage email sent to ${candidateEmail}`);
-            break;
-          
-          case 'offer-sent':
-            await sendOfferSentEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              companyName
-            });
-            console.log(`📧 Offer sent stage email sent to ${candidateEmail}`);
-            break;
-          
-          case 'offer-accepted':
-            await sendOfferAcceptedEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              companyName
-            });
-            console.log(`📧 Offer accepted stage email sent to ${candidateEmail}`);
-            break;
-          
-          case 'documents-pending':
-            // Generate upload URL for documents pending stage
-            const uploadUrl = `http://3.108.172.119/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`;
-            await sendDocumentsPendingEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              uploadUrl,
-              companyName
-            });
-            console.log(`📧 Documents pending stage email sent to ${candidateEmail}`);
-            break;
-          
-          case 'documents-verified':
-            await sendDocumentsVerifiedEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              companyName
-            });
-            console.log(`📧 Documents verified stage email sent to ${candidateEmail}`);
-            break;
-          
-          case 'ready-for-joining':
-            await sendReadyForJoiningEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              joiningDate: onboarding.joiningDate,
-              companyName
-            });
-            console.log(`📧 Ready for joining stage email sent to ${candidateEmail}`);
-            break;
-          
-          case 'completed':
-            await sendOnboardingCompletedEmail({
-              candidateName,
-              candidateEmail,
-              position,
-              companyName
-            });
-            console.log(`📧 Onboarding completed email sent to ${candidateEmail}`);
-            break;
-        }
-      } catch (emailError) {
-        console.error('⚠️ Failed to send onboarding stage notification email:', emailError.message);
-        console.error('⚠️ Full email error:', emailError);
-        // Don't fail the request if email fails
-      }
-      
       res.status(200).json({ success: true, message: 'Stage advanced successfully', data: onboarding });
     } else {
       res.status(400).json({ success: false, message: 'Already at final stage' });
@@ -829,6 +649,74 @@ exports.updateOnboardingStatus = async (req, res) => {
     });
 
     await onboarding.save();
+
+    // Auto-send document request email when status changes to docs_pending
+    if (status === 'docs_pending' && previousStatus !== 'docs_pending') {
+      try {
+        console.log(`📧 Auto-sending document request email for ${onboarding.candidateName} as status changed to docs_pending`);
+        
+        // Generate upload token
+        const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
+        let uploadToken = await CandidateDocumentUploadToken.findOne({
+          onboardingId: onboarding._id,
+          isActive: true,
+          revokedAt: null
+        });
+
+        let uploadUrl;
+        const tenantId = req.tenant.companyId || req.tenant.clientId;
+
+        if (uploadToken) {
+          // Reuse existing token
+          uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+          console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
+        } else {
+          // Generate new token
+          const token = require('crypto').randomBytes(32).toString('hex');
+          const expiresAt = new Date();
+          expiresAt.setDate(expiresAt.getDate() + 30); // 30 days validity
+
+          uploadToken = await CandidateDocumentUploadToken.create({
+            onboardingId: onboarding._id,
+            candidateId: onboarding.onboardingId,
+            candidateName: onboarding.candidateName,
+            candidateEmail: onboarding.candidateEmail,
+            position: onboarding.position,
+            token,
+            expiresAt,
+            generatedBy: hrUserId
+          });
+
+          uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+          console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
+        }
+
+        // Send document request email
+        await sendDocumentRequestEmail({
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          uploadUrl,
+          companyName: req.tenant?.companyName || 'Our Company'
+        });
+
+        // Add audit trail for automatic email
+        onboarding.auditTrail.push({
+          action: 'document_request_auto_sent',
+          description: `Document upload link automatically sent to candidate via email (status changed to docs_pending)`,
+          performedBy: hrUserId,
+          metadata: { uploadUrl, tokenId: uploadToken._id, previousStatus },
+          timestamp: new Date()
+        });
+
+        await onboarding.save();
+        console.log(`📧 Auto document request email sent to ${onboarding.candidateEmail}`);
+
+      } catch (emailError) {
+        console.error('⚠️ Failed to send automatic document request email:', emailError);
+        // Don't fail the status update, just log the error
+      }
+    }
 
     // Log HR activity
     try {
@@ -1091,12 +979,39 @@ exports.acceptOffer = async (req, res) => {
     const { id } = req.params;
     const { acceptanceNotes } = req.body;
 
+    // Get tenant connection from the onboarding record
     const onboarding = await Onboarding.findById(id);
     if (!onboarding) {
       return res.status(404).json({
         success: false,
         message: 'Onboarding record not found'
       });
+    }
+
+    // Get tenant connection - we need to find which tenant this onboarding belongs to
+    const { getTenantByConnection } = require('../utils/tenantModels');
+    let tenantConnection = null;
+    
+    // Try to find the tenant connection by checking common tenant databases
+    // This is a workaround since we don't have tenant middleware on this public route
+    try {
+      const Company = require('../models/Company');
+      const companies = await Company.find({});
+      
+      for (const company of companies) {
+        try {
+          const tenantDb = require('../utils/tenantModels').getTenantModel(company.connectionString, 'Onboarding');
+          const testOnboarding = await tenantDb.findById(id);
+          if (testOnboarding) {
+            tenantConnection = company.connectionString;
+            break;
+          }
+        } catch (err) {
+          // Continue to next company
+        }
+      }
+    } catch (err) {
+      console.log('Could not determine tenant, using default behavior');
     }
 
     // Validate status
@@ -1115,9 +1030,11 @@ exports.acceptOffer = async (req, res) => {
       });
     }
 
-    // Update offer acceptance
+    const previousStatus = onboarding.status;
+
+    // Update offer acceptance and move to docs_pending
     onboarding.offer.acceptedAt = new Date();
-    onboarding.status = 'offer_accepted';
+    onboarding.status = 'docs_pending'; // Move directly to docs_pending to trigger document request
 
     // Initialize required documents checklist if not already done
     if (!onboarding.requiredDocuments || onboarding.requiredDocuments.length === 0) {
@@ -1131,25 +1048,101 @@ exports.acceptOffer = async (req, res) => {
       ];
     }
 
-    // Add audit trail
+    // Add audit trail for offer acceptance
     onboarding.auditTrail.push({
       action: 'offer_accepted',
       description: 'Candidate accepted the offer',
       performedBy: null, // Candidate action
-      previousStatus: 'offer_sent',
-      newStatus: 'offer_accepted',
+      previousStatus: previousStatus,
+      newStatus: 'docs_pending',
       metadata: { acceptanceNotes },
       timestamp: new Date()
     });
 
     await onboarding.save();
 
+    // Auto-send document request email since status is now docs_pending
+    try {
+      console.log(`📧 Auto-sending document request email for ${onboarding.candidateName} (offer accepted)`);
+      
+      // Generate upload token - use the same tenant connection as the onboarding
+      let uploadToken;
+      let uploadUrl;
+      
+      if (tenantConnection) {
+        const CandidateDocumentUploadToken = getTenantModel(tenantConnection, 'CandidateDocumentUploadToken');
+        uploadToken = await CandidateDocumentUploadToken.findOne({
+          onboardingId: onboarding._id,
+          isActive: true,
+          revokedAt: null
+        });
+
+        const tenantId = tenantConnection.replace('mongodb://localhost:27017/', '').replace('hrms_', '');
+        
+        if (uploadToken) {
+          // Reuse existing token
+          uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+          console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
+        } else {
+          // Generate new token
+          const token = require('crypto').randomBytes(32).toString('hex');
+          const expiresAt = new Date();
+          expiresAt.setDate(expiresAt.getDate() + 30); // 30 days validity
+
+          uploadToken = await CandidateDocumentUploadToken.create({
+            onboardingId: onboarding._id,
+            candidateId: onboarding.onboardingId,
+            candidateName: onboarding.candidateName,
+            candidateEmail: onboarding.candidateEmail,
+            position: onboarding.position,
+            token,
+            expiresAt,
+            generatedBy: null // System generated since candidate accepted
+          });
+
+          uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+          console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
+        }
+      } else {
+        // Fallback: generate a simple URL without tenant-specific token
+        const token = require('crypto').randomBytes(32).toString('hex');
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=default`;
+        console.log(`⚠️ Using fallback upload URL for ${onboarding.candidateName}`);
+      }
+
+      // Send document request email
+      await sendDocumentRequestEmail({
+        candidateName: onboarding.candidateName,
+        candidateEmail: onboarding.candidateEmail,
+        position: onboarding.position,
+        uploadUrl,
+        companyName: 'Our Company' // Default company name for public route
+      });
+
+      // Add audit trail for automatic email
+      onboarding.auditTrail.push({
+        action: 'document_request_auto_sent',
+        description: `Document upload link automatically sent to candidate via email (offer accepted)`,
+        performedBy: null,
+        metadata: { uploadUrl, tokenId: uploadToken?._id, previousStatus: 'offer_sent' },
+        timestamp: new Date()
+      });
+
+      await onboarding.save();
+      console.log(`📧 Auto document request email sent to ${onboarding.candidateEmail}`);
+
+    } catch (emailError) {
+      console.error('⚠️ Failed to send automatic document request email after offer acceptance:', emailError);
+      // Don't fail the offer acceptance, just log the error
+    }
+
     res.status(200).json({
       success: true,
-      message: 'Offer accepted successfully',
+      message: 'Offer accepted successfully. Document request email has been sent.',
       data: {
         onboardingId: onboarding.onboardingId,
         acceptedAt: onboarding.offer.acceptedAt,
+        currentStatus: onboarding.status,
         nextStep: 'document_submission'
       }
     });
@@ -1232,9 +1225,73 @@ exports.setJoiningDateAndNotify = async (req, res) => {
       onboarding.notifications.facilitiesNotified.sentAt = new Date();
       onboarding.notifications.facilitiesNotified.sentBy = hrUserId;
 
-      // TODO: Send actual notifications
-      // await sendITNotification(onboarding);
-      // await sendFacilitiesNotification(onboarding);
+      // Send actual notifications
+      try {
+        console.log(`📧 Sending IT and Facilities notifications for ${onboarding.candidateName}`);
+        
+        // Send IT notification
+        const itResult = await sendITNotification({
+          employeeName: onboarding.candidateName,
+          employeeEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          department: onboarding.department?.name || 'Not specified',
+          joiningDate: joinDate,
+          companyName: req.tenant?.companyName || 'Our Company'
+        });
+        
+        if (itResult.success) {
+          console.log(`✅ IT notification sent successfully`);
+        } else {
+          console.log(`⚠️ IT notification failed: ${itResult.message || itResult.error}`);
+        }
+
+        // Send Facilities notification
+        const facilitiesResult = await sendFacilitiesNotification({
+          employeeName: onboarding.candidateName,
+          position: onboarding.position,
+          department: onboarding.department?.name || 'Not specified',
+          joiningDate: joinDate,
+          companyName: req.tenant?.companyName || 'Our Company'
+        });
+        
+        if (facilitiesResult.success) {
+          console.log(`✅ Facilities notification sent successfully`);
+        } else {
+          console.log(`⚠️ Facilities notification failed: ${facilitiesResult.message || facilitiesResult.error}`);
+        }
+
+      } catch (notificationError) {
+        console.error('⚠️ Failed to send team notifications:', notificationError);
+        // Don't fail the joining date setting, just log the error
+      }
+    }
+
+    // Always send joining date confirmation email to candidate
+    try {
+      console.log(`📧 Sending joining date confirmation email to ${onboarding.candidateEmail}`);
+      
+      await sendJoiningDateConfirmationEmail({
+        candidateName: onboarding.candidateName,
+        candidateEmail: onboarding.candidateEmail,
+        position: onboarding.position,
+        joiningDate: joinDate,
+        companyName: req.tenant?.companyName || 'Our Company'
+      });
+      
+      console.log(`✅ Joining date confirmation email sent to ${onboarding.candidateEmail}`);
+      
+      // Add audit trail for joining date email
+      onboarding.auditTrail.push({
+        action: 'joining_date_email_sent',
+        description: `Joining date confirmation email sent to candidate`,
+        performedBy: hrUserId,
+        metadata: { joiningDate, candidateEmail: onboarding.candidateEmail },
+        timestamp: new Date()
+      });
+      
+    } catch (emailError) {
+      console.error('⚠️ Failed to send joining date confirmation email:', emailError);
+      // Don't fail the joining date setting, just log the error
     }
 
     await onboarding.save();
