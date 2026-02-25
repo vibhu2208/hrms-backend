@@ -15,10 +15,10 @@ const getHRUserDetails = (req) => {
   }
   
   return {
-    id: req.user.id,
-    email: req.user.email,
-    name: req.user.name || req.user.firstName && req.user.lastName ? 
-      `${req.user.firstName} ${req.user.lastName}` : req.user.email,
+    hrUserId: req.user._id || req.user.id,
+    hrEmail: req.user.email,
+    hrName: req.user.firstName && req.user.lastName ? 
+      `${req.user.firstName} ${req.user.lastName}` : req.user.name || req.user.email,
     role: req.user.role,
     ip: req.ip || req.connection?.remoteAddress,
     userAgent: req.get('User-Agent')
@@ -49,7 +49,7 @@ const logHRActivity = async (tenantConnection, activityData, req) => {
       timestamp: new Date(),
       // Add request metadata if available
       ...(req && {
-        ip: req.ip || req.connection?.remoteAddress,
+        ipAddress: req.ip || req.connection?.remoteAddress,
         userAgent: req.get('User-Agent')
       })
     };

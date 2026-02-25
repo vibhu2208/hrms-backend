@@ -34,7 +34,25 @@ const createTransporter = () => {
 };
 
 const { generatePassword, generateEmployeeId } = require('../utils/passwordGenerator');
-const { sendOnboardingEmail, sendHRNotification, sendOfferEmail, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink } = require('../services/emailService');
+const { 
+  sendOnboardingEmail, 
+  sendHRNotification, 
+  sendDocumentRequestEmail, 
+  sendITNotification, 
+  sendFacilitiesNotification, 
+  sendOfferExtendedEmail, 
+  sendOfferLetterWithDocumentLink,
+  sendPreBoardingEmail,
+  sendOfferSentEmail,
+  sendOfferAcceptedEmail,
+  sendDocumentsPendingEmail,
+  sendDocumentsVerifiedEmail,
+  sendReadyForJoiningEmail,
+  sendOnboardingCompletedEmail
+} = require('../services/emailService');
+
+// Debug: Onboarding controller restart trigger
+console.log('🔍 Onboarding controller: Email functions loaded successfully');
 
 /**
  * Helper function to update candidate's applicationHistory when onboarding is created/updated
@@ -497,10 +515,34 @@ exports.createOnboarding = async (req, res) => {
       candidatePhone: req.body.candidatePhone,
       position,
       department,
-      stages: ['interview1', 'hrDiscussion', 'documentation', 'success'],
-      currentStage: 'interview1',
+      stages: ['pre-boarding', 'offer-sent', 'offer-accepted', 'documents-pending', 'documents-verified', 'ready-for-joining', 'completed'],
+      currentStage: 'pre-boarding',
       status: 'in-progress'
     });
+
+    // Send pre-boarding email
+    try {
+      const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company';
+      console.log('📧 createOnboarding: About to send pre-boarding email');
+      console.log('📧 createOnboarding: Candidate email:', candidateEmail);
+      console.log('📧 createOnboarding: Candidate name:', candidateName);
+      console.log('📧 createOnboarding: Position:', position);
+      console.log('📧 createOnboarding: Company name:', companyName);
+      console.log('📧 createOnboarding: sendPreBoardingEmail function type:', typeof sendPreBoardingEmail);
+      
+      const result = await sendPreBoardingEmail({
+        candidateName,
+        candidateEmail,
+        position,
+        companyName
+      });
+      console.log('✅ createOnboarding: Pre-boarding email result:', result);
+      console.log(`📧 Pre-boarding email sent to ${candidateEmail}`);
+    } catch (emailError) {
+      console.error('❌ createOnboarding: Failed to send pre-boarding email:', emailError.message);
+      console.error('❌ createOnboarding: Full email error:', emailError);
+      // Don't fail the request if email fails
+    }
 
     res.status(201).json({ success: true, message: 'Onboarding process initiated', data: onboarding });
   } catch (error) {
@@ -530,16 +572,113 @@ exports.advanceStage = async (req, res) => {
     }
 
     const currentIndex = onboarding.stages.indexOf(onboarding.currentStage);
+    console.log('🔍 advanceStage: Current stage:', onboarding.currentStage);
+    console.log('🔍 advanceStage: All stages:', onboarding.stages);
+    console.log('🔍 advanceStage: Current index:', currentIndex);
+    
     if (currentIndex < onboarding.stages.length - 1) {
+      const previousStage = onboarding.currentStage;
       onboarding.currentStage = onboarding.stages[currentIndex + 1];
+      console.log('🔍 advanceStage: New stage:', onboarding.currentStage);
       
-      // If reached success stage, mark as completed
-      if (onboarding.currentStage === 'success') {
+      // If reached completed stage, mark as completed
+      if (onboarding.currentStage === 'completed') {
         onboarding.status = 'completed';
         onboarding.completedAt = Date.now();
       }
       
       await onboarding.save();
+
+      // Send stage-specific email notifications
+      try {
+        const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company';
+        const candidateName = onboarding.candidateName;
+        const candidateEmail = onboarding.candidateEmail;
+        const position = onboarding.position;
+
+        console.log('📧 advanceStage: Attempting to send stage email for stage:', onboarding.currentStage);
+
+        switch (onboarding.currentStage) {
+          case 'pre-boarding':
+            await sendPreBoardingEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              companyName
+            });
+            console.log(`📧 Pre-boarding stage email sent to ${candidateEmail}`);
+            break;
+          
+          case 'offer-sent':
+            await sendOfferSentEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              companyName
+            });
+            console.log(`📧 Offer sent stage email sent to ${candidateEmail}`);
+            break;
+          
+          case 'offer-accepted':
+            await sendOfferAcceptedEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              companyName
+            });
+            console.log(`📧 Offer accepted stage email sent to ${candidateEmail}`);
+            break;
+          
+          case 'documents-pending':
+            // Generate upload URL for documents pending stage
+            const uploadUrl = `http://3.108.172.119/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`;
+            await sendDocumentsPendingEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              uploadUrl,
+              companyName
+            });
+            console.log(`📧 Documents pending stage email sent to ${candidateEmail}`);
+            break;
+          
+          case 'documents-verified':
+            await sendDocumentsVerifiedEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              companyName
+            });
+            console.log(`📧 Documents verified stage email sent to ${candidateEmail}`);
+            break;
+          
+          case 'ready-for-joining':
+            await sendReadyForJoiningEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              joiningDate: onboarding.joiningDate,
+              companyName
+            });
+            console.log(`📧 Ready for joining stage email sent to ${candidateEmail}`);
+            break;
+          
+          case 'completed':
+            await sendOnboardingCompletedEmail({
+              candidateName,
+              candidateEmail,
+              position,
+              companyName
+            });
+            console.log(`📧 Onboarding completed email sent to ${candidateEmail}`);
+            break;
+        }
+      } catch (emailError) {
+        console.error('⚠️ Failed to send onboarding stage notification email:', emailError.message);
+        console.error('⚠️ Full email error:', emailError);
+        // Don't fail the request if email fails
+      }
+      
       res.status(200).json({ success: true, message: 'Stage advanced successfully', data: onboarding });
     } else {
       res.status(400).json({ success: false, message: 'Already at final stage' });
@@ -873,10 +1012,29 @@ exports.sendOffer = async (req, res) => {
     await onboarding.save();
 
     // Get candidate details
-    const candidate = await Candidate.findById(onboarding.candidateId);
+    const candidate = await Candidate.findById(onboarding.applicationId);
+    
+    if (!candidate) {
+      console.error('❌ Candidate not found for ID:', onboarding.applicationId);
+    } else {
+      console.log('✅ Found candidate:', {
+        id: candidate._id,
+        name: `${candidate.firstName} ${candidate.lastName}`,
+        email: candidate.email
+      });
+    }
 
     // Send offer email to candidate
     try {
+      console.log('📧 Attempting to send offer email to candidate...');
+      console.log('📧 Candidate details:', {
+        name: `${candidate.firstName} ${candidate.lastName}`,
+        email: candidate.email,
+        position: designation,
+        joiningDate: startDate
+      });
+      console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
+      
       await sendOfferExtendedEmail({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
@@ -887,6 +1045,7 @@ exports.sendOffer = async (req, res) => {
       console.log(`✅ Offer email sent to ${candidate.email}`);
     } catch (emailError) {
       console.error('⚠️ Failed to send offer email:', emailError.message);
+      console.error('⚠️ Full email error:', emailError);
       // Don't fail the request if email fails
     }
 
