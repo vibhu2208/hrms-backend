@@ -206,20 +206,37 @@ exports.updateEmployee = async (req, res) => {
     // Get the current employee data before update for logging
     const previousEmployee = await TenantEmployee.findById(req.params.id).lean();
 
-    // If department is being updated, also update departmentId
+    // Clean up data before update to handle ObjectId fields properly
     const updateData = { ...req.body };
+    
+    // Handle department field
     if (req.body.department !== undefined) {
-      // If department is being set (even if empty string), update both fields
-      if (req.body.department) {
+      if (req.body.department && req.body.department.trim() !== '') {
         updateData.department = req.body.department;
         updateData.departmentId = req.body.department;
       } else {
-        // If department is being cleared
         updateData.department = null;
         updateData.departmentId = null;
       }
       console.log('📝 Department update:', { department: updateData.department, departmentId: updateData.departmentId });
     }
+    
+    // Handle reportingManager field - convert empty string to null for ObjectId fields
+    if (req.body.reportingManager !== undefined) {
+      if (req.body.reportingManager && req.body.reportingManager.trim() !== '') {
+        updateData.reportingManager = req.body.reportingManager;
+      } else {
+        updateData.reportingManager = null;
+      }
+    }
+    
+    // Handle any other ObjectId fields that might be empty strings
+    const objectIdFields = ['reportingManager', 'department', 'departmentId'];
+    objectIdFields.forEach(field => {
+      if (updateData[field] === '' || updateData[field] === 'null' || updateData[field] === 'undefined') {
+        updateData[field] = null;
+      }
+    });
 
     const employee = await TenantEmployee.findByIdAndUpdate(
       req.params.id,

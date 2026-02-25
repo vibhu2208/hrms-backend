@@ -73,10 +73,30 @@ exports.getJobPosting = async (req, res) => {
 exports.createJobPosting = async (req, res) => {
   try {
     const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+    const Department = getTenantModel(req.tenant.connection, 'Department');
+    
+    // Validate required fields
+    if (!req.body.title) {
+      return res.status(400).json({ success: false, message: 'Job title is required' });
+    }
+    
+    if (!req.body.department) {
+      return res.status(400).json({ success: false, message: 'Department is required for job posting' });
+    }
+    
+    // Validate department exists
+    if (Department) {
+      const departmentExists = await Department.findById(req.body.department);
+      if (!departmentExists) {
+        return res.status(400).json({ success: false, message: 'Selected department does not exist' });
+      }
+    }
+    
     req.body.postedBy = req.user.employeeId;
     const job = await JobPosting.create(req.body);
     res.status(201).json({ success: true, message: 'Job posting created successfully', data: job });
   } catch (error) {
+    console.error('Error creating job posting:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -84,12 +104,23 @@ exports.createJobPosting = async (req, res) => {
 exports.updateJobPosting = async (req, res) => {
   try {
     const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+    const Department = getTenantModel(req.tenant.connection, 'Department');
+    
+    // If department is being updated, validate it exists
+    if (req.body.department && Department) {
+      const departmentExists = await Department.findById(req.body.department);
+      if (!departmentExists) {
+        return res.status(400).json({ success: false, message: 'Selected department does not exist' });
+      }
+    }
+    
     const job = await JobPosting.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job posting not found' });
     }
     res.status(200).json({ success: true, message: 'Job posting updated successfully', data: job });
   } catch (error) {
+    console.error('Error updating job posting:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -155,11 +155,52 @@ exports.sendToOnboarding = async (req, res) => {
       });
     }
 
-    if (!candidate.appliedFor.department) {
-      return res.status(400).json({
-        success: false,
-        message: 'Department information is missing from job posting'
-      });
+    // Check if department exists in job posting, if not try to assign a default
+    let departmentId = candidate.appliedFor.department;
+    
+    if (!departmentId) {
+      console.warn(`⚠️ Job posting ${candidate.appliedFor._id} missing department, trying to assign default`);
+      
+      // Try to get a default department
+      const Department = getTenantModel(req.tenant.connection, 'Department');
+      if (Department) {
+        try {
+          const defaultDept = await Department.findOne({ isActive: true }).sort({ createdAt: 1 });
+          if (defaultDept) {
+            departmentId = defaultDept._id;
+            console.log(`✅ Assigned default department ${defaultDept.name} for onboarding`);
+            
+            // Update the job posting with the default department to prevent future issues
+            const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+            if (JobPosting) {
+              try {
+                await JobPosting.findByIdAndUpdate(candidate.appliedFor._id, { 
+                  department: defaultDept._id 
+                });
+                console.log(`✅ Updated job posting ${candidate.appliedFor._id} with default department`);
+              } catch (updateError) {
+                console.warn('⚠️ Could not update job posting with department:', updateError.message);
+              }
+            }
+          } else {
+            return res.status(400).json({
+              success: false,
+              message: 'No departments available in the system. Please create at least one department before proceeding with onboarding.'
+            });
+          }
+        } catch (deptError) {
+          console.error('❌ Error finding default department:', deptError);
+          return res.status(400).json({
+            success: false,
+            message: 'Department information is missing from job posting and no default department could be assigned'
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Department information is missing from job posting'
+        });
+      }
     }
 
     // If existing onboarding exists but not completed, update it
@@ -171,7 +212,7 @@ exports.sendToOnboarding = async (req, res) => {
       existingOnboarding.candidateName = `${candidate.firstName} ${candidate.lastName}`;
       existingOnboarding.candidatePhone = candidate.phone;
       existingOnboarding.position = candidate.appliedFor.title;
-      existingOnboarding.department = candidate.appliedFor.department; // This is already an ObjectId
+      existingOnboarding.department = departmentId; // Use resolved departmentId
       existingOnboarding.status = 'preboarding';
       existingOnboarding.createdBy = hrUserId;
       existingOnboarding.assignedHR = hrUserId;
@@ -207,7 +248,7 @@ exports.sendToOnboarding = async (req, res) => {
         candidateEmail: candidate.email,
         candidatePhone: candidate.phone,
         position: candidate.appliedFor.title,
-        department: candidate.appliedFor.department, // This is already an ObjectId, not ._id
+        department: departmentId, // Use resolved departmentId
         status: 'preboarding',
         createdBy: hrUserId,
         assignedHR: hrUserId,

@@ -623,26 +623,54 @@ class EmployeeCreationService {
     }
     
     // Check department - it's required in onboarding schema, but verify it exists
-    if (!onboarding.department) {
+    let departmentResolved = false;
+    
+    if (onboarding.department) {
+      // Department is directly available in onboarding
+      departmentResolved = true;
+    } else if (onboarding.jobId) {
       // Try to get from jobId if available
-      if (onboarding.jobId) {
-        const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
-        if (JobPosting) {
-          try {
-            const job = await JobPosting.findById(onboarding.jobId).populate('department');
-            if (job && job.department) {
-              // Department exists in job, this is okay
-            } else {
-              errors.push('Department is required - not found in job posting');
-            }
-          } catch (jobError) {
-            errors.push('Department is required - could not verify from job posting');
+      const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+      if (JobPosting) {
+        try {
+          const job = await JobPosting.findById(onboarding.jobId).populate('department');
+          if (job && job.department) {
+            // Department exists in job, update onboarding record with department
+            const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+            await Onboarding.findByIdAndUpdate(onboardingId, { 
+              department: job.department._id 
+            });
+            departmentResolved = true;
+            console.log(`✅ Updated onboarding ${onboardingId} with department from job posting: ${job.department.name}`);
           }
-        } else {
-          errors.push('Department is required');
+        } catch (jobError) {
+          console.warn('⚠️ Could not fetch department from job posting:', jobError.message);
         }
-      } else {
-        errors.push('Department is required');
+      }
+    }
+    
+    if (!departmentResolved) {
+      // Try to assign a default department if available
+      const Department = getTenantModel(tenantConnection, 'Department');
+      if (Department) {
+        try {
+          const defaultDept = await Department.findOne({ isActive: true }).sort({ createdAt: 1 });
+          if (defaultDept) {
+            const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+            await Onboarding.findByIdAndUpdate(onboardingId, { 
+              department: defaultDept._id 
+            });
+            departmentResolved = true;
+            warnings.push(`Department was missing - assigned to default department: ${defaultDept.name}`);
+            console.log(`⚠️ Assigned default department ${defaultDept.name} to onboarding ${onboardingId}`);
+          }
+        } catch (deptError) {
+          console.warn('⚠️ Could not assign default department:', deptError.message);
+        }
+      }
+      
+      if (!departmentResolved) {
+        errors.push('Department is required but could not be resolved from job posting or default department');
       }
     }
 
