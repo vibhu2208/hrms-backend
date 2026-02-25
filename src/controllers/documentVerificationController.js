@@ -182,6 +182,97 @@ exports.verifyDocument = async (req, res) => {
     
     await document.save();
     
+    // SYNC: Also update the Onboarding collection to keep both systems in sync
+    try {
+      const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+      const onboarding = await Onboarding.findById(document.onboardingId);
+      
+      if (onboarding) {
+        // Map CandidateDocument types to onboarding document types
+        const documentTypeMapping = {
+          'aadhaar_card': 'aadhar',
+          'pan_card': 'pan',
+          'educational_certificate': 'education_certificates',
+          'experience_letter': 'experience_letters',
+          'photograph': 'photo',
+          'resume': 'resume',
+          'bank_details': 'bank_details',
+          'passport': 'passport',
+          'address_proof': 'address_proof',
+          'other': 'other'
+        };
+        
+        const mappedDocType = documentTypeMapping[document.documentType] || document.documentType;
+        
+        // Find the document in the onboarding documents array using multiple criteria
+        let onboardingDoc = onboarding.documents.find(doc => 
+          doc.type === mappedDocType || doc.name === document.documentName
+        );
+        
+        // If not found by mapped type, try original type
+        if (!onboardingDoc) {
+          onboardingDoc = onboarding.documents.find(doc => 
+            doc.type === document.documentType || doc.name === document.documentName
+          );
+        }
+        
+        // If still not found, try by similar names (case insensitive)
+        if (!onboardingDoc) {
+          onboardingDoc = onboarding.documents.find(doc => 
+            doc.name && document.documentName && 
+            doc.name.toLowerCase().includes(document.documentName.toLowerCase()) ||
+            document.documentName.toLowerCase().includes(doc.name.toLowerCase())
+          );
+        }
+        
+        if (onboardingDoc) {
+          onboardingDoc.verified = true;
+          onboardingDoc.verifiedBy = req.user._id;
+          onboardingDoc.verifiedAt = new Date();
+          onboardingDoc.verificationNotes = remarks;
+          onboardingDoc.status = 'verified';
+          
+          // Update required documents checklist
+          const requiredDocIndex = onboarding.requiredDocuments.findIndex(doc => 
+            doc.type === mappedDocType || doc.type === document.documentType
+          );
+          if (requiredDocIndex >= 0) {
+            onboarding.requiredDocuments[requiredDocIndex].verified = true;
+          }
+          
+          // Add audit trail
+          onboarding.auditTrail.push({
+            action: 'document_approved',
+            description: `Document approved: ${document.documentType}`,
+            performedBy: req.user._id,
+            metadata: { documentType: document.documentType, notes: remarks },
+            timestamp: new Date()
+          });
+          
+          // Check if all required documents are verified
+          const allRequiredVerified = onboarding.requiredDocuments
+            .filter(doc => doc.isRequired)
+            .every(doc => doc.verified);
+
+          if (allRequiredVerified && onboarding.status === 'docs_pending') {
+            onboarding.status = 'docs_verified';
+            onboarding.auditTrail.push({
+              action: 'all_documents_verified',
+              description: 'All required documents have been verified',
+              performedBy: req.user._id,
+              timestamp: new Date()
+            });
+          }
+          
+          await onboarding.save();
+          console.log(`✅ Synced document verification to Onboarding collection: ${document.documentType}`);
+        }
+      }
+    } catch (syncError) {
+      console.error('❌ Failed to sync document verification to Onboarding collection:', syncError);
+      // Don't fail the main operation if sync fails
+    }
+    
     console.log(`✅ Document verified: ${document.documentName} for ${document.candidateName}`);
     
     res.status(200).json({
@@ -236,6 +327,83 @@ exports.unverifyDocument = async (req, res) => {
     document.addToHistory('unverified', req.user._id, document.unverifiedByName, reason);
     
     await document.save();
+    
+    // SYNC: Also update the Onboarding collection to keep both systems in sync
+    try {
+      const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+      const onboarding = await Onboarding.findById(document.onboardingId);
+      
+      if (onboarding) {
+        // Map CandidateDocument types to onboarding document types
+        const documentTypeMapping = {
+          'aadhaar_card': 'aadhar',
+          'pan_card': 'pan',
+          'educational_certificate': 'education_certificates',
+          'experience_letter': 'experience_letters',
+          'photograph': 'photo',
+          'resume': 'resume',
+          'bank_details': 'bank_details',
+          'passport': 'passport',
+          'address_proof': 'address_proof',
+          'other': 'other'
+        };
+        
+        const mappedDocType = documentTypeMapping[document.documentType] || document.documentType;
+        
+        // Find the document in the onboarding documents array using multiple criteria
+        let onboardingDoc = onboarding.documents.find(doc => 
+          doc.type === mappedDocType || doc.name === document.documentName
+        );
+        
+        // If not found by mapped type, try original type
+        if (!onboardingDoc) {
+          onboardingDoc = onboarding.documents.find(doc => 
+            doc.type === document.documentType || doc.name === document.documentName
+          );
+        }
+        
+        // If still not found, try by similar names (case insensitive)
+        if (!onboardingDoc) {
+          onboardingDoc = onboarding.documents.find(doc => 
+            doc.name && document.documentName && 
+            doc.name.toLowerCase().includes(document.documentName.toLowerCase()) ||
+            document.documentName.toLowerCase().includes(doc.name.toLowerCase())
+          );
+        }
+        
+        if (onboardingDoc) {
+          onboardingDoc.verified = false;
+          onboardingDoc.verifiedBy = req.user._id;
+          onboardingDoc.verifiedAt = new Date();
+          onboardingDoc.verificationNotes = reason;
+          onboardingDoc.status = 'rejected';
+          onboardingDoc.rejectionReason = reason;
+          
+          // Update required documents checklist
+          const requiredDocIndex = onboarding.requiredDocuments.findIndex(doc => 
+            doc.type === mappedDocType || doc.type === document.documentType
+          );
+          if (requiredDocIndex >= 0) {
+            onboarding.requiredDocuments[requiredDocIndex].verified = false;
+          }
+          
+          // Add audit trail
+          onboarding.auditTrail.push({
+            action: 'document_rejected',
+            description: `Document rejected: ${document.documentType}`,
+            performedBy: req.user._id,
+            metadata: { documentType: document.documentType, notes: reason },
+            timestamp: new Date()
+          });
+          
+          await onboarding.save();
+          console.log(`✅ Synced document rejection to Onboarding collection: ${document.documentType}`);
+        }
+      }
+    } catch (syncError) {
+      console.error('❌ Failed to sync document rejection to Onboarding collection:', syncError);
+      // Don't fail the main operation if sync fails
+    }
     
     // Update upload token to mark resubmission required
     const uploadToken = await CandidateDocumentUploadToken.findOne({
@@ -341,6 +509,117 @@ exports.bulkVerifyDocuments = async (req, res) => {
         }
       }
     );
+    
+    // SYNC: Also update the Onboarding collection for bulk verified documents
+    try {
+      const documents = await CandidateDocument.find({ 
+        _id: { $in: documentIds }, 
+        isActive: true 
+      }).select('onboardingId documentType documentName');
+      
+      const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+      
+      // Group documents by onboarding ID for efficient updates
+      const onboardingUpdates = {};
+      documents.forEach(doc => {
+        if (!onboardingUpdates[doc.onboardingId]) {
+          onboardingUpdates[doc.onboardingId] = [];
+        }
+        onboardingUpdates[doc.onboardingId].push(doc);
+      });
+      
+      // Update each onboarding record
+      for (const [onboardingId, docs] of Object.entries(onboardingUpdates)) {
+        const onboarding = await Onboarding.findById(onboardingId);
+        if (onboarding) {
+          // Map CandidateDocument types to onboarding document types
+          const documentTypeMapping = {
+            'aadhaar_card': 'aadhar',
+            'pan_card': 'pan',
+            'educational_certificate': 'education_certificates',
+            'experience_letter': 'experience_letters',
+            'photograph': 'photo',
+            'resume': 'resume',
+            'bank_details': 'bank_details',
+            'passport': 'passport',
+            'address_proof': 'address_proof',
+            'other': 'other'
+          };
+          
+          docs.forEach(doc => {
+            const mappedDocType = documentTypeMapping[doc.documentType] || doc.documentType;
+            
+            // Find the document in the onboarding documents array using multiple criteria
+            let onboardingDoc = onboarding.documents.find(oDoc => 
+              oDoc.type === mappedDocType || oDoc.name === doc.documentName
+            );
+            
+            // If not found by mapped type, try original type
+            if (!onboardingDoc) {
+              onboardingDoc = onboarding.documents.find(oDoc => 
+                oDoc.type === doc.documentType || oDoc.name === doc.documentName
+              );
+            }
+            
+            // If still not found, try by similar names (case insensitive)
+            if (!onboardingDoc) {
+              onboardingDoc = onboarding.documents.find(oDoc => 
+                oDoc.name && doc.documentName && 
+                oDoc.name.toLowerCase().includes(doc.documentName.toLowerCase()) ||
+                doc.documentName.toLowerCase().includes(oDoc.name.toLowerCase())
+              );
+            }
+            
+            if (onboardingDoc) {
+              onboardingDoc.verified = true;
+              onboardingDoc.verifiedBy = req.user._id;
+              onboardingDoc.verifiedAt = verifiedAt;
+              onboardingDoc.verificationNotes = remarks;
+              onboardingDoc.status = 'verified';
+            }
+            
+            // Update required documents checklist
+            const requiredDocIndex = onboarding.requiredDocuments.findIndex(rDoc => 
+              rDoc.type === mappedDocType || rDoc.type === doc.documentType
+            );
+            if (requiredDocIndex >= 0) {
+              onboarding.requiredDocuments[requiredDocIndex].verified = true;
+            }
+            
+            // Add audit trail
+            onboarding.auditTrail.push({
+              action: 'document_approved',
+              description: `Document bulk approved: ${doc.documentType}`,
+              performedBy: req.user._id,
+              metadata: { documentType: doc.documentType, notes: remarks },
+              timestamp: verifiedAt
+            });
+          });
+          
+          // Check if all required documents are verified
+          const allRequiredVerified = onboarding.requiredDocuments
+            .filter(doc => doc.isRequired)
+            .every(doc => doc.verified);
+
+          if (allRequiredVerified && onboarding.status === 'docs_pending') {
+            onboarding.status = 'docs_verified';
+            onboarding.auditTrail.push({
+              action: 'all_documents_verified',
+              description: 'All required documents have been verified (bulk)',
+              performedBy: req.user._id,
+              timestamp: verifiedAt
+            });
+          }
+          
+          await onboarding.save();
+        }
+      }
+      
+      console.log(`✅ Synced bulk verification to Onboarding collection for ${documents.length} documents`);
+    } catch (syncError) {
+      console.error('❌ Failed to sync bulk verification to Onboarding collection:', syncError);
+      // Don't fail the main operation if sync fails
+    }
     
     console.log(`✅ Bulk verified ${result.modifiedCount} documents`);
     

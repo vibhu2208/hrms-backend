@@ -329,7 +329,17 @@ exports.submitApplication = async (req, res) => {
       email: req.body.email?.toLowerCase(),
       phone: req.body.phone,
       alternatePhone: req.body.alternatePhone || '',
+      // Additional personal information
+      dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : undefined,
+      gender: req.body.gender || '',
+      bloodGroup: req.body.bloodGroup || '',
+      maritalStatus: req.body.maritalStatus || '',
+      // Address information
+      address: parseJsonField(req.body.address),
       currentLocation: req.body.currentLocation || '',
+      // Emergency contact
+      emergencyContact: parseJsonField(req.body.emergencyContact),
+      // Job application specific
       appliedFor: jobId,
       source: req.body.source || 'job-portal',
       stage: 'applied',

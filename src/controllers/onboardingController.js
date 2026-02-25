@@ -1486,6 +1486,83 @@ exports.verifyDocument = async (req, res) => {
 
     await onboarding.save();
 
+    // SYNC: Also update the CandidateDocument collection to keep both systems in sync
+    try {
+      const CandidateDocument = getTenantModel(req.tenant.connection, 'CandidateDocument');
+      
+      // Map onboarding document types to CandidateDocument types
+      const documentTypeMapping = {
+        'aadhar': 'aadhaar_card',
+        'pan': 'pan_card',
+        'education_certificates': 'educational_certificate',
+        'experience_letters': 'experience_letter',
+        'photo': 'photograph',
+        'resume': 'resume',
+        'bank_details': 'bank_details',
+        'passport': 'passport',
+        'address_proof': 'address_proof',
+        'other': 'other'
+      };
+      
+      const mappedDocType = documentTypeMapping[document.type] || document.type;
+      
+      // Try to find the candidate document by multiple criteria
+      let candidateDoc = await CandidateDocument.findOne({
+        onboardingId: onboarding._id,
+        documentType: mappedDocType,
+        isActive: true
+      });
+
+      // If not found by mapped type, try original type
+      if (!candidateDoc) {
+        candidateDoc = await CandidateDocument.findOne({
+          onboardingId: onboarding._id,
+          documentType: document.type,
+          isActive: true
+        });
+      }
+
+      // If still not found, try by document name
+      if (!candidateDoc && document.name) {
+        candidateDoc = await CandidateDocument.findOne({
+          onboardingId: onboarding._id,
+          documentName: document.name,
+          isActive: true
+        });
+      }
+
+      if (candidateDoc) {
+        candidateDoc.verificationStatus = action === 'approve' ? 'verified' : 'unverified';
+        candidateDoc.verifiedBy = hrUserId;
+        candidateDoc.verifiedByName = `${req.user.firstName} ${req.user.lastName}`;
+        candidateDoc.verifiedAt = new Date();
+        candidateDoc.verificationRemarks = notes;
+        
+        if (action === 'reject') {
+          candidateDoc.unverifiedBy = hrUserId;
+          candidateDoc.unverifiedByName = `${req.user.firstName} ${req.user.lastName}`;
+          candidateDoc.unverifiedAt = new Date();
+          candidateDoc.unverificationReason = notes;
+        }
+
+        // Add to history
+        candidateDoc.addToHistory(
+          action === 'approve' ? 'verified' : 'unverified', 
+          hrUserId, 
+          `${req.user.firstName} ${req.user.lastName}`, 
+          notes
+        );
+
+        await candidateDoc.save();
+        console.log(`✅ Synced document verification to CandidateDocument collection: ${document.type} (${candidateDoc.documentType})`);
+      } else {
+        console.log(`⚠️ Could not find matching CandidateDocument for onboarding document: ${document.type} / ${document.name}`);
+      }
+    } catch (syncError) {
+      console.error('❌ Failed to sync document verification to CandidateDocument collection:', syncError);
+      // Don't fail the main operation if sync fails
+    }
+
     // Send notification email to candidate if document was rejected
     if (action === 'reject') {
       try {
