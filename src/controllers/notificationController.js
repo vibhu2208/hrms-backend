@@ -1,7 +1,8 @@
-const Notification = require('../models/Notification');
+const { getTenantModel } = require('../utils/tenantModels');
 
 exports.getNotifications = async (req, res) => {
   try {
+    const Notification = getTenantModel(req.tenant.connection, 'Notification');
     const { isRead, type, priority } = req.query;
     let query = { recipient: req.user._id };
 
@@ -25,12 +26,14 @@ exports.getNotifications = async (req, res) => {
       data: notifications 
     });
   } catch (error) {
+    console.error('Error fetching notifications:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.markAsRead = async (req, res) => {
   try {
+    const Notification = getTenantModel(req.tenant.connection, 'Notification');
     const notification = await Notification.findById(req.params.id);
     
     if (!notification) {
@@ -47,12 +50,14 @@ exports.markAsRead = async (req, res) => {
 
     res.status(200).json({ success: true, data: notification });
   } catch (error) {
+    console.error('Error marking notification as read:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.markAllAsRead = async (req, res) => {
   try {
+    const Notification = getTenantModel(req.tenant.connection, 'Notification');
     await Notification.updateMany(
       { recipient: req.user._id, isRead: false },
       { isRead: true, readAt: Date.now() }
@@ -60,12 +65,14 @@ exports.markAllAsRead = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'All notifications marked as read' });
   } catch (error) {
+    console.error('Error marking all notifications as read:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.deleteNotification = async (req, res) => {
   try {
+    const Notification = getTenantModel(req.tenant.connection, 'Notification');
     const notification = await Notification.findById(req.params.id);
     
     if (!notification) {
@@ -79,13 +86,15 @@ exports.deleteNotification = async (req, res) => {
     await notification.deleteOne();
     res.status(200).json({ success: true, message: 'Notification deleted' });
   } catch (error) {
+    console.error('Error deleting notification:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // Helper function to create notifications (used by other controllers)
-exports.createNotification = async (data) => {
+exports.createNotification = async (tenantConnection, data) => {
   try {
+    const Notification = getTenantModel(tenantConnection, 'Notification');
     return await Notification.create(data);
   } catch (error) {
     console.error('Error creating notification:', error);
