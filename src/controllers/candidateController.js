@@ -10,6 +10,7 @@ const {
 const onboardingAutomationService = require('../services/onboardingAutomationService');
 const reductoService = require('../services/reductoService');
 const awsS3Service = require('../services/awsS3Service');
+const { getS3FileUrl } = require('../middlewares/s3Upload');
 
 exports.getCandidates = async (req, res) => {
   try {
@@ -47,6 +48,9 @@ exports.getCandidates = async (req, res) => {
         .populate('referredBy', 'firstName lastName')
         .select('+resume')
         .sort({ createdAt: -1 });
+      
+      // Process resume URLs to generate S3 signed URLs
+      candidates = await processCandidateResumes(candidates);
       
       // Filter out candidates who are active employees by email (but allow ex-employees)
       if (activeEmployeeEmails.length > 0) {
@@ -145,18 +149,21 @@ exports.getCandidates = async (req, res) => {
       };
     });
 
+    // Process resume URLs for search results
+    const processedResults = await processCandidateResumes(resultsWithMetadata);
+
     // Sort by relevance score (already sorted by intelligentSearch, but ensure it)
-    resultsWithMetadata.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+    processedResults.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
     
 
     res.status(200).json({ 
       success: true, 
-      count: resultsWithMetadata.length, 
-      data: resultsWithMetadata,
+      count: processedResults.length, 
+      data: processedResults,
       searchMetadata: {
         query: search,
         searchType: 'intelligent',
-        totalResults: resultsWithMetadata.length
+        totalResults: processedResults.length
       }
     });
   } catch (error) {
@@ -177,7 +184,10 @@ exports.getCandidate = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
-    res.status(200).json({ success: true, data: candidate });
+    // Process resume URLs to generate S3 signed URLs
+    const processedCandidate = await processCandidateResumes([candidate]);
+
+    res.status(200).json({ success: true, data: processedCandidate[0] });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -187,6 +197,28 @@ exports.getCandidate = async (req, res) => {
 const normalizePhone = (phone) => {
   if (!phone) return null;
   return phone.replace(/\D/g, '');
+};
+
+// Helper function to process candidate resume URLs and generate S3 signed URLs
+const processCandidateResumes = async (candidates) => {
+  return candidates.map(candidate => {
+    const candidateObj = candidate.toObject ? candidate.toObject() : candidate;
+    
+    // Process resume URL for S3 files
+    if (candidateObj.resume) {
+      if (candidateObj.resume.isS3File && candidateObj.resume.s3Key) {
+        // Generate signed URL for S3 files
+        try {
+          candidateObj.resume.url = awsS3Service.generateSignedUrl(candidateObj.resume.s3Key, 3600); // 1 hour expiry
+        } catch (error) {
+          console.error('❌ Error generating signed URL for candidate:', candidateObj._id, error);
+          // Keep the original URL as fallback
+        }
+      }
+    }
+    
+    return candidateObj;
+  });
 };
 
 exports.createCandidate = async (req, res) => {

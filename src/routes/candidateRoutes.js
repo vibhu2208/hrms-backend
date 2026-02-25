@@ -32,6 +32,7 @@ const {
   downloadTemplate
 } = require('../controllers/candidateBulkUploadController');
 const { uploadBulk, uploadResume } = require('../middlewares/fileUpload');
+const { uploadResumeToS3, handleUploadError: handleS3UploadError } = require('../middlewares/s3Upload');
 const { sendToOnboarding } = require('../controllers/onboardingController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
@@ -92,8 +93,8 @@ router.post('/bulk/validate', uploadBulk.single('file'), validateBulkUpload);
 router.post('/bulk/import', importBulkCandidates);
 router.get('/bulk/template', downloadTemplate);
 
-// Resume upload and parsing route
-router.post('/upload-resume', uploadResume, uploadResumeController);
+// Resume upload and parsing route (S3 enabled)
+router.post('/upload-resume', uploadResumeToS3, handleS3UploadError, uploadResumeController);
 
 // Fix ex-employee candidate names
 router.post('/fix-ex-employee-names', fixExEmployeeCandidateNames);
