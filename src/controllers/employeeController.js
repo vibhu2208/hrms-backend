@@ -106,6 +106,22 @@ exports.getEmployee = async (req, res) => {
       });
     }
 
+    console.log('Employee data from DB:', employee);
+    console.log('Salary data from DB:', employee.salary);
+
+    // Clean and validate salary data before sending to frontend
+    if (employee.salary && typeof employee.salary === 'object') {
+      employee.salary = {
+        currency: employee.salary.currency || 'USD',
+        basic: parseFloat(employee.salary.basic) || 0,
+        hra: parseFloat(employee.salary.hra) || 0,
+        allowances: parseFloat(employee.salary.allowances) || 0,
+        deductions: parseFloat(employee.salary.deductions) || 0,
+        total: parseFloat(employee.salary.total) || 0
+      };
+      console.log('Cleaned salary data:', employee.salary);
+    }
+
     // Populate department information manually since department is stored as string
     // Try to get department from departmentId first, then from department field
     const deptId = employee.departmentId || employee.department;
@@ -147,33 +163,67 @@ exports.createEmployee = async (req, res) => {
     const employeeCount = await TenantEmployee.countDocuments();
     const employeeCode = `EMP${String(employeeCount + 1).padStart(4, '0')}`;
 
-    // Prepare employee data
+    // Prepare employee data - include all fields from request body
     const employeeData = {
+      // Personal Information
       firstName: req.body.firstName,
       lastName: req.body.lastName,
       email: req.body.email,
       phone: req.body.phone,
+      dateOfBirth: req.body.dateOfBirth,
+      gender: req.body.gender,
+      bloodGroup: req.body.bloodGroup,
+      maritalStatus: req.body.maritalStatus,
+      alternatePhone: req.body.alternatePhone,
+      address: req.body.address,
+      profilePicture: req.body.profilePicture,
+      
+      // Employment Information
       employeeCode,
       joiningDate: req.body.joiningDate || new Date(),
       designation: req.body.designation,
+      employmentType: req.body.employmentType || 'full-time',
+      
+      // Contract Information
+      contractId: req.body.contractId,
+      hasActiveContract: req.body.hasActiveContract || false,
+      
+      // Department and Manager
       department: req.body.department, // Store department ID as string
       departmentId: req.body.department, // Also store as ObjectId reference
       reportingManager: req.body.reportingManager,
-      salary: req.body.salary || {
-        basic: 0,
-        hra: 0,
-        allowances: 0,
-        total: 0
+      
+      // Salary Information - Ensure proper number conversion
+      salary: {
+        currency: req.body.salary?.currency || 'USD',
+        basic: parseFloat(req.body.salary?.basic) || 0,
+        hra: parseFloat(req.body.salary?.hra) || 0,
+        allowances: parseFloat(req.body.salary?.allowances) || 0,
+        deductions: parseFloat(req.body.salary?.deductions) || 0,
+        total: parseFloat(req.body.salary?.total) || 0
       },
+      
+      // Bank Details
+      bankDetails: req.body.bankDetails,
+      
+      // Emergency Contact
+      emergencyContact: req.body.emergencyContact,
+      
+      // Status and Lifecycle
+      status: req.body.status || 'active',
       isActive: req.body.isActive !== undefined ? req.body.isActive : true,
       isFirstLogin: true,
       mustChangePassword: true,
+      
+      // Metadata
       createdBy: req.user._id
     };
 
+    console.log('Creating employee with salary data:', employeeData.salary);
     const employee = await TenantEmployee.create(employeeData);
 
     console.log(`✅ Created employee: ${employee.firstName} ${employee.lastName} (${employeeCode})`);
+    console.log('Saved employee salary data:', employee.salary);
 
     // Log HR activity
     await logEmployeeCreated(tenantConnection, employee, req);
@@ -238,11 +288,32 @@ exports.updateEmployee = async (req, res) => {
       }
     });
 
+    // Clean and validate salary data before updating
+    if (updateData.salary && typeof updateData.salary === 'object') {
+      console.log('Original salary data received:', updateData.salary);
+      console.log('Original currency received:', updateData.salary.currency);
+      
+      updateData.salary = {
+        currency: updateData.salary.currency || 'USD',
+        basic: parseFloat(updateData.salary.basic) || 0,
+        hra: parseFloat(updateData.salary.hra) || 0,
+        allowances: parseFloat(updateData.salary.allowances) || 0,
+        deductions: parseFloat(updateData.salary.deductions) || 0,
+        total: parseFloat(updateData.salary.total) || 0
+      };
+      console.log('Cleaned salary data for update:', updateData.salary);
+      console.log('Final currency being saved:', updateData.salary.currency);
+    }
+
     const employee = await TenantEmployee.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
     ).lean();
+
+    console.log('Employee after update:', employee);
+    console.log('Salary after update:', employee.salary);
+    console.log('Currency after update:', employee.salary?.currency);
 
     if (!employee) {
       return res.status(404).json({
@@ -368,14 +439,35 @@ exports.deleteEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
     const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);
 
-    const employee = await TenantEmployee.findByIdAndDelete(req.params.id);
+    // First, find the employee to get their email for user cleanup
+    const employee = await TenantEmployee.findById(req.params.id);
 
     if (!employee) {
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
       });
+    }
+
+    console.log(`🗑️ Deleting employee: ${employee.firstName} ${employee.lastName} (${employee.email})`);
+
+    // Delete the employee record
+    await TenantEmployee.findByIdAndDelete(req.params.id);
+    console.log('✅ Employee record deleted');
+
+    // Also delete the associated user account if it exists
+    try {
+      const userDeleted = await TenantUser.findOneAndDelete({ email: employee.email });
+      if (userDeleted) {
+        console.log('✅ Associated user account deleted');
+      } else {
+        console.log('ℹ️ No associated user account found');
+      }
+    } catch (userError) {
+      console.warn('⚠️ Failed to delete associated user account:', userError.message);
+      // Don't fail the entire operation if user deletion fails
     }
 
     // Log HR activity
@@ -392,6 +484,7 @@ exports.deleteEmployee = async (req, res) => {
       message: 'Employee deleted successfully'
     });
   } catch (error) {
+    console.error('❌ Error deleting employee:', error);
     res.status(500).json({
       success: false,
       message: error.message

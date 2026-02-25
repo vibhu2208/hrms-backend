@@ -26,6 +26,36 @@ const candidateSchema = new mongoose.Schema({
     required: true
   },
   alternatePhone: String,
+  // Additional personal information
+  dateOfBirth: {
+    type: Date
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female', 'other']
+  },
+  bloodGroup: {
+    type: String,
+    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+  },
+  maritalStatus: {
+    type: String,
+    enum: ['single', 'married', 'divorced', 'widowed']
+  },
+  // Address information
+  address: {
+    street: { type: String },
+    city: { type: String },
+    state: { type: String },
+    zipCode: { type: String },
+    country: { type: String }
+  },
+  // Emergency contact
+  emergencyContact: {
+    name: { type: String },
+    relationship: { type: String },
+    phone: { type: String }
+  },
   currentLocation: String,
   preferredLocation: [String],
   source: {
