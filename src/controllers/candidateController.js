@@ -839,6 +839,13 @@ exports.scheduleInterview = async (req, res) => {
     try {
       console.log('📧 Sending interview notification email to:', candidate.email);
       console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
+      console.log('📧 Interview details:', {
+        interviewType,
+        scheduledDate,
+        scheduledTime,
+        candidateName: `${candidate.firstName} ${candidate.lastName}`,
+        position: candidate.appliedFor?.title
+      });
       
       await sendInterviewNotification({
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
