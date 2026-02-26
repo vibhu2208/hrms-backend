@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const mongoose = require('mongoose');
 
 /**
  * Email Service for HRMS
@@ -1251,6 +1252,139 @@ const sendOfferExtendedEmail = async ({
   } catch (error) {
     console.error('❌ Error sending offer email:', error);
     return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send offer letter using selected template with variable replacement
+ * @param {Object} options - Email options
+ * @param {string} options.templateId - Template ID to use
+ * @param {string} options.candidateName - Candidate name
+ * @param {string} options.candidateEmail - Candidate email
+ * @param {string} options.position - Position/Job title
+ * @param {string} options.designation - Designation
+ * @param {number} options.ctc - Annual CTC
+ * @param {Date} options.joiningDate - Joining date
+ * @param {Object} options.offerDetails - Offer details for template variables
+ * @param {string} options.companyName - Company name
+ */
+const sendOfferLetterWithTemplate = async ({
+  templateId,
+  candidateName,
+  candidateEmail,
+  position,
+  designation,
+  ctc,
+  joiningDate,
+  offerDetails = {},
+  companyName = 'SPC Management Services PVT Ltd.'
+}) => {
+  try {
+    // Get OfferTemplate model (global, not tenant-specific)
+    const OfferTemplate = require('../models/OfferTemplate');
+    
+    // Check database connection state
+    if (mongoose.connection.readyState !== 1) {
+      console.log('🔌 Database not connected (state:', mongoose.connection.readyState, '), connecting...');
+      try {
+        await mongoose.connect(process.env.MONGODB_URI);
+        console.log('✅ Database connected for email service');
+      } catch (dbError) {
+        console.error('❌ Failed to connect to database:', dbError.message);
+        throw new Error(`Database connection failed: ${dbError.message}`);
+      }
+    } else {
+      console.log('✅ Database already connected');
+    }
+    
+    // Find the template
+    console.log('🔍 Looking for template with ID:', templateId);
+    const template = await OfferTemplate.findById(templateId);
+    if (!template) {
+      throw new Error(`Template with ID ${templateId} not found`);
+    }
+    console.log('✅ Template found:', template.name);
+
+    // Replace template variables with actual values
+    let htmlContent = template.content;
+    let subjectContent = template.subject;
+
+    // Define all possible variables with defaults
+    const variables = {
+      candidateName: candidateName || 'Candidate',
+      position: position || designation || 'Position',
+      designation: designation || position || 'Designation',
+      ctc: ctc || 0,
+      annualCTC: ctc || 0,
+      monthlySalary: offerDetails.monthlySalary || 0,
+      basic: offerDetails.basic || 0,
+      hra: offerDetails.hra || 0,
+      allowances: offerDetails.allowances || 0,
+      joiningDate: joiningDate ? new Date(joiningDate).toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      }) : 'To be determined',
+      contractStartDate: offerDetails.contractStartDate || joiningDate || 'To be determined',
+      contractEndDate: offerDetails.contractEndDate || 'To be determined',
+      clientName: offerDetails.clientName || 'Client Organization',
+      location: offerDetails.location || 'Work Location',
+      projectName: offerDetails.projectName || 'Project Name',
+      benefits: offerDetails.benefits || 'Standard benefits package',
+      contractExtensionInfo: offerDetails.contractExtensionInfo || 'Contract extension terms to be discussed',
+      hrName: offerDetails.hrName || 'HR Team',
+      hrDesignation: offerDetails.hrDesignation || 'HR Manager',
+      expiryDate: offerDetails.expiryDate || '3 days from receipt of this email',
+      currentDate: new Date().toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      }),
+      companyName: companyName,
+      ...offerDetails // Include any additional custom variables
+    };
+
+    // Replace variables in both content and subject
+    Object.keys(variables).forEach(key => {
+      const regex = new RegExp(`{{${key}}}`, 'g');
+      const value = variables[key];
+      htmlContent = htmlContent.replace(regex, value);
+      subjectContent = subjectContent.replace(regex, value);
+    });
+
+    // Send the email
+    console.log('📧 Creating email transporter...');
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+    console.log('✅ Email transporter created');
+
+    const mailOptions = {
+      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
+      to: candidateEmail,
+      subject: subjectContent,
+      html: htmlContent,
+      priority: 'high'
+    };
+    
+    console.log('📤 Sending email to:', candidateEmail);
+    console.log('📋 Subject:', subjectContent);
+    console.log('📋 From:', mailOptions.from);
+    
+    await sendEmailWithRetry(transporter, mailOptions);
+
+    console.log(`✅ Offer letter sent using template "${template.name}" to ${candidateEmail}`);
+    
+    return { 
+      success: true, 
+      templateId: template._id,
+      templateName: template.name,
+      recipient: candidateEmail
+    };
+  } catch (error) {
+    console.error('❌ Error sending offer letter with template:', error);
+    throw new Error(`Failed to send offer letter with template: ${error.message}`);
   }
 };
 
@@ -3150,6 +3284,7 @@ module.exports = {
   sendShortlistedEmail,
   sendInterviewCompletedEmail,
   sendOfferExtendedEmail,
+  sendOfferLetterWithTemplate,
   sendOfferLetterWithDocumentLink,
   sendDocumentRequestEmail,
   sendJoiningDateConfirmationEmail,

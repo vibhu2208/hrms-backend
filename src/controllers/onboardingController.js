@@ -34,7 +34,7 @@ const createTransporter = () => {
 };
 
 const { generatePassword, generateEmployeeId } = require('../utils/passwordGenerator');
-const { sendOnboardingEmail, sendHRNotification, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink, sendJoiningDateConfirmationEmail } = require('../services/emailService');
+const { sendOnboardingEmail, sendHRNotification, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink, sendOfferLetterWithTemplate, sendJoiningDateConfirmationEmail } = require('../services/emailService');
 
 /**
  * Helper function to update candidate's applicationHistory when onboarding is created/updated
@@ -759,8 +759,27 @@ exports.sendOffer = async (req, res) => {
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
     // Use global OfferTemplate model (not tenant-specific)
     const { id } = req.params;
-    const { templateId, offerDetails } = req.body;
+    let emailWarning = null; // Track email sending issues
+    const { 
+      templateId, 
+      clientName,
+      location,
+      employmentStartDate,
+      contractEndDate,
+      monthlySalary,
+      projectName,
+      additionalDetails = {}
+    } = req.body;
     const hrUserId = req.user.id;
+
+    // Validate required fields for offer
+    if (!clientName || !location || !employmentStartDate || !contractEndDate || !monthlySalary || !projectName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required offer details. Please provide: client organization, work location, project name, employment start date, contract end date, and monthly salary.',
+        requiredFields: ['clientName', 'location', 'projectName', 'employmentStartDate', 'contractEndDate', 'monthlySalary']
+      });
+    }
 
     const onboarding = await Onboarding.findById(id)
       .populate('applicationId')
@@ -854,34 +873,41 @@ exports.sendOffer = async (req, res) => {
     // Set offer expiry (24 hours from now)
     const expiryDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+    // Parse monthly salary and calculate annual CTC
+    const parsedMonthlySalary = parseFloat(monthlySalary);
+    const annualCTC = parsedMonthlySalary * 12;
+
     // Use offer details from request or fallback to onboarding data
-    const designation = offerDetails?.designation || onboarding.position || 'Not Specified';
-    const ctc = offerDetails?.ctc || offerDetails?.salary || 0;
-    const benefits = offerDetails?.benefits || [];
-    const startDate = offerDetails?.startDate || null;
+    const designation = additionalDetails?.designation || onboarding.position || 'Not Specified';
+    const benefits = additionalDetails?.benefits || [];
 
     // Calculate salary breakdown (60% basic, 40% HRA by default)
-    const basic = Math.round(ctc * 0.6);
-    const hra = Math.round(ctc * 0.4);
+    const basic = Math.round(parsedMonthlySalary * 0.6);
+    const hra = Math.round(parsedMonthlySalary * 0.4);
 
     // Update onboarding with offer details
     onboarding.offer = {
       templateId: template._id,
       templateVersion: template.version,
-      offeredDesignation: designation,
-      offeredCTC: ctc,
+      offeredDesignation: onboarding.position,
+      offeredCTC: annualCTC,
+      monthlySalary: parsedMonthlySalary,
       salary: {
         basic: basic,
         hra: hra,
         allowances: 0,
-        total: ctc
+        total: parsedMonthlySalary
       },
-      benefits: benefits,
-      startDate: startDate,
+      clientName: clientName,
+      location: location,
+      projectName: projectName,
+      employmentStartDate: new Date(employmentStartDate),
+      contractEndDate: new Date(contractEndDate),
       sentAt: new Date(),
       sentBy: hrUserId,
       expiryDate,
-      remindersSent: []
+      remindersSent: [],
+      additionalDetails: additionalDetails
     };
 
     onboarding.status = 'offer_sent';
@@ -893,7 +919,16 @@ exports.sendOffer = async (req, res) => {
       performedBy: hrUserId,
       previousStatus: 'preboarding',
       newStatus: 'offer_sent',
-      metadata: { templateId, offerDetails },
+      metadata: { 
+        templateId, 
+        clientName,
+        location,
+        projectName,
+        employmentStartDate,
+        contractEndDate,
+        monthlySalary: parsedMonthlySalary,
+        additionalDetails 
+      },
       timestamp: new Date()
     });
 
@@ -904,37 +939,98 @@ exports.sendOffer = async (req, res) => {
     
     if (!candidate) {
       console.error('❌ Candidate not found for ID:', onboarding.applicationId);
-    } else {
-      console.log('✅ Found candidate:', {
-        id: candidate._id,
-        name: `${candidate.firstName} ${candidate.lastName}`,
-        email: candidate.email
+      return res.status(400).json({
+        success: false,
+        message: 'Candidate not found'
       });
     }
-
-    // Send offer email to candidate
+    
+    console.log('👤 Found candidate:', `${candidate.firstName} ${candidate.lastName}`);
+    console.log('📧 Candidate email:', candidate.email);
+    console.log('📋 Template ID:', templateId);
+    console.log('📋 Template Name:', template.name);
+    console.log('🎯 Project Name from request:', projectName);
+    console.log('🏢 Client Name from request:', clientName);
+    
     try {
       console.log('📧 Attempting to send offer email to candidate...');
       console.log('📧 Candidate details:', {
         name: `${candidate.firstName} ${candidate.lastName}`,
         email: candidate.email,
-        position: designation,
-        joiningDate: startDate
+        position: onboarding.position,
+        joiningDate: employmentStartDate
       });
       console.log('📧 Email configuration check - EMAIL_USER:', process.env.EMAIL_USER);
       
-      await sendOfferExtendedEmail({
+      // Prepare offer details for template
+      const templateOfferDetails = {
+        clientName: clientName,
+        location: location,
+        projectName: projectName,
+        joiningDate: new Date(employmentStartDate).toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        contractStartDate: new Date(employmentStartDate).toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        contractEndDate: new Date(contractEndDate).toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        monthlySalary: monthlySalary,
+        basic: basic,
+        hra: hra,
+        allowances: 0,
+        benefits: additionalDetails.benefits || '',
+        contractExtensionInfo: additionalDetails.contractExtensionInfo || '',
+        hrName: additionalDetails.hrName || 'HR Team',
+        hrDesignation: additionalDetails.hrDesignation || 'HR Manager',
+        expiryDate: expiryDate.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        currentDate: new Date().toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        ...additionalDetails
+      };
+
+      const emailResult = await sendOfferLetterWithTemplate({
+        templateId: templateId,
         candidateName: `${candidate.firstName} ${candidate.lastName}`,
         candidateEmail: candidate.email,
-        position: designation,
-        joiningDate: startDate,
-        companyName: process.env.COMPANY_NAME || 'Our Company'
+        position: onboarding.position,
+        designation: onboarding.position,
+        ctc: annualCTC,
+        joiningDate: new Date(employmentStartDate),
+        offerDetails: templateOfferDetails,
+        companyName: process.env.COMPANY_NAME || 'SPC Management Services PVT Ltd.'
       });
-      console.log(`✅ Offer email sent to ${candidate.email}`);
+      
+      console.log(`✅ Offer email sent to ${candidate.email} using template: ${template.name}`);
+      console.log('📧 Email result:', emailResult);
     } catch (emailError) {
-      console.error('⚠️ Failed to send offer email:', emailError.message);
+      console.error('❌ EMAIL SENDING FAILED:');
+      console.error('⚠️ Error message:', emailError.message);
       console.error('⚠️ Full email error:', emailError);
-      // Don't fail the request if email fails
+      console.error('⚠️ Stack trace:', emailError.stack);
+      
+      // Don't fail the request if email fails, but log the error
+      // Return warning in response for debugging
+      emailWarning = emailError.message;
     }
 
     // Log HR activity
@@ -950,12 +1046,26 @@ exports.sendOffer = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Offer letter sent successfully',
+      message: emailWarning ? 'Offer processed but email may have failed' : 'Offer letter sent successfully',
       data: {
         onboardingId: onboarding.onboardingId,
         offerSentAt: onboarding.offer.sentAt,
         expiryDate: onboarding.offer.expiryDate,
-        emailSent: true
+        emailSent: !emailWarning, // Set to false if there was an email warning
+        templateUsed: {
+          templateId: onboarding.offer.templateId,
+          templateName: template.name,
+          emailSentAt: onboarding.offer.sentAt
+        },
+        offerDetails: {
+          clientName: clientName,
+          location: location,
+          projectName: projectName,
+          employmentStartDate: employmentStartDate,
+          contractEndDate: contractEndDate,
+          monthlySalary: monthlySalary
+        },
+        emailWarning: emailWarning // Include email warning for debugging
       }
     });
 
