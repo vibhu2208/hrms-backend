@@ -29,8 +29,40 @@ const getEmployeeDetails = async (employeeId, req) => {
       console.log('🔍 Trying Employee model...');
       employee = await TenantEmployee.findById(employeeId)
         .select('firstName lastName email employeeCode designation department')
-        .populate('department', 'name')
         .lean();
+      
+      // Handle department population safely
+      if (employee && employee.department) {
+        try {
+          const Department = getTenantModel(req.tenant.connection, 'Department');
+          if (typeof employee.department === 'string') {
+            // If it's a string, try to find the department by name or ObjectId
+            const dept = await Department.findOne({
+              $or: [
+                { name: employee.department },
+                { _id: employee.department.match(/^[0-9a-fA-F]{24}$/) ? employee.department : null }
+              ]
+            }).select('name').lean();
+            if (dept) {
+              employee.department = dept;
+            } else {
+              employee.department = { name: employee.department };
+            }
+          } else if (typeof employee.department === 'object' && !employee.department.name) {
+            // Try to populate as ObjectId
+            const dept = await Department.findById(employee.department).select('name').lean();
+            if (dept) {
+              employee.department = dept;
+            }
+          }
+        } catch (deptErr) {
+          console.warn(`Could not populate department for employee ${employeeId}:`, deptErr.message);
+          if (typeof employee.department === 'string') {
+            employee.department = { name: employee.department };
+          }
+        }
+      }
+      
       console.log('🔍 Employee model result:', employee ? {
         id: employee._id,
         name: `${employee.firstName} ${employee.lastName}`,
@@ -163,11 +195,7 @@ exports.getOffboardingList = async (req, res) => {
                 reasonDetails: offboarding.reason || '',
                 lastWorkingDay: offboarding.lastWorkingDate || new Date(),
                 status: 'closed',
-                isCompleted: true,
-                save: async function() { 
-                  await this.save();
-                  return this;
-                }
+                isCompleted: true
               };
               
               await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
@@ -193,8 +221,42 @@ exports.getOffboardingList = async (req, res) => {
           if (TenantEmployee) {
             employee = await TenantEmployee.findById(item.employee)
               .select('firstName lastName email employeeCode designation department')
-              .populate('department', 'name')
               .lean();
+            
+            // Handle department population safely
+            if (employee && employee.department) {
+              try {
+                // If department is already an object, keep it
+                if (typeof employee.department === 'object' && employee.department.name) {
+                  // Already populated
+                } else if (typeof employee.department === 'string') {
+                  // If it's a string, try to find the department by name or ObjectId
+                  const dept = await Department.findOne({
+                    $or: [
+                      { name: employee.department },
+                      { _id: employee.department.match(/^[0-9a-fA-F]{24}$/) ? employee.department : null }
+                    ]
+                  }).select('name').lean();
+                  if (dept) {
+                    employee.department = dept;
+                  } else {
+                    employee.department = { name: employee.department };
+                  }
+                } else {
+                  // Try to populate as ObjectId
+                  const dept = await Department.findById(employee.department).select('name').lean();
+                  if (dept) {
+                    employee.department = dept;
+                  }
+                }
+              } catch (deptErr) {
+                console.warn(`Could not populate department for employee ${item.employee}:`, deptErr.message);
+                // Keep original department value
+                if (typeof employee.department === 'string') {
+                  employee.department = { name: employee.department };
+                }
+              }
+            }
           }
           
           // If not found in Employee model, try User model
@@ -295,8 +357,38 @@ exports.getOffboarding = async (req, res) => {
         if (TenantEmployee) {
           employee = await TenantEmployee.findById(offboarding.employee)
             .select('firstName lastName email employeeCode designation department joiningDate dateOfJoining phone address')
-            .populate('department', 'name')
             .lean();
+          
+          // Handle department population safely
+          if (employee && employee.department) {
+            try {
+              if (typeof employee.department === 'string') {
+                // If it's a string, try to find the department by name or ObjectId
+                const dept = await Department.findOne({
+                  $or: [
+                    { name: employee.department },
+                    { _id: employee.department.match(/^[0-9a-fA-F]{24}$/) ? employee.department : null }
+                  ]
+                }).select('name').lean();
+                if (dept) {
+                  employee.department = dept;
+                } else {
+                  employee.department = { name: employee.department };
+                }
+              } else if (typeof employee.department === 'object' && !employee.department.name) {
+                // Try to populate as ObjectId
+                const dept = await Department.findById(employee.department).select('name').lean();
+                if (dept) {
+                  employee.department = dept;
+                }
+              }
+            } catch (deptErr) {
+              console.warn(`Could not populate department for employee ${offboarding.employee}:`, deptErr.message);
+              if (typeof employee.department === 'string') {
+                employee.department = { name: employee.department };
+              }
+            }
+          }
         }
         
         // If not found in Employee model, try User model
