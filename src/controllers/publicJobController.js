@@ -1,6 +1,6 @@
 const { getTenantModel } = require('../utils/tenantModels');
 const { getTenantConnection } = require('../config/database.config');
-const { getFileUrl } = require('../middlewares/fileUpload');
+const { getS3FileUrl } = require('../middlewares/s3Upload');
 
 // @desc    Get all active public job postings
 // @route   GET /api/public/jobs?companyId=xxx
@@ -207,14 +207,29 @@ exports.submitApplication = async (req, res) => {
     // Handle resume file if uploaded
     let resumeData = {};
     if (req.file) {
+      // Use S3 URL if available, otherwise fallback to local storage
+      const resumeUrl = getS3FileUrl(req.file) || null;
+      
       resumeData = {
-        url: getFileUrl(req.file.filename, 'resume'),
+        url: resumeUrl,
         filename: req.file.filename,
         originalName: req.file.originalname,
         size: req.file.size,
         mimetype: req.file.mimetype,
-        uploadedAt: new Date()
+        uploadedAt: new Date(),
+        // Add S3 information if available
+        ...(req.file.s3Key && {
+          s3Key: req.file.s3Key,
+          s3Bucket: req.file.s3Bucket,
+          isS3File: true
+        })
       };
+      
+      console.log('📄 Resume data:', {
+        hasS3Key: !!req.file.s3Key,
+        url: resumeUrl,
+        originalName: req.file.originalname
+      });
     }
 
     // Check if we have the required fields
