@@ -2,6 +2,7 @@ const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
 const TenantUserSchema = require('../models/tenant/TenantUser');
 const Department = require('../models/Department');
 const { getTenantModel } = require('../middlewares/tenantMiddleware');
+const ContractWorkflowService = require('../services/contractWorkflowService');
 
 // @desc    Get all employees
 // @route   GET /api/employees
@@ -331,13 +332,33 @@ exports.createEmployee = async (req, res) => {
     console.log(`✅ Created employee: ${employee.firstName} ${employee.lastName} (${employeeCode})`);
     console.log('Saved employee salary data:', employee.salary);
 
+    // Handle contract workflow for contract-requiring employment types
+    let contractWorkflowResult = null;
+    try {
+      contractWorkflowResult = await ContractWorkflowService.handleEmployeeCreation(
+        employee, 
+        tenantConnection, 
+        req.user
+      );
+      
+      if (contractWorkflowResult.success && contractWorkflowResult.contractId) {
+        console.log(`✅ Contract workflow initiated for ${employee.firstName} ${employee.lastName}: ${contractWorkflowResult.message}`);
+      }
+    } catch (contractError) {
+      console.error('Error in contract workflow:', contractError);
+      // Don't fail employee creation if contract workflow fails
+    }
+
     // Log HR activity
     await logEmployeeCreated(tenantConnection, employee, req);
 
     res.status(201).json({
       success: true,
-      message: 'Employee created successfully',
-      data: employee
+      message: contractWorkflowResult?.contractId ? 
+        'Employee created successfully. Contract approval required.' : 
+        'Employee created successfully',
+      data: employee,
+      contractWorkflow: contractWorkflowResult
     });
   } catch (error) {
     console.error('Error creating employee:', error);
@@ -428,6 +449,31 @@ exports.updateEmployee = async (req, res) => {
       });
     }
 
+    // Handle contract workflow for employment type changes
+    let contractWorkflowResult = null;
+    if (previousEmployee && updateData.employmentType && 
+        previousEmployee.employmentType !== updateData.employmentType) {
+      try {
+        // Get the updated employee object (not lean) for contract workflow
+        const employeeForContract = await TenantEmployee.findById(req.params.id);
+        
+        contractWorkflowResult = await ContractWorkflowService.handleEmploymentTypeChange(
+          employeeForContract,
+          previousEmployee.employmentType,
+          updateData.employmentType,
+          tenantConnection,
+          req.user
+        );
+        
+        if (contractWorkflowResult.success) {
+          console.log(`✅ Contract workflow handled for employment type change: ${contractWorkflowResult.message}`);
+        }
+      } catch (contractError) {
+        console.error('Error in contract workflow for employment type change:', contractError);
+        // Don't fail employee update if contract workflow fails
+      }
+    }
+
     // Populate department information for response
     const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
     if (employee.departmentId) {
@@ -456,8 +502,11 @@ exports.updateEmployee = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Employee updated successfully',
-      data: employee
+      message: contractWorkflowResult?.contractId ? 
+        'Employee updated successfully. Contract approval required.' : 
+        'Employee updated successfully',
+      data: employee,
+      contractWorkflow: contractWorkflowResult
     });
   } catch (error) {
     console.error('❌ Error updating employee:', error);

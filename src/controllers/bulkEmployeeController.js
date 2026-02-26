@@ -1,6 +1,7 @@
 const Employee = require('../models/Employee');
 const Department = require('../models/Department');
 const { getTenantModel } = require('../middlewares/tenantMiddleware');
+const { EMPLOYMENT_TYPES, isValidEmploymentType } = require('../utils/employmentTypeConstants');
 
 // Helper function to validate email format
 const isValidEmail = (email) => {
@@ -154,8 +155,7 @@ const validateEmployeeRecord = async (record, rowIndex, tenantConnection) => {
   }
 
   // Validate employment type enum
-  const validEmploymentTypes = ['full-time', 'part-time', 'contract', 'intern'];
-  if (normalizedRecord.employmentType && !validEmploymentTypes.includes(normalizedRecord.employmentType.toLowerCase())) {
+  if (normalizedRecord.employmentType && !isValidEmploymentType(normalizedRecord.employmentType.toLowerCase())) {
     warnings.push('Invalid employment type, will be set to full-time');
   }
 

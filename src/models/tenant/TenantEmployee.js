@@ -76,7 +76,7 @@ const tenantEmployeeSchema = new mongoose.Schema({
   // Employment Type
   employmentType: {
     type: String,
-    enum: ['full-time', 'contract-fixed-deliverable', 'contract-rate-based', 'contract-hourly-based'],
+    enum: ['full-time', 'part-time', 'consultant', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
     default: 'full-time',
     required: true
   },
@@ -154,7 +154,7 @@ const tenantEmployeeSchema = new mongoose.Schema({
   // Status and Lifecycle
   status: {
     type: String,
-    enum: ['active', 'on-leave', 'terminated', 'suspended', 'probation'],
+    enum: ['active', 'on-leave', 'terminated', 'suspended', 'probation', 'contract-pending'],
     default: 'active'
   },
   isActive: {
@@ -192,6 +192,17 @@ const tenantEmployeeSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+// Pre-save middleware to handle empty strings for enum fields
+tenantEmployeeSchema.pre('save', function(next) {
+  // Convert empty strings to undefined for enum fields to avoid validation errors
+  if (this.gender === '') this.gender = undefined;
+  if (this.bloodGroup === '') this.bloodGroup = undefined;
+  if (this.maritalStatus === '') this.maritalStatus = undefined;
+  if (this.employmentType === '') this.employmentType = undefined;
+  if (this.status === '') this.status = undefined;
+  next();
 });
 
 // Index for performance

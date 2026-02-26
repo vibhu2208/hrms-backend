@@ -324,6 +324,8 @@ exports.submitApplication = async (req, res) => {
       currentLocation: req.body.currentLocation || '',
       // Emergency contact
       emergencyContact: parseJsonField(req.body.emergencyContact),
+      // Employment preference
+      employmentType: req.body.employmentType || 'full-time',
       // Job application specific
       appliedFor: jobId,
       source: req.body.source || 'job-portal',

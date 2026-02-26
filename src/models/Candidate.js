@@ -65,7 +65,7 @@ const candidateSchema = new mongoose.Schema({
   },
   employmentType: {
     type: String,
-    enum: ['full-time', 'part-time', 'contract', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
+    enum: ['full-time', 'part-time', 'consultant', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
     default: 'full-time'
   },
   referredBy: {
@@ -455,6 +455,12 @@ const normalizePhone = (phone) => {
 
 // Pre-save hook to check for duplicates (non-blocking, just flag)
 candidateSchema.pre('save', async function(next) {
+  // Convert empty strings to undefined for enum fields to avoid validation errors
+  if (this.gender === '') this.gender = undefined;
+  if (this.bloodGroup === '') this.bloodGroup = undefined;
+  if (this.maritalStatus === '') this.maritalStatus = undefined;
+  if (this.employmentType === '') this.employmentType = undefined;
+  
   // Skip candidate code generation if already set (done in controller)
   if (!this.candidateCode || this.candidateCode.trim() === '') {
     try {

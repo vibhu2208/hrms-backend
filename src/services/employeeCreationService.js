@@ -14,6 +14,7 @@ const TenantUserSchema = require('../models/tenant/TenantUser');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('./emailService');
 const mongoose = require('mongoose');
+const ContractWorkflowService = require('./contractWorkflowService');
 
 class EmployeeCreationService {
   /**
@@ -86,7 +87,20 @@ class EmployeeCreationService {
       const tempPassword = this.generateTempPassword();
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-      // Prepare employee data
+      // Get candidate details for personal information transfer
+      const candidate = onboarding.applicationId;
+      
+      // Get employment type from job posting, fallback to candidate preference, then default
+      let employmentType = 'full-time'; // default
+      if (onboarding.jobId && onboarding.jobId.employmentType) {
+        employmentType = onboarding.jobId.employmentType;
+        console.log(`✅ Using employment type from job posting: ${employmentType}`);
+      } else if (candidate && candidate.employmentType) {
+        employmentType = candidate.employmentType;
+        console.log(`✅ Using employment type from candidate preference: ${employmentType}`);
+      }
+
+      // Prepare employee data with candidate personal details
       const employeeData = {
         firstName: onboarding.candidateName?.split(' ')[0] || '',
         lastName: onboarding.candidateName?.split(' ').slice(1).join(' ') || '',
@@ -95,8 +109,17 @@ class EmployeeCreationService {
         employeeCode: employeeCode,
         designation: onboarding.position || '',
         joiningDate: onboarding.joiningDate || new Date(),
+        employmentType: employmentType,
         status: 'active',
-        isActive: true
+        isActive: true,
+        // Transfer personal details from candidate if available
+        ...(candidate && candidate.dateOfBirth ? { dateOfBirth: candidate.dateOfBirth } : {}),
+        ...(candidate && candidate.gender ? { gender: candidate.gender } : {}),
+        ...(candidate && candidate.bloodGroup ? { bloodGroup: candidate.bloodGroup } : {}),
+        ...(candidate && candidate.maritalStatus ? { maritalStatus: candidate.maritalStatus } : {}),
+        ...(candidate && candidate.alternatePhone ? { alternatePhone: candidate.alternatePhone } : {}),
+        ...(candidate && candidate.address ? { address: candidate.address } : {}),
+        ...(candidate && candidate.emergencyContact ? { emergencyContact: candidate.emergencyContact } : {})
       };
       
       // Apply additional data, but exclude department fields to set them manually
@@ -325,6 +348,23 @@ class EmployeeCreationService {
 
 
       console.log(`✅ Employee created: ${employee.email} (${employeeCode})`);
+
+      // Handle contract workflow for contract-requiring employment types
+      let contractWorkflowResult = null;
+      try {
+        contractWorkflowResult = await ContractWorkflowService.handleEmployeeCreation(
+          employee, 
+          tenantConnection, 
+          { _id: onboarding.createdBy || null }
+        );
+        
+        if (contractWorkflowResult.success && contractWorkflowResult.contractId) {
+          console.log(`✅ Contract workflow initiated for ${employee.firstName} ${employee.lastName}: ${contractWorkflowResult.message}`);
+        }
+      } catch (contractError) {
+        console.error('Error in contract workflow during onboarding:', contractError);
+        // Don't fail employee creation if contract workflow fails
+      }
 
       // Create user account with 'employee' role
       const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);

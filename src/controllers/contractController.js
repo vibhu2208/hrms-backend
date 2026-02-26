@@ -236,9 +236,9 @@ exports.createContract = async (req, res) => {
 
     // Update employee employment type and contract reference
     const employmentTypeMap = {
-      'fixed-deliverable': 'contract-fixed-deliverable',
-      'rate-based': 'contract-rate-based',
-      'hourly-based': 'contract-hourly-based'
+      'fixed-deliverable': 'deliverable-based',
+      'rate-based': 'rate-based',
+      'hourly-based': 'hourly-based'
     };
 
     
@@ -405,6 +405,31 @@ exports.createContract = async (req, res) => {
 
     
 
+    // Optionally create a project from this contract
+    try {
+      const projectData = {
+        name: `Project - ${contract.title}`,
+        description: contract.description,
+        client: employee._id, // Use employee as client reference
+        location: 'Remote', // Default location
+        startDate: contract.startDate,
+        endDate: contract.endDate,
+        contractId: contract._id,
+        createdBy: req.user.id,
+        status: 'active',
+        priority: 'medium'
+      };
+      
+      const Project = getTenantModel(tenantConnection, 'Project', require('../models/tenant/Project'));
+      const project = await Project.create(projectData);
+      
+      console.log(`✅ Project created from contract: ${project.name} (${project._id})`);
+      
+    } catch (projectError) {
+      console.error('Error creating project from contract:', projectError);
+      // Don't fail the contract creation if project creation fails
+    }
+    
     res.status(201).json({
 
       success: true,
@@ -913,16 +938,16 @@ exports.approveContract = async (req, res) => {
 
     
 
-    // Update employee
-
+    // Update employee - activate employee when contract is approved
     const employee = await TenantEmployee.findById(contract.employeeId);
-
     if (employee) {
-
       employee.hasActiveContract = true;
-
+      // Change status from contract-pending to active
+      if (employee.status === 'contract-pending') {
+        employee.status = 'active';
+        console.log(`✅ Employee ${employee.firstName} ${employee.lastName} activated after contract approval`);
+      }
       await employee.save();
-
     }
 
     
