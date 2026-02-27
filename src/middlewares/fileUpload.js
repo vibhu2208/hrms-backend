@@ -151,7 +151,9 @@ const getFileUrl = (filename, type = 'resume') => {
   // Use apiConfig to get the correct backend URL and port
   const apiConfig = require('../config/api.config');
   const baseUrl = process.env.BACKEND_URL || apiConfig.backendUrl || `http://localhost:${apiConfig.port || 5001}`;
-  return `${baseUrl}/uploads/${type}s/${filename}`;
+  // For resume files, the actual directory is 'resumes' (with s)
+  const directoryName = type === 'resume' ? 'resumes' : `${type}s`;
+  return `${baseUrl}/uploads/${directoryName}/${filename}`;
 };
 
 // Helper function to delete file

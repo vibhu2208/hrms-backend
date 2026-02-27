@@ -143,6 +143,12 @@ const protect = async (req, res, next) => {
       req.companyId = decoded.companyId;
       req.companyCode = decoded.companyCode;
       req.databaseName = decoded.databaseName;
+      
+      // Attach tenant connection for controllers that need it
+      req.tenant = {
+        connection: tenantConnection,
+        companyId: decoded.companyId
+      };
     }
     
     console.log('🔍 Auth middleware - Final req.user:', JSON.stringify(req.user, null, 2));

@@ -92,6 +92,13 @@ const superAdminMiddleware = async (req, res, next) => {
  */
 const getTenantModel = (tenantConnection, modelName, schema) => {
   try {
+    // For Employee-related models, always recreate to ensure latest schema is used
+    // This prevents caching issues when schema is updated
+    if ((modelName === 'Employee' || modelName === 'TenantEmployee') && tenantConnection.models[modelName]) {
+      console.log(`🔄 Recreating ${modelName} model to use updated schema`);
+      delete tenantConnection.models[modelName];
+    }
+    
     // Check if model already exists in this connection
     if (tenantConnection.models[modelName]) {
       return tenantConnection.models[modelName];

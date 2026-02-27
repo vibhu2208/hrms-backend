@@ -28,6 +28,31 @@ const tenantEmployeeSchema = new mongoose.Schema({
   phone: {
     type: String
   },
+  dateOfBirth: {
+    type: Date
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female', 'other']
+  },
+  bloodGroup: {
+    type: String,
+    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+  },
+  maritalStatus: {
+    type: String,
+    enum: ['single', 'married', 'divorced', 'widowed']
+  },
+  alternatePhone: {
+    type: String
+  },
+  address: {
+    street: { type: String },
+    city: { type: String },
+    state: { type: String },
+    zipCode: { type: String },
+    country: { type: String }
+  },
   profilePicture: {
     type: String
   },
@@ -51,7 +76,7 @@ const tenantEmployeeSchema = new mongoose.Schema({
   // Employment Type
   employmentType: {
     type: String,
-    enum: ['full-time', 'contract-fixed-deliverable', 'contract-rate-based', 'contract-hourly-based'],
+    enum: ['full-time', 'part-time', 'consultant', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
     default: 'full-time',
     required: true
   },
@@ -83,6 +108,11 @@ const tenantEmployeeSchema = new mongoose.Schema({
 
   // Salary Information
   salary: {
+    currency: {
+      type: String,
+      default: 'USD',
+      enum: ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'CNY', 'SGD', 'AED', 'SAR', 'MYR', 'THB', 'PHP', 'IDR', 'VND', 'HKD', 'KRW', 'CHF', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RUB', 'TRY', 'ZAR', 'BRL', 'MXN', 'ARS', 'CLP', 'COP', 'PEN', 'UYU']
+    },
     basic: {
       type: Number,
       default: 0
@@ -95,16 +125,36 @@ const tenantEmployeeSchema = new mongoose.Schema({
       type: Number,
       default: 0
     },
+    deductions: {
+      type: Number,
+      default: 0
+    },
     total: {
       type: Number,
       default: 0
     }
   },
 
+  // Bank Details
+  bankDetails: {
+    accountNumber: { type: String },
+    bankName: { type: String },
+    ifscCode: { type: String },
+    accountHolderName: { type: String },
+    branch: { type: String }
+  },
+
+  // Emergency Contact
+  emergencyContact: {
+    name: { type: String },
+    relationship: { type: String },
+    phone: { type: String }
+  },
+
   // Status and Lifecycle
   status: {
     type: String,
-    enum: ['active', 'on-leave', 'terminated', 'suspended', 'probation'],
+    enum: ['active', 'on-leave', 'terminated', 'suspended', 'probation', 'contract-pending'],
     default: 'active'
   },
   isActive: {
@@ -142,6 +192,17 @@ const tenantEmployeeSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+// Pre-save middleware to handle empty strings for enum fields
+tenantEmployeeSchema.pre('save', function(next) {
+  // Convert empty strings to undefined for enum fields to avoid validation errors
+  if (this.gender === '') this.gender = undefined;
+  if (this.bloodGroup === '') this.bloodGroup = undefined;
+  if (this.maritalStatus === '') this.maritalStatus = undefined;
+  if (this.employmentType === '') this.employmentType = undefined;
+  if (this.status === '') this.status = undefined;
+  next();
 });
 
 // Index for performance

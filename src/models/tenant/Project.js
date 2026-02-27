@@ -128,6 +128,16 @@ const projectSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
+  // Contract Reference (optional - for projects created from contracts)
+  contractId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Contract'
+  },
+  // Job Posting Reference (optional - for projects created from job postings)
+  jobPostingId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'JobPosting'
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

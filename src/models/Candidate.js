@@ -26,6 +26,36 @@ const candidateSchema = new mongoose.Schema({
     required: true
   },
   alternatePhone: String,
+  // Additional personal information
+  dateOfBirth: {
+    type: Date
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female', 'other']
+  },
+  bloodGroup: {
+    type: String,
+    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+  },
+  maritalStatus: {
+    type: String,
+    enum: ['single', 'married', 'divorced', 'widowed']
+  },
+  // Address information
+  address: {
+    street: { type: String },
+    city: { type: String },
+    state: { type: String },
+    zipCode: { type: String },
+    country: { type: String }
+  },
+  // Emergency contact
+  emergencyContact: {
+    name: { type: String },
+    relationship: { type: String },
+    phone: { type: String }
+  },
   currentLocation: String,
   preferredLocation: [String],
   source: {
@@ -35,7 +65,7 @@ const candidateSchema = new mongoose.Schema({
   },
   employmentType: {
     type: String,
-    enum: ['full-time', 'part-time', 'contract', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
+    enum: ['full-time', 'part-time', 'consultant', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
     default: 'full-time'
   },
   referredBy: {
@@ -425,67 +455,32 @@ const normalizePhone = (phone) => {
 
 // Pre-save hook to check for duplicates (non-blocking, just flag)
 candidateSchema.pre('save', async function(next) {
+  // Convert empty strings to undefined for enum fields to avoid validation errors
+  if (this.gender === '') this.gender = undefined;
+  if (this.bloodGroup === '') this.bloodGroup = undefined;
+  if (this.maritalStatus === '') this.maritalStatus = undefined;
+  if (this.employmentType === '') this.employmentType = undefined;
+  
   // Skip candidate code generation if already set (done in controller)
-  console.log(`Pre-save hook triggered for candidate: ${this.email || 'unknown'}, candidateCode: ${this.candidateCode || 'not set'}`);
   if (!this.candidateCode || this.candidateCode.trim() === '') {
     try {
-      // Find the highest existing candidate code and increment it
-      const lastCandidate = await mongoose.model('Candidate').findOne({})
-        .sort({ candidateCode: -1 })
-        .select('candidateCode')
-        .lean();
-
-      let nextNumber = 1; // Default for first candidate
-
-      if (lastCandidate && lastCandidate.candidateCode) {
-        // Extract number from last code (e.g., "CAN00008" -> 8)
-        const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
-        nextNumber = lastNumber + 1;
-      }
-
-      // Generate unique code with retry logic for race conditions
-      let candidateCode;
-      let attempts = 0;
-      const maxAttempts = 10;
-
-      console.log(`Starting candidate code generation for ${this.email || 'new candidate'}. Next number should be: ${nextNumber}`);
-
-      while (attempts < maxAttempts) {
-        candidateCode = `CAN${String(nextNumber + attempts).padStart(5, '0')}`;
-        console.log(`Attempting candidate code: ${candidateCode} (attempt ${attempts + 1})`);
-
-        // Check if this code already exists
-        const existing = await mongoose.model('Candidate').findOne({ candidateCode });
-        if (!existing) {
-          console.log(`✅ Candidate code ${candidateCode} is unique, using it`);
-          // Code is unique, use it
-          break;
-        } else {
-          console.log(`❌ Candidate code ${candidateCode} already exists, trying next`);
-        }
-
-        attempts++;
-      }
-
-      // If we couldn't find a unique code after max attempts, use timestamp fallback
-      if (attempts >= maxAttempts) {
-        candidateCode = `CAN${Date.now().toString().slice(-8)}`;
-        console.log(`⚠️ Max attempts reached, using timestamp fallback: ${candidateCode}`);
-      }
-
-      this.candidateCode = candidateCode;
-      console.log(`🎯 Final candidate code: ${this.candidateCode} for ${this.email || 'new candidate'}`);
-
+      // Use timestamp-based approach for better performance
+      // This avoids expensive database queries for code generation
+      const timestamp = Date.now().toString().slice(-8);
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      this.candidateCode = `CAN${timestamp}${random}`;
+      
+      console.log(`Generated candidate code: ${this.candidateCode} for ${this.email || 'new candidate'}`);
     } catch (error) {
       console.error('Error generating candidate code:', error);
-      // Fallback to timestamp-based code
+      // Fallback to simple timestamp
       this.candidateCode = `CAN${Date.now().toString().slice(-8)}`;
     }
   }
 
   // Check for duplicates only if this is a new document and not already marked as duplicate
   if (this.isNew && !this.isDuplicate) {
-    const Candidate = mongoose.model('Candidate');
+    const Candidate = this.constructor;
     const normalizedPhone = normalizePhone(this.phone);
     const normalizedEmail = this.email?.toLowerCase().trim();
 
@@ -506,11 +501,16 @@ candidateSchema.pre('save', async function(next) {
     }
 
     if (duplicateQuery.$or.length > 0) {
-      const duplicate = await Candidate.findOne(duplicateQuery);
-      if (duplicate) {
-        // Flag as duplicate but don't block save (non-blocking)
-        this.isDuplicate = true;
-        this.duplicateOf = duplicate._id;
+      try {
+        const duplicate = await Candidate.findOne(duplicateQuery).lean().exec();
+        if (duplicate) {
+          // Flag as duplicate but don't block save (non-blocking)
+          this.isDuplicate = true;
+          this.duplicateOf = duplicate._id;
+        }
+      } catch (dupError) {
+        console.warn('Error checking for duplicates:', dupError);
+        // Don't fail the save if duplicate check fails
       }
     }
   }

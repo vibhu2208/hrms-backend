@@ -1,4 +1,104 @@
 const { getTenantModel } = require('../utils/tenantModels');
+const {
+  sendOffboardingInitiatedEmail,
+  sendExitInterviewScheduledEmail,
+  sendAssetReturnReminderEmail,
+  sendClearanceProcessEmail,
+  sendFinalSettlementEmail,
+  sendOffboardingCompletedEmail,
+  sendDocumentationStageEmail
+} = require('../services/emailService');
+
+// Debug: Check if sendDocumentationStageEmail is properly imported
+// Nodemon restart trigger
+console.log('🔍 Offboarding controller: sendDocumentationStageEmail imported:', typeof sendDocumentationStageEmail);
+
+/**
+ * Helper function to get employee details for email notifications
+ */
+const getEmployeeDetails = async (employeeId, req) => {
+  try {
+    console.log('🔍 getEmployeeDetails: Looking up employee ID:', employeeId);
+    const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+    const TenantUser = getTenantModel(req.tenant.connection, 'User');
+    
+    let employee = null;
+    
+    // First try Employee model
+    if (TenantEmployee) {
+      console.log('🔍 Trying Employee model...');
+      employee = await TenantEmployee.findById(employeeId)
+        .select('firstName lastName email employeeCode designation department')
+        .lean();
+      
+      // Handle department population safely
+      if (employee && employee.department) {
+        try {
+          const Department = getTenantModel(req.tenant.connection, 'Department');
+          if (typeof employee.department === 'string') {
+            // If it's a string, try to find the department by name or ObjectId
+            const dept = await Department.findOne({
+              $or: [
+                { name: employee.department },
+                { _id: employee.department.match(/^[0-9a-fA-F]{24}$/) ? employee.department : null }
+              ]
+            }).select('name').lean();
+            if (dept) {
+              employee.department = dept;
+            } else {
+              employee.department = { name: employee.department };
+            }
+          } else if (typeof employee.department === 'object' && !employee.department.name) {
+            // Try to populate as ObjectId
+            const dept = await Department.findById(employee.department).select('name').lean();
+            if (dept) {
+              employee.department = dept;
+            }
+          }
+        } catch (deptErr) {
+          console.warn(`Could not populate department for employee ${employeeId}:`, deptErr.message);
+          if (typeof employee.department === 'string') {
+            employee.department = { name: employee.department };
+          }
+        }
+      }
+      
+      console.log('🔍 Employee model result:', employee ? {
+        id: employee._id,
+        name: `${employee.firstName} ${employee.lastName}`,
+        email: employee.email
+      } : 'Not found');
+    }
+    
+    // If not found, try User model
+    if (!employee && TenantUser) {
+      console.log('🔍 Trying User model...');
+      employee = await TenantUser.findById(employeeId)
+        .select('firstName lastName email employeeCode designation departmentId')
+        .lean();
+      
+      if (employee && employee.departmentId) {
+        console.log('🔍 Populating department for User model...');
+        const Department = getTenantModel(req.tenant.connection, 'Department');
+        const dept = await Department.findById(employee.departmentId).select('name').lean();
+        if (dept) {
+          employee.department = dept;
+        }
+      }
+      console.log('🔍 User model result:', employee ? {
+        id: employee._id,
+        name: `${employee.firstName} ${employee.lastName}`,
+        email: employee.email
+      } : 'Not found');
+    }
+    
+    console.log('🔍 Final employee result:', employee ? 'Found' : 'Not found');
+    return employee;
+  } catch (error) {
+    console.error('Error getting employee details:', error);
+    return null;
+  }
+};
 
 exports.getOffboardingList = async (req, res) => {
   try {
@@ -81,29 +181,31 @@ exports.getOffboardingList = async (req, res) => {
     for (const offboarding of offboardingList) {
       if (offboarding.status === 'completed' && offboarding.currentStage === 'success') {
         if (offboarding.employee && TenantEmployee) {
-          TenantEmployee.findById(offboarding.employee)
-            .then(employee => {
-              if (employee && !employee.isExEmployee) {
-                // Process this offboarding
-                const offboardingWorkflow = require('../services/offboardingWorkflow');
-                const mockOffboardingRequest = {
-                  employeeId: offboarding.employee,
-                  reason: offboarding.reason || 'Offboarding completed',
-                  reasonDetails: offboarding.reason || '',
-                  lastWorkingDay: offboarding.lastWorkingDate || new Date(),
-                  status: 'closed',
-                  isCompleted: true,
-                  save: async function() { return this; }
-                };
-                offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest)
-                  .then(() => {
-                  })
-                  .catch(err => {
-                    console.error(`Auto-fix failed for offboarding ${offboarding._id}:`, err);
-                  });
-              }
-            })
-            .catch(err => console.warn(`Could not check employee for auto-fix:`, err));
+          try {
+            const employee = await TenantEmployee.findById(offboarding.employee);
+            if (employee && !employee.isExEmployee) {
+              console.log(`🔄 Auto-fix: Processing ex-employee logic for employee: ${employee.employeeCode}`);
+              
+              // Process this offboarding
+              const offboardingWorkflow = require('../services/offboardingWorkflow');
+              const offboardingRequest = {
+                _id: offboarding._id,
+                employeeId: offboarding.employee,
+                reason: offboarding.reason || 'Offboarding completed',
+                reasonDetails: offboarding.reason || '',
+                lastWorkingDay: offboarding.lastWorkingDate || new Date(),
+                status: 'closed',
+                isCompleted: true
+              };
+              
+              await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
+              console.log(`✅ Auto-fix: Successfully processed ex-employee logic for ${employee.employeeCode}`);
+            } else if (employee && employee.isExEmployee) {
+              console.log(`ℹ️ Auto-fix: Employee ${employee.employeeCode} is already marked as ex-employee`);
+            }
+          } catch (err) {
+            console.error(`❌ Auto-fix failed for offboarding ${offboarding._id}:`, err);
+          }
         }
       }
     }
@@ -119,8 +221,42 @@ exports.getOffboardingList = async (req, res) => {
           if (TenantEmployee) {
             employee = await TenantEmployee.findById(item.employee)
               .select('firstName lastName email employeeCode designation department')
-              .populate('department', 'name')
               .lean();
+            
+            // Handle department population safely
+            if (employee && employee.department) {
+              try {
+                // If department is already an object, keep it
+                if (typeof employee.department === 'object' && employee.department.name) {
+                  // Already populated
+                } else if (typeof employee.department === 'string') {
+                  // If it's a string, try to find the department by name or ObjectId
+                  const dept = await Department.findOne({
+                    $or: [
+                      { name: employee.department },
+                      { _id: employee.department.match(/^[0-9a-fA-F]{24}$/) ? employee.department : null }
+                    ]
+                  }).select('name').lean();
+                  if (dept) {
+                    employee.department = dept;
+                  } else {
+                    employee.department = { name: employee.department };
+                  }
+                } else {
+                  // Try to populate as ObjectId
+                  const dept = await Department.findById(employee.department).select('name').lean();
+                  if (dept) {
+                    employee.department = dept;
+                  }
+                }
+              } catch (deptErr) {
+                console.warn(`Could not populate department for employee ${item.employee}:`, deptErr.message);
+                // Keep original department value
+                if (typeof employee.department === 'string') {
+                  employee.department = { name: employee.department };
+                }
+              }
+            }
           }
           
           // If not found in Employee model, try User model
@@ -221,8 +357,38 @@ exports.getOffboarding = async (req, res) => {
         if (TenantEmployee) {
           employee = await TenantEmployee.findById(offboarding.employee)
             .select('firstName lastName email employeeCode designation department joiningDate dateOfJoining phone address')
-            .populate('department', 'name')
             .lean();
+          
+          // Handle department population safely
+          if (employee && employee.department) {
+            try {
+              if (typeof employee.department === 'string') {
+                // If it's a string, try to find the department by name or ObjectId
+                const dept = await Department.findOne({
+                  $or: [
+                    { name: employee.department },
+                    { _id: employee.department.match(/^[0-9a-fA-F]{24}$/) ? employee.department : null }
+                  ]
+                }).select('name').lean();
+                if (dept) {
+                  employee.department = dept;
+                } else {
+                  employee.department = { name: employee.department };
+                }
+              } else if (typeof employee.department === 'object' && !employee.department.name) {
+                // Try to populate as ObjectId
+                const dept = await Department.findById(employee.department).select('name').lean();
+                if (dept) {
+                  employee.department = dept;
+                }
+              }
+            } catch (deptErr) {
+              console.warn(`Could not populate department for employee ${offboarding.employee}:`, deptErr.message);
+              if (typeof employee.department === 'string') {
+                employee.department = { name: employee.department };
+              }
+            }
+          }
         }
         
         // If not found in Employee model, try User model
@@ -420,8 +586,38 @@ exports.createOffboarding = async (req, res) => {
       }
     });
 
-    // Get employee details for logging
+    // Get employee details for logging and email
+    console.log('🔍 Looking up employee data for ID:', employeeIdValue);
     const employeeData = Employee ? await Employee.findById(employeeIdValue) : null;
+    console.log('🔍 Employee data found:', employeeData ? {
+      id: employeeData._id,
+      name: `${employeeData.firstName} ${employeeData.lastName}`,
+      email: employeeData.email
+    } : 'Not found');
+
+    // Send offboarding initiated email to employee
+    if (employeeData && employeeData.email) {
+      console.log('📧 Attempting to send offboarding email to:', employeeData.email);
+      try {
+        await sendOffboardingInitiatedEmail({
+          employeeName: `${employeeData.firstName} ${employeeData.lastName}`,
+          employeeEmail: employeeData.email,
+          lastWorkingDate: lastWorkingDateObj,
+          resignationType: resignationTypeValue,
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+        });
+        console.log(`📧 Offboarding initiated email sent to ${employeeData.email}`);
+      } catch (emailError) {
+        console.error('⚠️ Failed to send offboarding initiated email:', emailError.message);
+        console.error('⚠️ Full email error:', emailError);
+        // Don't fail the request if email fails
+      }
+    } else {
+      console.log('⚠️ Cannot send email: employeeData or email missing', {
+        employeeData: !!employeeData,
+        email: employeeData?.email
+      });
+    }
 
     // Log HR activity
     if (employeeData) {
@@ -479,7 +675,53 @@ exports.updateOffboarding = async (req, res) => {
     }
 
     Object.assign(offboarding, req.body);
+    
+    // Check if offboarding is being marked as completed
+    const wasCompleted = offboarding.status === 'completed';
+    const isNowCompleted = req.body.status === 'completed' || req.body.currentStage === 'success';
+    
     await offboarding.save();
+    
+    // If offboarding is being marked as completed, process ex-employee logic
+    if (!wasCompleted && isNowCompleted) {
+      console.log(`🔄 Offboarding marked as completed, processing ex-employee logic for employee: ${offboarding.employee}`);
+      
+      try {
+        const offboardingWorkflow = require('../services/offboardingWorkflow');
+        const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
+        
+        // Get the employee to verify they exist and are not already ex-employee
+        const employee = await TenantEmployee.findById(offboarding.employee);
+        if (employee && !employee.isExEmployee) {
+          console.log(`🔄 Processing ex-employee logic for employee: ${employee.employeeCode}`);
+          
+          // Create a proper offboardingRequest object for the workflow
+          const offboardingRequest = {
+            _id: offboarding._id,
+            employeeId: offboarding.employee,
+            reason: offboarding.reason || 'Offboarding completed',
+            reasonDetails: offboarding.reason || '',
+            lastWorkingDay: offboarding.lastWorkingDate || new Date(),
+            status: 'closed',
+            isCompleted: true,
+            save: async function() { 
+              await this.save();
+              return this;
+            }
+          };
+          
+          await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
+          console.log(`✅ Successfully processed ex-employee logic for ${employee.employeeCode}`);
+        } else if (employee && employee.isExEmployee) {
+          console.log(`ℹ️ Employee ${employee.employeeCode} is already marked as ex-employee`);
+        } else {
+          console.warn(`⚠️ Employee not found for ID: ${offboarding.employee}`);
+        }
+      } catch (exEmployeeError) {
+        console.error('❌ Error processing ex-employee:', exEmployeeError);
+        // Don't fail the update if ex-employee processing fails
+      }
+    }
 
     res.status(200).json({ success: true, message: 'Offboarding updated successfully', data: offboarding });
   } catch (error) {
@@ -496,47 +738,160 @@ exports.advanceStage = async (req, res) => {
     }
 
     const currentIndex = offboarding.stages.indexOf(offboarding.currentStage);
+    console.log('🔍 advanceStage: Current stage:', offboarding.currentStage);
+    console.log('🔍 advanceStage: All stages:', offboarding.stages);
+    console.log('🔍 advanceStage: Current index:', currentIndex);
+    
     if (currentIndex < offboarding.stages.length - 1) {
       const previousStage = offboarding.currentStage;
       const previousStatus = offboarding.status;
 
       offboarding.currentStage = offboarding.stages[currentIndex + 1];
+      console.log('🔍 advanceStage: New stage:', offboarding.currentStage);
 
-      // If reached success stage, mark as completed and process ex-employee logic
-      if (offboarding.currentStage === 'success') {
+      // If reached success stage OR if status is being set to completed, mark as completed and process ex-employee logic
+      if (offboarding.currentStage === 'success' || offboarding.status === 'completed') {
+        // Ensure status is set to completed
         offboarding.status = 'completed';
         offboarding.completedAt = Date.now();
         
         // Process ex-employee logic using the workflow service
         try {
           const offboardingWorkflow = require('../services/offboardingWorkflow');
-          const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee', require('../models/tenant/TenantEmployee'));
+          const TenantEmployee = getTenantModel(req.tenant.connection, 'Employee');
           
-          // Convert old offboarding format to new format for completeOffboarding
+          // Get the employee to verify they exist and are not already ex-employee
           const employee = await TenantEmployee.findById(offboarding.employee);
           if (employee && !employee.isExEmployee) {
+            console.log(`🔄 Processing ex-employee logic for employee: ${employee.employeeCode} (stage: ${offboarding.currentStage}, status: ${offboarding.status})`);
             
-            // Create a mock offboardingRequest object for the workflow
-            const mockOffboardingRequest = {
+            // Create a proper offboardingRequest object for the workflow
+            const offboardingRequest = {
+              _id: offboarding._id,
               employeeId: offboarding.employee,
               reason: offboarding.reason || 'Offboarding completed',
               reasonDetails: offboarding.reason || '',
               lastWorkingDay: offboarding.lastWorkingDate || new Date(),
               status: 'closed',
               isCompleted: true,
-              save: async function() { return this; }
+              save: async function() { 
+                await this.save();
+                return this;
+              }
             };
             
-            await offboardingWorkflow.completeOffboarding(req.tenant.connection, mockOffboardingRequest);
+            await offboardingWorkflow.completeOffboarding(req.tenant.connection, offboardingRequest);
+            console.log(`✅ Successfully processed ex-employee logic for ${employee.employeeCode}`);
           } else if (employee && employee.isExEmployee) {
+            console.log(`ℹ️ Employee ${employee.employeeCode} is already marked as ex-employee`);
+          } else {
+            console.warn(`⚠️ Employee not found for ID: ${offboarding.employee}`);
           }
         } catch (exEmployeeError) {
-          console.error('Error processing ex-employee:', exEmployeeError);
+          console.error('❌ Error processing ex-employee:', exEmployeeError);
           // Don't fail the stage advancement if ex-employee processing fails
         }
       }
 
       await offboarding.save();
+
+      // Get employee details for email notifications
+      console.log('🔍 advanceStage: Getting employee details for ID:', offboarding.employee);
+      const employeeDetails = await getEmployeeDetails(offboarding.employee, req);
+
+      // Send stage-specific email notifications
+      if (employeeDetails && employeeDetails.email) {
+        console.log('📧 advanceStage: Attempting to send stage email for stage:', offboarding.currentStage);
+        try {
+          const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company';
+          const employeeName = `${employeeDetails.firstName} ${employeeDetails.lastName}`;
+          const employeeEmail = employeeDetails.email;
+
+          console.log('📧 advanceStage: Sending email to:', employeeEmail, 'for stage:', offboarding.currentStage);
+
+          switch (offboarding.currentStage) {
+            case 'assetReturn':
+              await sendAssetReturnReminderEmail({
+                employeeName,
+                employeeEmail,
+                companyName
+              });
+              console.log(`📧 Asset return reminder email sent to ${employeeEmail}`);
+              break;
+            
+            case 'documentation':
+              console.log('📧 advanceStage: Entering documentation case');
+              // Send documentation stage email with clearance status
+              console.log('📧 advanceStage: About to call sendDocumentationStageEmail');
+              await sendDocumentationStageEmail({
+                employeeName,
+                employeeEmail,
+                clearanceStatus: offboarding.clearance,
+                companyName
+              });
+              console.log('📧 advanceStage: sendDocumentationStageEmail completed');
+              
+              // Also send individual clearance process emails for any completed clearances
+              let clearanceEmailsSent = 0;
+              ['hr', 'finance', 'it', 'admin'].forEach(dept => {
+                if (offboarding.clearance[dept]?.cleared) {
+                  clearanceEmailsSent++;
+                  sendClearanceProcessEmail({
+                    employeeName,
+                    employeeEmail,
+                    department: dept.charAt(0).toUpperCase() + dept.slice(1),
+                    cleared: true,
+                    notes: offboarding.clearance[dept]?.notes,
+                    companyName
+                  }).catch(err => console.error(`Failed to send ${dept} clearance email:`, err.message));
+                }
+              });
+              
+              console.log(`📧 Documentation stage email sent to ${employeeEmail}${clearanceEmailsSent > 0 ? ` (${clearanceEmailsSent} clearance emails also sent)` : ''}`);
+              break;
+            
+            case 'finalSettlement':
+              await sendFinalSettlementEmail({
+                employeeName,
+                employeeEmail,
+                amount: offboarding.finalSettlement?.amount,
+                paymentStatus: offboarding.finalSettlement?.paymentStatus,
+                companyName
+              });
+              console.log(`📧 Final settlement email sent to ${employeeEmail}`);
+              break;
+            
+            case 'success':
+              // Always send documentation email if not already sent, then send completion email
+              console.log('📧 advanceStage: Entering success case - sending documentation email first');
+              await sendDocumentationStageEmail({
+                employeeName,
+                employeeEmail,
+                clearanceStatus: offboarding.clearance,
+                companyName
+              });
+              console.log('📧 advanceStage: Documentation email sent in success stage');
+              
+              await sendOffboardingCompletedEmail({
+                employeeName,
+                employeeEmail,
+                companyName
+              });
+              console.log(`📧 Offboarding completed email sent to ${employeeEmail}`);
+              break;
+          }
+        } catch (emailError) {
+          console.error('⚠️ Failed to send stage notification email:', emailError.message);
+          console.error('⚠️ Full email error:', emailError);
+          // Don't fail the request if email fails
+        }
+      } else {
+        console.log('⚠️ advanceStage: Cannot send email - employeeDetails or email missing', {
+          employeeDetails: !!employeeDetails,
+          email: employeeDetails?.email,
+          employeeId: offboarding.employee
+        });
+      }
 
       // Log HR activity
       try {
@@ -569,6 +924,34 @@ exports.scheduleExitInterview = async (req, res) => {
     offboarding.exitInterview.scheduledDate = scheduledDate;
     offboarding.exitInterview.conductedBy = conductedBy;
     await offboarding.save();
+
+    // Send exit interview scheduled email to employee
+    const employeeDetails = await getEmployeeDetails(offboarding.employee, req);
+    if (employeeDetails && employeeDetails.email) {
+      try {
+        // Get interviewer name if conductedBy is provided
+        let interviewerName = null;
+        if (conductedBy) {
+          const TenantUser = getTenantModel(req.tenant.connection, 'User');
+          const interviewer = await TenantUser.findById(conductedBy).select('firstName lastName').lean();
+          if (interviewer) {
+            interviewerName = `${interviewer.firstName} ${interviewer.lastName}`;
+          }
+        }
+
+        await sendExitInterviewScheduledEmail({
+          employeeName: `${employeeDetails.firstName} ${employeeDetails.lastName}`,
+          employeeEmail: employeeDetails.email,
+          scheduledDate,
+          interviewerName,
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+        });
+        console.log(`📧 Exit interview scheduled email sent to ${employeeDetails.email}`);
+      } catch (emailError) {
+        console.error('⚠️ Failed to send exit interview scheduled email:', emailError.message);
+        // Don't fail the request if email fails
+      }
+    }
 
     res.status(200).json({ success: true, message: 'Exit interview scheduled', data: offboarding });
   } catch (error) {
@@ -641,6 +1024,25 @@ exports.updateClearance = async (req, res) => {
 
     await offboarding.save();
 
+    // Send clearance process email to employee
+    const employeeDetails = await getEmployeeDetails(offboarding.employee, req);
+    if (employeeDetails && employeeDetails.email) {
+      try {
+        await sendClearanceProcessEmail({
+          employeeName: `${employeeDetails.firstName} ${employeeDetails.lastName}`,
+          employeeEmail: employeeDetails.email,
+          department: department.charAt(0).toUpperCase() + department.slice(1),
+          cleared,
+          notes,
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+        });
+        console.log(`📧 ${department} clearance email sent to ${employeeDetails.email}`);
+      } catch (emailError) {
+        console.error('⚠️ Failed to send clearance process email:', emailError.message);
+        // Don't fail the request if email fails
+      }
+    }
+
     res.status(200).json({ success: true, message: 'Clearance updated', data: offboarding });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -662,6 +1064,24 @@ exports.processFinalSettlement = async (req, res) => {
     offboarding.finalSettlement.paymentStatus = paymentStatus || 'processed';
 
     await offboarding.save();
+
+    // Send final settlement email to employee
+    const employeeDetails = await getEmployeeDetails(offboarding.employee, req);
+    if (employeeDetails && employeeDetails.email) {
+      try {
+        await sendFinalSettlementEmail({
+          employeeName: `${employeeDetails.firstName} ${employeeDetails.lastName}`,
+          employeeEmail: employeeDetails.email,
+          amount,
+          paymentStatus: paymentStatus || 'processed',
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+        });
+        console.log(`📧 Final settlement email sent to ${employeeDetails.email}`);
+      } catch (emailError) {
+        console.error('⚠️ Failed to send final settlement email:', emailError.message);
+        // Don't fail the request if email fails
+      }
+    }
 
     res.status(200).json({ success: true, message: 'Final settlement processed', data: offboarding });
   } catch (error) {

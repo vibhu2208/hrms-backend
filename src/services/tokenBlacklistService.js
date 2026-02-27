@@ -8,6 +8,7 @@ class TokenBlacklistService {
   constructor() {
     this.client = null;
     this.isConnected = false;
+    this.connectionAttempted = false;
   }
 
   /**
@@ -15,13 +16,17 @@ class TokenBlacklistService {
    */
   async connect() {
     if (this.isConnected) return;
+    if (this.connectionAttempted) return; // Prevent repeated connection attempts
 
     // If no Redis URL configured, run in fallback mode (no blacklisting)
     if (!process.env.REDIS_URL) {
       console.warn('⚠️  Redis not configured - token blacklisting disabled (tokens will remain valid until expiry)');
       this.isConnected = false;
+      this.connectionAttempted = true;
       return;
     }
+
+    this.connectionAttempted = true;
 
     try {
       this.client = redis.createClient({
@@ -33,6 +38,7 @@ class TokenBlacklistService {
           reconnectStrategy: (retries) => {
             if (retries > 3) {
               console.error('Redis connection failed after 3 retries - running without blacklist');
+              this.isConnected = false;
               return false; // Stop retrying
             }
             return Math.min(retries * 100, 3000);
@@ -48,6 +54,11 @@ class TokenBlacklistService {
       this.client.on('connect', () => {
         console.log('✅ Redis connected for token blacklist');
         this.isConnected = true;
+      });
+
+      this.client.on('end', () => {
+        console.log('Redis connection closed');
+        this.isConnected = false;
       });
 
       await this.client.connect();
@@ -93,8 +104,13 @@ class TokenBlacklistService {
    * @returns {Boolean}
    */
   async isBlacklisted(token) {
-    if (!this.isConnected) {
+    if (!this.isConnected && !this.connectionAttempted) {
       await this.connect();
+    }
+
+    if (!this.isConnected) {
+      // Redis not available, fail open (allow request)
+      return false;
     }
 
     try {
@@ -102,6 +118,7 @@ class TokenBlacklistService {
       return result === 'revoked';
     } catch (error) {
       console.error('Error checking token blacklist:', error);
+      this.isConnected = false; // Mark as disconnected on error
       // Fail open - if Redis is down, allow the request
       return false;
     }
@@ -155,8 +172,13 @@ class TokenBlacklistService {
    * @returns {Boolean}
    */
   async isUserBlacklisted(userId) {
-    if (!this.isConnected) {
+    if (!this.isConnected && !this.connectionAttempted) {
       await this.connect();
+    }
+
+    if (!this.isConnected) {
+      // Redis not available, fail open (allow request)
+      return false;
     }
 
     try {
@@ -164,6 +186,7 @@ class TokenBlacklistService {
       return result !== null;
     } catch (error) {
       console.error('Error checking user blacklist:', error);
+      this.isConnected = false; // Mark as disconnected on error
       return false;
     }
   }

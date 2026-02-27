@@ -546,26 +546,26 @@ class OffboardingWorkflowEngine {
     return exitFeedback;
   }
 
-  /**
-   * Calculate experience in years and months from two dates
-   */
-  calculateExperience(startDate, endDate) {
-    if (!startDate || !endDate) {
+  calculateExperience(joiningDate, terminationDate) {
+    if (!joiningDate || !terminationDate) {
       return { years: 0, months: 0 };
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
+    const start = new Date(joiningDate);
+    const end = new Date(terminationDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return { years: 0, months: 0 };
+    }
+
     let years = end.getFullYear() - start.getFullYear();
     let months = end.getMonth() - start.getMonth();
-    
+
     if (months < 0) {
       years--;
       months += 12;
     }
-    
-    // Adjust for days
+
     if (end.getDate() < start.getDate()) {
       months--;
       if (months < 0) {
@@ -573,8 +573,29 @@ class OffboardingWorkflowEngine {
         months += 12;
       }
     }
-    
-    return { years, months };
+
+    return {
+      years: Math.max(0, years),
+      months: Math.max(0, months)
+    };
+  }
+
+  sanitizeCTC(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string') {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (typeof value === 'object') {
+      if (value.isEncrypted) return null;
+      if (typeof value.total === 'number') return Number.isFinite(value.total) ? value.total : null;
+      if (typeof value.total === 'string') {
+        const n = Number(value.total);
+        return Number.isFinite(n) ? n : null;
+      }
+    }
+    return null;
   }
 
   /**
@@ -583,7 +604,8 @@ class OffboardingWorkflowEngine {
   async completeOffboarding(tenantConnection, offboardingRequest) {
     // Get the complete employee data before marking as ex-employee
     const TenantEmployee = tenantConnection.models.Employee || tenantConnection.model('Employee', require('../models/tenant/TenantEmployee'));
-    const TalentPool = require('../models/TalentPool');
+    const TalentPool = tenantConnection.models.TalentPool || tenantConnection.model('TalentPool', require('../models/TalentPool').schema);
+    const Candidate = tenantConnection.models.Candidate || tenantConnection.model('Candidate', require('../models/Candidate').schema);
 
     const employeeData = await TenantEmployee.findById(offboardingRequest.employeeId);
 
@@ -597,7 +619,6 @@ class OffboardingWorkflowEngine {
       
       // Even if already ex-employee, ensure candidate exists
       try {
-        const Candidate = getTenantModel(tenantConnection, 'Candidate', require('../models/Candidate'));
         const existingCandidate = await Candidate.findOne({
           $or: [
             { exEmployeeId: employeeData._id },
@@ -729,8 +750,10 @@ class OffboardingWorkflowEngine {
       // Verify the save by re-fetching from database
       const verifyEmployee = await TenantEmployee.findById(employeeData._id).lean();
 
-      // Add ex-employee to talent pool
+      // Add ex-employee to talent pool (non-blocking)
       try {
+        console.log(`🔄 Adding ex-employee to talent pool: ${employeeData.firstName} ${employeeData.lastName}`);
+
         const talentPoolData = {
           name: `${employeeData.firstName} ${employeeData.lastName}`,
           email: employeeData.email,
@@ -743,8 +766,8 @@ class OffboardingWorkflowEngine {
           },
           currentCompany: 'Previous Employer',
           currentDesignation: employeeData.designation,
-          currentCTC: employeeData.salary?.total || employeeData.salary || null,
-          skills: [], // Can be populated from employee profile if available
+          currentCTC: this.sanitizeCTC(employeeData.salary?.total ?? employeeData.salary),
+          skills: [],
           status: 'new',
           isExEmployee: true,
           exEmployeeId: employeeData._id,
@@ -758,90 +781,71 @@ class OffboardingWorkflowEngine {
         };
 
         const talentPoolEntry = await TalentPool.create(talentPoolData);
-
-        console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) marked as ex-employee and added to talent pool (${talentPoolEntry.talentCode})`);
-        
-        // Also add ex-employee to candidate pool
-        try {
-          const Candidate = getTenantModel(tenantConnection, 'Candidate', require('../models/Candidate'));
-          // Capture employee data values immediately to avoid closure issues
-          const empFirstName = String(employeeData.firstName || '').trim();
-          const empLastName = String(employeeData.lastName || '').trim();
-          const empEmail = String(employeeData.email || '').trim();
-          const empPhone = String(employeeData.phone || '').trim();
-          const empCode = String(employeeData.employeeCode || '').trim();
-          
-          
-          // Check if candidate already exists for this ex-employee
-          const existingCandidate = await Candidate.findOne({
-            $or: [
-              { exEmployeeId: employeeData._id },
-              { exEmployeeCode: empCode },
-              { email: empEmail, isExEmployee: true }
-            ]
-          });
-          
-          if (existingCandidate) {
-            console.log(`⚠️  Candidate already exists for ex-employee ${empFirstName} ${empLastName} (${empCode}): ${existingCandidate.candidateCode}`);
-            // Update existing candidate if needed
-            if (existingCandidate.firstName !== empFirstName || existingCandidate.lastName !== empLastName) {
-              existingCandidate.firstName = empFirstName;
-              existingCandidate.lastName = empLastName;
-              await existingCandidate.save();
-              console.log(`✅ Updated candidate name for ${existingCandidate.candidateCode}`);
-            }
-            // Skip creating new candidate since one already exists
-          } else {
-            // Create new candidate for ex-employee
-            const candidateData = {
-              firstName: empFirstName,
-              lastName: empLastName,
-              email: empEmail,
-              phone: empPhone,
-              currentLocation: employeeData.address?.city || employeeData.address || '',
-              experience: {
-                years: experience.years,
-                months: experience.months
-              },
-              currentCompany: 'Previous Employer',
-              currentDesignation: employeeData.designation || 'Previous Role',
-              currentCTC: employeeData.salary?.total || employeeData.salary || null,
-              skills: employeeData.skills || [],
-              source: 'internal',
-              stage: 'applied',
-              status: 'active',
-              isExEmployee: true,
-              exEmployeeId: employeeData._id,
-              exEmployeeCode: empCode,
-              notes: `Ex-employee from ${employeeData.department || 'General'} department. ${offboardingRequest.reason ? `Reason: ${offboardingRequest.reason}` : ''}`,
-              timeline: [{
-                action: 'Added from Offboarding',
-                description: `Employee offboarding completed. Previous employee code: ${empCode}. Experience: ${experience.years} years ${experience.months} months.`,
-                timestamp: new Date()
-              }]
-            };
-            
-            // Generate candidate code
-            const lastCandidate = await Candidate.findOne({}).sort({ createdAt: -1 });
-            let candidateNumber = 1;
-            if (lastCandidate && lastCandidate.candidateCode) {
-              const match = lastCandidate.candidateCode.match(/CAND(\d+)/);
-              if (match) {
-                candidateNumber = parseInt(match[1]) + 1;
-              }
-            }
-            candidateData.candidateCode = `CAND${String(candidateNumber).padStart(5, '0')}`;
-            
-            const candidateEntry = await Candidate.create(candidateData);
-            console.log(`✅ Ex-employee ${empFirstName} ${empLastName} (${empCode}) added to candidate pool (${candidateEntry.candidateCode})`);
-          }
-        } catch (candidateError) {
-          console.error('⚠️  Error adding ex-employee to candidate pool:', candidateError);
-          // Continue with offboarding completion even if candidate addition fails
-        }
+        console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) added to talent pool (${talentPoolEntry.talentCode})`);
       } catch (talentPoolError) {
         console.error('⚠️  Error adding ex-employee to talent pool:', talentPoolError);
-        // Continue with offboarding completion even if talent pool addition fails
+      }
+
+      // Add ex-employee to candidate pool (must run even if TalentPool fails)
+      try {
+        console.log(`🔄 Adding ex-employee to candidate pool: ${employeeData.firstName} ${employeeData.lastName}`);
+
+        const empFirstName = String(employeeData.firstName || '').trim();
+        const empLastName = String(employeeData.lastName || '').trim();
+        const empEmail = String(employeeData.email || '').trim();
+        const empPhone = String(employeeData.phone || '').trim();
+        const empCode = String(employeeData.employeeCode || '').trim();
+
+        const existingCandidate = await Candidate.findOne({
+          $or: [
+            { exEmployeeId: employeeData._id },
+            { exEmployeeCode: empCode },
+            { email: empEmail, isExEmployee: true }
+          ]
+        });
+
+        if (existingCandidate) {
+          console.log(`⚠️  Candidate already exists for ex-employee ${empFirstName} ${empLastName} (${empCode}): ${existingCandidate.candidateCode}`);
+          if (existingCandidate.firstName !== empFirstName || existingCandidate.lastName !== empLastName) {
+            existingCandidate.firstName = empFirstName;
+            existingCandidate.lastName = empLastName;
+            await existingCandidate.save();
+            console.log(`✅ Updated candidate name for ${existingCandidate.candidateCode}`);
+          }
+        } else {
+          const candidateData = {
+            firstName: empFirstName,
+            lastName: empLastName,
+            email: empEmail,
+            phone: empPhone,
+            currentLocation: employeeData.address?.city || employeeData.address || '',
+            experience: {
+              years: experience.years,
+              months: experience.months
+            },
+            currentCompany: 'Previous Employer',
+            currentDesignation: employeeData.designation || 'Previous Role',
+            currentCTC: this.sanitizeCTC(employeeData.salary?.total ?? employeeData.salary),
+            skills: employeeData.skills || [],
+            source: 'internal',
+            stage: 'applied',
+            status: 'active',
+            isExEmployee: true,
+            exEmployeeId: employeeData._id,
+            exEmployeeCode: empCode,
+            notes: `Ex-employee from ${employeeData.department || 'General'} department. ${offboardingRequest.reason ? `Reason: ${offboardingRequest.reason}` : ''}`,
+            timeline: [{
+              action: 'Added from Offboarding',
+              description: `Employee offboarding completed. Previous employee code: ${empCode}. Experience: ${experience.years} years ${experience.months} months.`,
+              timestamp: new Date()
+            }]
+          };
+
+          const candidateEntry = await Candidate.create(candidateData);
+          console.log(`✅ Ex-employee ${empFirstName} ${empLastName} (${empCode}) added to candidate pool (${candidateEntry.candidateCode})`);
+        }
+      } catch (candidateError) {
+        console.error('⚠️  Error adding ex-employee to candidate pool:', candidateError);
       }
 
       console.log(`✅ Employee ${employeeData.firstName} ${employeeData.lastName} (${employeeData.employeeCode}) marked as ex-employee`);

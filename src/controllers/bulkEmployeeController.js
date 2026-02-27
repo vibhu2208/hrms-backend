@@ -1,5 +1,7 @@
 const Employee = require('../models/Employee');
 const Department = require('../models/Department');
+const { getTenantModel } = require('../middlewares/tenantMiddleware');
+const { EMPLOYMENT_TYPES, isValidEmploymentType } = require('../utils/employmentTypeConstants');
 
 // Helper function to validate email format
 const isValidEmail = (email) => {
@@ -19,17 +21,26 @@ const isValidDate = (dateString) => {
   return date instanceof Date && !isNaN(date);
 };
 
-// Helper function to find department by name or ID
-const findDepartment = async (departmentValue) => {
+// Helper function to find department by name or ID (tenant-aware)
+const findDepartment = async (departmentValue, tenantConnection) => {
   if (!departmentValue) return null;
   
+  const DepartmentModel = getTenantModel(tenantConnection, 'Department', Department.schema);
+  
   // Try to find by ID first
-  let department = await Department.findById(departmentValue).catch(() => null);
+  let department = await DepartmentModel.findById(departmentValue).catch(() => null);
   
   // If not found, try to find by name (case-insensitive)
   if (!department) {
-    department = await Department.findOne({ 
+    department = await DepartmentModel.findOne({ 
       name: { $regex: new RegExp(`^${departmentValue}$`, 'i') } 
+    });
+  }
+  
+  // Also try to find by code (case-insensitive)
+  if (!department) {
+    department = await DepartmentModel.findOne({ 
+      code: { $regex: new RegExp(`^${departmentValue}$`, 'i') } 
     });
   }
   
@@ -81,7 +92,7 @@ const employeeFieldMapping = {
   'ifsc code': 'ifscCode'
 };
 
-const validateEmployeeRecord = async (record, rowIndex) => {
+const validateEmployeeRecord = async (record, rowIndex, tenantConnection) => {
   const errors = [];
   const warnings = [];
 
@@ -144,8 +155,7 @@ const validateEmployeeRecord = async (record, rowIndex) => {
   }
 
   // Validate employment type enum
-  const validEmploymentTypes = ['full-time', 'part-time', 'contract', 'intern'];
-  if (normalizedRecord.employmentType && !validEmploymentTypes.includes(normalizedRecord.employmentType.toLowerCase())) {
+  if (normalizedRecord.employmentType && !isValidEmploymentType(normalizedRecord.employmentType.toLowerCase())) {
     warnings.push('Invalid employment type, will be set to full-time');
   }
 
@@ -155,25 +165,27 @@ const validateEmployeeRecord = async (record, rowIndex) => {
     warnings.push('Invalid status, will be set to active');
   }
 
-  // Check for duplicate email
+  // Check for duplicate email using tenant-aware model
   if (normalizedRecord.email) {
-    const existingEmployee = await Employee.findOne({ email: normalizedRecord.email.toLowerCase() });
+    const EmployeeModel = getTenantModel(tenantConnection, 'Employee', Employee.schema);
+    const existingEmployee = await EmployeeModel.findOne({ email: normalizedRecord.email.toLowerCase() });
     if (existingEmployee) {
       errors.push(`Email already exists for employee: ${existingEmployee.firstName} ${existingEmployee.lastName}`);
     }
   }
 
-  // Check for duplicate employee code if provided
+  // Check for duplicate employee code if provided using tenant-aware model
   if (normalizedRecord.employeeCode) {
-    const existingCode = await Employee.findOne({ employeeCode: normalizedRecord.employeeCode });
+    const EmployeeModel = getTenantModel(tenantConnection, 'Employee', Employee.schema);
+    const existingCode = await EmployeeModel.findOne({ employeeCode: normalizedRecord.employeeCode });
     if (existingCode) {
       errors.push(`Employee code already exists: ${normalizedRecord.employeeCode}`);
     }
   }
 
-  // Validate department exists
+  // Validate department exists using tenant-aware model
   if (normalizedRecord.department) {
-    const department = await findDepartment(normalizedRecord.department);
+    const department = await findDepartment(normalizedRecord.department, tenantConnection);
     if (!department) {
       errors.push(`Department not found: ${normalizedRecord.department}`);
     }
@@ -188,7 +200,7 @@ const validateEmployeeRecord = async (record, rowIndex) => {
 };
 
 // Transform CSV/Excel record to employee schema format
-const transformRecord = async (record) => {
+const transformRecord = async (record, tenantConnection) => {
   // Normalize field names from CSV headers
   const normalizedRecord = {};
   for (const [key, value] of Object.entries(record)) {
@@ -196,7 +208,7 @@ const transformRecord = async (record) => {
     normalizedRecord[normalizedKey] = value;
   }
 
-  const department = await findDepartment(normalizedRecord.department);
+  const department = await findDepartment(normalizedRecord.department, tenantConnection);
   
   const employee = {
     firstName: normalizedRecord.firstName?.trim(),
@@ -291,7 +303,7 @@ exports.validateBulkEmployees = async (req, res) => {
     let invalidCount = 0;
 
     for (let i = 0; i < employees.length; i++) {
-      const validation = await validateEmployeeRecord(employees[i], i + 1);
+      const validation = await validateEmployeeRecord(employees[i], i + 1, req.tenant.connection);
       validationResults.push({
         row: i + 1,
         data: employees[i],
@@ -343,7 +355,7 @@ exports.bulkCreateEmployees = async (req, res) => {
     let skippedCount = 0;
 
     for (let i = 0; i < employees.length; i++) {
-      const validation = await validateEmployeeRecord(employees[i], i + 1);
+      const validation = await validateEmployeeRecord(employees[i], i + 1, req.tenant.connection);
       
       if (validation.isValid) {
         validRecords.push(employees[i]);
@@ -357,14 +369,15 @@ exports.bulkCreateEmployees = async (req, res) => {
       }
     }
 
-    // Transform and create valid records
+    // Transform and create valid records using tenant-aware model
     const createdEmployees = [];
     const errors = [];
+    const EmployeeModel = getTenantModel(req.tenant.connection, 'Employee', Employee.schema);
 
     for (let i = 0; i < validRecords.length; i++) {
       try {
-        const transformedData = await transformRecord(validRecords[i]);
-        const employee = await Employee.create(transformedData);
+        const transformedData = await transformRecord(validRecords[i], req.tenant.connection);
+        const employee = await EmployeeModel.create(transformedData);
         createdEmployees.push(employee);
       } catch (error) {
         errors.push({

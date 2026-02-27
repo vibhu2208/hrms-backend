@@ -14,6 +14,7 @@ const TenantUserSchema = require('../models/tenant/TenantUser');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('./emailService');
 const mongoose = require('mongoose');
+const ContractWorkflowService = require('./contractWorkflowService');
 
 class EmployeeCreationService {
   /**
@@ -86,7 +87,20 @@ class EmployeeCreationService {
       const tempPassword = this.generateTempPassword();
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-      // Prepare employee data
+      // Get candidate details for personal information transfer
+      const candidate = onboarding.applicationId;
+      
+      // Get employment type from job posting, fallback to candidate preference, then default
+      let employmentType = 'full-time'; // default
+      if (onboarding.jobId && onboarding.jobId.employmentType) {
+        employmentType = onboarding.jobId.employmentType;
+        console.log(`✅ Using employment type from job posting: ${employmentType}`);
+      } else if (candidate && candidate.employmentType) {
+        employmentType = candidate.employmentType;
+        console.log(`✅ Using employment type from candidate preference: ${employmentType}`);
+      }
+
+      // Prepare employee data with candidate personal details
       const employeeData = {
         firstName: onboarding.candidateName?.split(' ')[0] || '',
         lastName: onboarding.candidateName?.split(' ').slice(1).join(' ') || '',
@@ -95,8 +109,17 @@ class EmployeeCreationService {
         employeeCode: employeeCode,
         designation: onboarding.position || '',
         joiningDate: onboarding.joiningDate || new Date(),
+        employmentType: employmentType,
         status: 'active',
-        isActive: true
+        isActive: true,
+        // Transfer personal details from candidate if available
+        ...(candidate && candidate.dateOfBirth ? { dateOfBirth: candidate.dateOfBirth } : {}),
+        ...(candidate && candidate.gender ? { gender: candidate.gender } : {}),
+        ...(candidate && candidate.bloodGroup ? { bloodGroup: candidate.bloodGroup } : {}),
+        ...(candidate && candidate.maritalStatus ? { maritalStatus: candidate.maritalStatus } : {}),
+        ...(candidate && candidate.alternatePhone ? { alternatePhone: candidate.alternatePhone } : {}),
+        ...(candidate && candidate.address ? { address: candidate.address } : {}),
+        ...(candidate && candidate.emergencyContact ? { emergencyContact: candidate.emergencyContact } : {})
       };
       
       // Apply additional data, but exclude department fields to set them manually
@@ -325,6 +348,23 @@ class EmployeeCreationService {
 
 
       console.log(`✅ Employee created: ${employee.email} (${employeeCode})`);
+
+      // Handle contract workflow for contract-requiring employment types
+      let contractWorkflowResult = null;
+      try {
+        contractWorkflowResult = await ContractWorkflowService.handleEmployeeCreation(
+          employee, 
+          tenantConnection, 
+          { _id: onboarding.createdBy || null }
+        );
+        
+        if (contractWorkflowResult.success && contractWorkflowResult.contractId) {
+          console.log(`✅ Contract workflow initiated for ${employee.firstName} ${employee.lastName}: ${contractWorkflowResult.message}`);
+        }
+      } catch (contractError) {
+        console.error('Error in contract workflow during onboarding:', contractError);
+        // Don't fail employee creation if contract workflow fails
+      }
 
       // Create user account with 'employee' role
       const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);
@@ -623,26 +663,54 @@ class EmployeeCreationService {
     }
     
     // Check department - it's required in onboarding schema, but verify it exists
-    if (!onboarding.department) {
+    let departmentResolved = false;
+    
+    if (onboarding.department) {
+      // Department is directly available in onboarding
+      departmentResolved = true;
+    } else if (onboarding.jobId) {
       // Try to get from jobId if available
-      if (onboarding.jobId) {
-        const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
-        if (JobPosting) {
-          try {
-            const job = await JobPosting.findById(onboarding.jobId).populate('department');
-            if (job && job.department) {
-              // Department exists in job, this is okay
-            } else {
-              errors.push('Department is required - not found in job posting');
-            }
-          } catch (jobError) {
-            errors.push('Department is required - could not verify from job posting');
+      const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+      if (JobPosting) {
+        try {
+          const job = await JobPosting.findById(onboarding.jobId).populate('department');
+          if (job && job.department) {
+            // Department exists in job, update onboarding record with department
+            const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+            await Onboarding.findByIdAndUpdate(onboardingId, { 
+              department: job.department._id 
+            });
+            departmentResolved = true;
+            console.log(`✅ Updated onboarding ${onboardingId} with department from job posting: ${job.department.name}`);
           }
-        } else {
-          errors.push('Department is required');
+        } catch (jobError) {
+          console.warn('⚠️ Could not fetch department from job posting:', jobError.message);
         }
-      } else {
-        errors.push('Department is required');
+      }
+    }
+    
+    if (!departmentResolved) {
+      // Try to assign a default department if available
+      const Department = getTenantModel(tenantConnection, 'Department');
+      if (Department) {
+        try {
+          const defaultDept = await Department.findOne({ isActive: true }).sort({ createdAt: 1 });
+          if (defaultDept) {
+            const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+            await Onboarding.findByIdAndUpdate(onboardingId, { 
+              department: defaultDept._id 
+            });
+            departmentResolved = true;
+            warnings.push(`Department was missing - assigned to default department: ${defaultDept.name}`);
+            console.log(`⚠️ Assigned default department ${defaultDept.name} to onboarding ${onboardingId}`);
+          }
+        } catch (deptError) {
+          console.warn('⚠️ Could not assign default department:', deptError.message);
+        }
+      }
+      
+      if (!departmentResolved) {
+        errors.push('Department is required but could not be resolved from job posting or default department');
       }
     }
 

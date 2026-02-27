@@ -87,7 +87,7 @@ const employeeSchema = new mongoose.Schema({
   },
   employmentType: {
     type: String,
-    enum: ['full-time', 'part-time', 'contract', 'intern'],
+    enum: ['full-time', 'part-time', 'consultant', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
     default: 'full-time'
   },
   status: {
@@ -184,42 +184,50 @@ const employeeSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate employee code before saving
+// Pre-save hook to handle enum validation and encrypt salary data
 employeeSchema.pre('save', async function(next) {
-  if (!this.employeeCode) {
-    const count = await mongoose.model('Employee').countDocuments();
-    this.employeeCode = `EMP${String(count + 1).padStart(5, '0')}`;
-  }
+  // Convert empty strings to undefined for enum fields to avoid validation errors
+  if (this.gender === '') this.gender = undefined;
+  if (this.bloodGroup === '') this.bloodGroup = undefined;
+  if (this.maritalStatus === '') this.maritalStatus = undefined;
+  if (this.employmentType === '') this.employmentType = undefined;
   
-  // Encrypt salary data if modified and not already encrypted
-  if (this.isModified('salary') && this.salary) {
-    try {
-      const encryptionService = require('../services/encryptionService');
-      
-      // Only encrypt if values are not already encrypted (backward compatibility)
-      if (this.salary.basic && !String(this.salary.basic).includes(':')) {
-        this.salary.basic = encryptionService.encryptField(this.salary.basic, 'basic');
-      }
-      if (this.salary.hra && !String(this.salary.hra).includes(':')) {
-        this.salary.hra = encryptionService.encryptField(this.salary.hra, 'hra');
-      }
-      if (this.salary.allowances && !String(this.salary.allowances).includes(':')) {
-        this.salary.allowances = encryptionService.encryptField(this.salary.allowances, 'allowances');
-      }
-      if (this.salary.deductions && !String(this.salary.deductions).includes(':')) {
-        this.salary.deductions = encryptionService.encryptField(this.salary.deductions, 'deductions');
-      }
-      if (this.salary.total && !String(this.salary.total).includes(':')) {
-        this.salary.total = encryptionService.encryptField(this.salary.total, 'total');
-      }
-      
-      this.salary.isEncrypted = true;
-    } catch (error) {
-      console.error('Error encrypting salary:', error.message);
-      // Continue without encryption if key not configured
+  const encryptionService = require('../services/encryptionService');
+  
+  // Only encrypt if encryption is configured and salary exists
+  if (!encryptionService.isEncryptionConfigured() || !this.salary) {
+    return next();
+  }
+
+  // Skip if already encrypted
+  if (this.salary.isEncrypted) {
+    return next();
+  }
+
+  try {
+    // Encrypt each salary field
+    if (this.salary.basic && !String(this.salary.basic).includes(':')) {
+      this.salary.basic = encryptionService.encryptField(this.salary.basic, 'basic');
     }
+    if (this.salary.hra && !String(this.salary.hra).includes(':')) {
+      this.salary.hra = encryptionService.encryptField(this.salary.hra, 'hra');
+    }
+    if (this.salary.allowances && !String(this.salary.allowances).includes(':')) {
+      this.salary.allowances = encryptionService.encryptField(this.salary.allowances, 'allowances');
+    }
+    if (this.salary.deductions && !String(this.salary.deductions).includes(':')) {
+      this.salary.deductions = encryptionService.encryptField(this.salary.deductions, 'deductions');
+    }
+    if (this.salary.total && !String(this.salary.total).includes(':')) {
+      this.salary.total = encryptionService.encryptField(this.salary.total, 'total');
+    }
+
+    this.salary.isEncrypted = true;
+  } catch (error) {
+    console.error('Error encrypting salary:', error.message);
+    // Continue without encryption if key not configured
   }
-  
+
   next();
 });
 

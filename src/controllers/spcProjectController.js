@@ -98,6 +98,30 @@ class SPCProjectController {
       
       const Project = connection.model('Project', new mongoose.Schema({}, { strict: false }), 'projects');
       
+      // If project is created from a contract, use contract dates as timeline
+      if (projectData.contractId) {
+        const Contract = connection.model('Contract', new mongoose.Schema({}, { strict: false }), 'contracts');
+        const contract = await Contract.findById(projectData.contractId);
+        
+        if (contract) {
+          // Use contract dates if project dates are not explicitly provided
+          projectData.startDate = projectData.startDate || contract.startDate;
+          projectData.endDate = projectData.endDate || contract.endDate;
+        }
+      }
+      
+      // If project is created from a job posting, use job posting dates as timeline
+      if (projectData.jobPostingId) {
+        const JobPosting = connection.model('JobPosting', new mongoose.Schema({}, { strict: false }), 'jobpostings');
+        const jobPosting = await JobPosting.findById(projectData.jobPostingId);
+        
+        if (jobPosting) {
+          // Use job posting dates if project dates are not explicitly provided
+          projectData.startDate = projectData.startDate || jobPosting.startDate;
+          projectData.endDate = projectData.endDate || jobPosting.endDate;
+        }
+      }
+      
       // Generate unique project code
       const projectCode = `PROJ${Date.now()}`;
       
