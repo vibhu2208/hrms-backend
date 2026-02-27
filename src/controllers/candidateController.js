@@ -2126,11 +2126,30 @@ exports.uploadResume = async (req, res) => {
 
     // Step 1: Upload file to AWS S3
     try {
-      s3UploadResult = await awsS3Service.uploadResume(
-        file.path,
-        file.originalname,
-        file.mimetype
-      );
+      let filePath, fileName, mimeType;
+      
+      if (req.file.buffer) {
+        // File is in memory (from multer memory storage)
+        filePath = req.file.buffer;
+        fileName = req.file.originalname;
+        mimeType = req.file.mimetype;
+        
+        // Use uploadFile method for buffer
+        s3UploadResult = await awsS3Service.uploadFile(req.file, 'resumes');
+      } else {
+        // File is on disk (traditional storage)
+        filePath = req.file.path;
+        fileName = req.file.originalname;
+        mimeType = req.file.mimetype;
+        
+        // Use uploadResume method for file path
+        s3UploadResult = await awsS3Service.uploadResume(
+          filePath,
+          fileName,
+          mimeType
+        );
+      }
+      
       console.log('✅ Resume uploaded to S3:', s3UploadResult.key);
     } catch (s3Error) {
       console.error('❌ S3 upload failed:', s3Error);
@@ -2144,7 +2163,37 @@ exports.uploadResume = async (req, res) => {
     // Step 2: Extract candidate data using Reducto
     let extractionResult;
     try {
-      extractionResult = await reductoService.extractCandidateData(file.path);
+      let filePathForExtraction;
+      
+      if (req.file.buffer) {
+        // For memory storage, save buffer to temporary file
+        const fs = require('fs').promises;
+        const os = require('os');
+        const path = require('path');
+        
+        const tempDir = os.tmpdir();
+        const tempFileName = `resume-${Date.now()}-${Math.random().toString(36).substring(7)}${path.extname(file.originalname)}`;
+        filePathForExtraction = path.join(tempDir, tempFileName);
+        
+        await fs.writeFile(filePathForExtraction, req.file.buffer);
+        console.log('Temporary file created for extraction:', filePathForExtraction);
+      } else {
+        // Use existing file path
+        filePathForExtraction = file.path;
+      }
+      
+      extractionResult = await reductoService.extractCandidateData(filePathForExtraction);
+      
+      // Clean up temporary file if created
+      if (req.file.buffer && filePathForExtraction) {
+        try {
+          const fs = require('fs').promises;
+          await fs.unlink(filePathForExtraction);
+          console.log('Temporary file cleaned up');
+        } catch (cleanupError) {
+          console.warn('Failed to clean up temporary file:', cleanupError);
+        }
+      }
     } catch (extractError) {
       console.error('Error calling Reducto service:', extractError);
 
@@ -2181,8 +2230,12 @@ exports.uploadResume = async (req, res) => {
     // Clean up temporary file
     try {
       const fs = require('fs').promises;
-      await fs.unlink(file.path);
-      console.log('Temporary file cleaned up');
+      
+      // Only clean up if file exists on disk (not memory storage)
+      if (file.path && !req.file.buffer) {
+        await fs.unlink(file.path);
+        console.log('Temporary file cleaned up');
+      }
     } catch (cleanupError) {
       console.warn('Failed to clean up temporary file:', cleanupError);
     }
@@ -2210,7 +2263,7 @@ exports.uploadResume = async (req, res) => {
     console.error('Error in resume upload:', error);
 
     // Clean up temporary file on error
-    if (req.file && req.file.path) {
+    if (req.file && req.file.path && !req.file.buffer) {
       try {
         const fs = require('fs').promises;
         await fs.unlink(req.file.path);
