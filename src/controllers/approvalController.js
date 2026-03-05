@@ -194,7 +194,7 @@ exports.approveRequest = async (req, res) => {
         const TenantUser = tenantConnection.model('User', TenantUserSchema);
         const adminUser = await TenantUser.findById(userId).select('firstName lastName email');
         
-        onboarding.status = 'preboarding'; // Return to preboarding so HR can send offer
+        onboarding.status = 'payslip_upload_requested'; // Move to payslip upload request after approval
         onboarding.approvalStatus.status = 'approved';
         onboarding.approvalStatus.approvedBy = userId;
         onboarding.approvalStatus.approvedAt = new Date();
@@ -206,18 +206,17 @@ exports.approveRequest = async (req, res) => {
           description: `Approval granted by ${adminUser?.firstName || 'Admin'} ${adminUser?.lastName || ''}`,
           performedBy: userId,
           previousStatus: 'pending_approval',
-          newStatus: 'preboarding',
+          newStatus: 'payslip_upload_requested',
           metadata: { comments },
           timestamp: new Date()
         });
         
         await onboarding.save();
-        console.log(`✅ Onboarding approved for ${onboarding.candidateName}`);
       }
       
       return res.json({
         success: true,
-        message: 'Onboarding approval granted. HR can now send offer letter.',
+        message: 'Onboarding approval granted. HR can now request payslip verification.',
         data: instance
       });
     }
@@ -369,7 +368,6 @@ exports.rejectRequest = async (req, res) => {
         });
         
         await onboarding.save();
-        console.log(`❌ Onboarding rejected for ${onboarding.candidateName}. Candidate on hold.`);
       }
       
       return res.json({

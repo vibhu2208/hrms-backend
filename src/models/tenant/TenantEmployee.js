@@ -191,7 +191,8 @@ const tenantEmployeeSchema = new mongoose.Schema({
     type: Date
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  collection: 'employees' // Explicitly set collection name
 });
 
 // Pre-save middleware to handle empty strings for enum fields

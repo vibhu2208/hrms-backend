@@ -23,7 +23,13 @@ const {
   // Onboarding Approval Routes
   requestOnboardingApproval,
   getOnboardingApprovalStatus,
-  processOnboardingApproval
+  processOnboardingApproval,
+  // Payslip verification routes
+  requestPayslipUpload,
+  verifyPayslip,
+  // Agreement generation routes
+  generateAgreement,
+  getEmployeeAgreements
 } = require('../controllers/onboardingController');
 const { sendTestOnboardingEmail } = require('../controllers/testEmailController');
 const { protect, authorize } = require('../middlewares/auth');
@@ -56,6 +62,14 @@ router.post('/:id/set-joining-date', setJoiningDateAndNotify);
 router.post('/:id/request-approval', requestOnboardingApproval);
 router.get('/:id/approval-status', getOnboardingApprovalStatus);
 router.put('/:id/process-approval', processOnboardingApproval);
+
+// Payslip verification routes
+router.post('/:id/request-payslip-upload', requestPayslipUpload);
+router.post('/:id/verify-payslip', verifyPayslip);
+
+// Agreement generation routes
+router.post('/:id/generate-agreement', generateAgreement);
+router.get('/:id/agreements', getEmployeeAgreements);
 
 // Document management routes
 router.get('/:id/documents', getDocuments);

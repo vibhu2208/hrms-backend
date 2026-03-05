@@ -3273,6 +3273,394 @@ const sendDocumentationStageEmail = async ({
   }
 };
 
+/**
+ * Send payslip verification request email to candidate
+ * @param {Object} options - Email options
+ * @param {string} options.candidateName - Candidate's full name
+ * @param {string} options.candidateEmail - Candidate's email address
+ * @param {string} options.position - Position/role
+ * @param {string} options.uploadUrl - Secure upload link
+ * @param {string} options.companyName - Company name
+ * @param {Date} options.expiryDate - Upload link expiry date
+ * @returns {Promise<Object>} Email send result
+ */
+const sendPayslipVerificationRequestEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  uploadUrl,
+  companyName = 'Our Company',
+  expiryDate
+}) => {
+  try {
+    const subject = `${companyName} - Payslip Verification Required for ${position} Position`;
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payslip Verification Request</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #A88BFF; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background: #f9f9f9; }
+          .button { 
+            display: inline-block; 
+            padding: 12px 24px; 
+            background: #A88BFF; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            margin: 20px 0;
+          }
+          .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
+          .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Payslip Verification Request</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${candidateName},</p>
+            <p>Congratulations on your progress for the <strong>${position}</strong> position at ${companyName}!</p>
+            <p>As part of our verification process, we need you to upload your recent payslip for verification. This is a mandatory step before we can proceed with your offer letter.</p>
+            
+            <div class="warning">
+              <strong>Important:</strong> Please upload your payslip within 7 days. The upload link will expire on ${new Date(expiryDate).toLocaleDateString()}.
+            </div>
+            
+            <p><strong>Instructions:</strong></p>
+            <ul>
+              <li>Click the button below to upload your payslip</li>
+              <li>Ensure the payslip shows your name, company, and salary details</li>
+              <li>File should be in PDF, JPG, or PNG format</li>
+              <li>Maximum file size: 5MB</li>
+            </ul>
+            
+            <div style="text-align: center;">
+              <a href="${uploadUrl}" class="button">Upload Payslip</a>
+            </div>
+            
+            <p>If you have any issues uploading the document, please contact our HR team.</p>
+            
+            <p>We look forward to receiving your documents and moving forward with your onboarding process.</p>
+            
+            <p>Best regards,<br>
+            HR Team<br>
+            ${companyName}</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated message. Please do not reply to this email.</p>
+            <p>© ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return await sendEmail({
+      to: candidateEmail,
+      subject,
+      html
+    });
+  } catch (error) {
+    console.error('Error sending payslip verification request email:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send payslip verification result email to candidate
+ * @param {Object} options - Email options
+ * @param {string} options.candidateName - Candidate's full name
+ * @param {string} options.candidateEmail - Candidate's email address
+ * @param {string} options.position - Position/role
+ * @param {boolean} options.isApproved - Whether payslip was approved
+ * @param {string} options.notes - Additional notes or rejection reason
+ * @param {string} options.companyName - Company name
+ * @returns {Promise<Object>} Email send result
+ */
+const sendPayslipVerificationResultEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  isApproved,
+  notes,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const subject = `${companyName} - Payslip Verification ${isApproved ? 'Approved' : 'Requires Attention'}`;
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payslip Verification Result</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: ${isApproved ? '#28a745' : '#dc3545'}; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background: #f9f9f9; }
+          .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
+          .success { background: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin: 10px 0; }
+          .error { background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Payslip Verification ${isApproved ? 'Approved' : 'Requires Action'}</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${candidateName},</p>
+            
+            ${isApproved ? `
+              <div class="success">
+                <strong>Good News!</strong> Your payslip has been successfully verified and approved.
+              </div>
+              <p>Your verification for the <strong>${position}</strong> position at ${companyName} is complete. We will now proceed with the next steps in your onboarding process.</p>
+              <p>You will receive further communication regarding your offer letter shortly.</p>
+            ` : `
+              <div class="error">
+                <strong>Action Required:</strong> There is an issue with your payslip submission.
+              </div>
+              <p>Our team has reviewed your payslip submission for the <strong>${position}</strong> position and found the following issue:</p>
+              <p><em>${notes}</em></p>
+              <p>Please rectify the issue and re-submit your payslip. Our HR team will contact you shortly with further instructions.</p>
+            `}
+            
+            <p>If you have any questions or need assistance, please don't hesitate to contact our HR team.</p>
+            
+            <p>Best regards,<br>
+            HR Team<br>
+            ${companyName}</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated message. Please do not reply to this email.</p>
+            <p>© ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return await sendEmail({
+      to: candidateEmail,
+      subject,
+      html
+    });
+  } catch (error) {
+    console.error('Error sending payslip verification result email:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send agreement letter with template
+ * @param {Object} options - Email options
+ * @param {string} options.templateId - Template ID
+ * @param {string} options.employeeName - Employee name
+ * @param {string} options.employeeEmail - Employee email
+ * @param {string} options.designation - Employee designation
+ * @param {Object} options.agreementData - Agreement data for template
+ * @param {string} options.companyName - Company name
+ */
+const sendAgreementLetterWithTemplate = async (options) => {
+  const {
+    templateId,
+    employeeName,
+    employeeEmail,
+    designation,
+    agreementData,
+    companyName,
+    tenantConnection
+  } = options;
+
+  try {
+    // Get agreement template and tenant connection
+    const { getTenantModel } = require('../utils/tenantModels');
+    const AgreementTemplate = getTenantModel(tenantConnection || global.connection, 'AgreementTemplate');
+    
+    const template = await AgreementTemplate.findById(templateId);
+    if (!template) {
+      throw new Error('Agreement template not found');
+    }
+
+    // Process template variables
+    let processedContent = template.content;
+    let processedSubject = template.subject;
+    
+    // Replace template variables with actual data
+    const variables = {
+      employeeName,
+      employeeEmail,
+      designation,
+      companyName,
+      ...agreementData
+    };
+
+    // Replace all {{variable}} placeholders
+    Object.keys(variables).forEach(key => {
+      const regex = new RegExp(`{{${key}}}`, 'g');
+      const value = variables[key] || '';
+      processedContent = processedContent.replace(regex, value);
+      processedSubject = processedSubject.replace(regex, value);
+    });
+
+    // Generate PDF from processed HTML content
+    const { generatePDFFromHTML } = require('../utils/pdfGenerator');
+    const pdfBuffer = await generatePDFFromHTML(processedContent, {
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '20px',
+        right: '20px',
+        bottom: '20px',
+        left: '20px'
+      }
+    });
+
+    // Create email with PDF attachment
+    const subject = processedSubject || `Employment Agreement - ${companyName}`;
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Employment Agreement</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+          }
+          .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            border-radius: 10px 10px 0 0;
+          }
+          .content {
+            background: #ffffff;
+            padding: 40px;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          }
+          .highlight {
+            background: #f8f9fa;
+            padding: 20px;
+            border-left: 4px solid #007bff;
+            margin: 20px 0;
+            border-radius: 5px;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+          }
+          .agreement-info {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>📋 Employment Agreement</h1>
+          <p>${companyName}</p>
+        </div>
+        
+        <div class="content">
+          <p>Dear <strong>${employeeName}</strong>,</p>
+          
+          <p>Congratulations! We are pleased to send you your employment agreement for the position of <strong>${designation}</strong> at <strong>${companyName}</strong>.</p>
+          
+          <div class="agreement-info">
+            <h3>📄 Your Agreement Details:</h3>
+            <ul>
+              <li><strong>Position:</strong> ${designation}</li>
+              <li><strong>Company:</strong> ${companyName}</li>
+              <li><strong>Effective Date:</strong> ${agreementData.effectiveDate || 'As per agreement'}</li>
+              <li><strong>Agreement Type:</strong> ${template.category || 'Employment Agreement'}</li>
+            </ul>
+          </div>
+          
+          <div class="highlight">
+            <h3>📎 Important: Your Agreement is Attached</h3>
+            <p>Please find your complete employment agreement attached as a PDF file. This document contains all the terms and conditions of your employment.</p>
+            <p><strong>Action Required:</strong> Please review the agreement carefully and keep it for your records.</p>
+          </div>
+          
+          <h3>📋 Next Steps:</h3>
+          <ol>
+            <li>Download and review the attached agreement PDF</li>
+            <li>Sign the agreement if required by your HR team</li>
+            <li>Keep a copy for your personal records</li>
+            <li>Contact HR if you have any questions</li>
+          </ol>
+          
+          <h3>❓ Need Help?</h3>
+          <p>If you have any questions about your agreement or need any clarifications, please don't hesitate to contact our HR team.</p>
+          
+          <div class="footer">
+            <p><strong>Best regards,</strong></p>
+            <p>HR Team<br>${companyName}</p>
+            <p style="font-size: 12px; color: #6c757d;">
+              This is an automated email. Please do not reply to this message.<br>
+              For HR inquiries, please contact: hr@${companyName.toLowerCase().replace(/\s+/g, '')}.com
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Create email attachments array with the PDF
+    const attachments = [
+      {
+        filename: `Employment_Agreement_${employeeName.replace(/\s+/g, '_')}_${companyName.replace(/\s+/g, '_')}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }
+    ];
+    
+    console.log('🔍 Email Attachment - PDF buffer size:', pdfBuffer.length, 'bytes');
+    console.log('🔍 Email Attachment - PDF buffer type:', typeof pdfBuffer);
+    console.log('🔍 Email Attachment - Attachment created:', attachments[0].filename);
+
+    // Send email with PDF attachment
+    await sendEmail({
+      to: employeeEmail,
+      subject: subject,
+      html: html,
+      attachments: attachments
+    });
+
+    console.log(`📧 Agreement email with PDF sent to ${employeeEmail}`);
+    
+  } catch (error) {
+    console.error('Error sending agreement email with PDF:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendEmail, // Generic email function
   sendOnboardingEmail,
@@ -3295,6 +3683,11 @@ module.exports = {
   verifyEmailConfig,
   sendDocumentRejectionEmail,
   sendCompanyAdminCredentials,
+  // Payslip verification email functions
+  sendPayslipVerificationRequestEmail,
+  sendPayslipVerificationResultEmail,
+  // Agreement email functions
+  sendAgreementLetterWithTemplate,
   // Offboarding email functions
   sendOffboardingInitiatedEmail,
   sendExitInterviewScheduledEmail,
@@ -3302,5 +3695,8 @@ module.exports = {
   sendClearanceProcessEmail,
   sendFinalSettlementEmail,
   sendOffboardingCompletedEmail,
-  sendDocumentationStageEmail
+  sendDocumentationStageEmail,
+  // Payslip verification email functions
+  sendPayslipVerificationRequestEmail,
+  sendPayslipVerificationResultEmail
 };

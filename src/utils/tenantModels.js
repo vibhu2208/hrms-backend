@@ -22,6 +22,7 @@ const Notification = require('../models/Notification');
 const ExitProcess = require('../models/ExitProcess');
 const TalentPool = require('../models/TalentPool');
 const OfferTemplate = require('../models/OfferTemplate');
+const AgreementTemplate = require('../models/AgreementTemplate');
 const ResumePool = require('../models/ResumePool');
 const JobDescription = require('../models/JobDescription');
 
@@ -166,6 +167,7 @@ function getTenantModels(tenantConnection) {
   models.ExitProcess = createTenantModel('ExitProcess', ExitProcess);
   models.TalentPool = createTenantModel('TalentPool', TalentPool);
   models.OfferTemplate = createTenantModel('OfferTemplate', OfferTemplate);
+  models.AgreementTemplate = createTenantModel('AgreementTemplate', AgreementTemplate);
   models.ResumePool = createTenantModel('ResumePool', ResumePool);
   models.JobDescription = createTenantModel('JobDescription', JobDescription);
   
