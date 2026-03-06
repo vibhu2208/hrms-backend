@@ -87,12 +87,79 @@ exports.createEmployee = async (req, res) => {
     const tenantConnection = req.tenant.connection;
     const TenantUser = tenantConnection.model('User', TenantUserSchema);
     
-    const employee = await TenantUser.create(req.body);
+    // Ensure required fields are present
+    const { email, firstName, lastName, role, password, ...otherFields } = req.body;
+    
+    // Validate required fields
+    if (!email || !firstName || !lastName || !role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email, firstName, lastName, and role are required'
+      });
+    }
+    
+    // Set default role to 'employee' if not provided or invalid
+    const validRoles = ['company_admin', 'hr', 'manager', 'employee'];
+    const userRole = validRoles.includes(role) ? role : 'employee';
+    
+    // Generate default password if not provided
+    const generatePassword = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+      let password = '';
+      for (let i = 0; i < 8; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return password;
+    };
+    
+    const userPassword = password || generatePassword();
+    
+    // Create user with all required fields
+    const userData = {
+      email,
+      firstName,
+      lastName,
+      role: userRole,
+      password: userPassword,
+      authProvider: 'local',
+      ...otherFields
+    };
+    
+    const employee = await TenantUser.create(userData);
+
+    // Send welcome email with credentials
+    let emailSent = false;
+    try {
+      const { sendOnboardingEmail } = require('../services/emailService');
+      await sendOnboardingEmail({
+        employeeName: `${firstName} ${lastName}`,
+        employeeEmail: email,
+        employeeId: employee._id,
+        tempPassword: userPassword,
+        companyName: req.user.companyName || 'Our Company'
+      });
+      console.log(`📧 Welcome email sent to employee: ${email}`);
+      emailSent = true;
+    } catch (emailError) {
+      console.error('❌ Error sending welcome email to employee:', emailError);
+      // Don't fail the employee creation if email fails
+    }
+
+    // Log the generated password for admin to share with employee
+    if (!password) {
+      console.log(`🔑 Generated password for ${email}: ${userPassword}`);
+    }
+
+    // Remove password from response
+    const employeeResponse = employee.toObject();
+    delete employeeResponse.password;
 
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
-      data: employee
+      data: employeeResponse,
+      generatedPassword: !password ? userPassword : undefined,
+      emailSent: emailSent
     });
   } catch (error) {
     console.error('Error creating employee:', error);

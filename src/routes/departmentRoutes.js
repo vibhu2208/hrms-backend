@@ -13,11 +13,11 @@ router.use(protect);
 
 router.route('/')
   .get(getDepartments)
-  .post(authorize('admin', 'hr'), createDepartment);
+  .post(authorize('admin', 'hr', 'company_admin'), createDepartment);
 
 router.route('/:id')
   .get(getDepartment)
-  .put(authorize('admin', 'hr'), updateDepartment)
-  .delete(authorize('admin'), deleteDepartment);
+  .put(authorize('admin', 'hr', 'company_admin'), updateDepartment)
+  .delete(authorize('admin', 'company_admin'), deleteDepartment);
 
 module.exports = router;

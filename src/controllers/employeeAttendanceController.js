@@ -1,5 +1,8 @@
 // Multi-tenant compatible attendance controller
-// TODO: Implement actual database queries with tenant connection
+
+const { getTenantConnection } = require('../config/database.config');
+const TenantAttendanceSchema = require('../models/tenant/Attendance');
+const { verifyOfficeNetwork } = require('../utils/networkVerification');
 
 /**
  * Employee Attendance Controller
@@ -11,22 +14,35 @@
  * Get today's attendance
  */
 exports.getTodayAttendance = async (req, res) => {
+  let tenantConnection = null;
+
   try {
-    const today = new Date();
-    const attendance = {
-      _id: 'today_attendance',
-      date: today.toISOString().split('T')[0],
-      status: 'not_marked',
-      checkIn: null,
-      checkOut: null,
-      workHours: '0h 0m',
-      location: 'Office',
-      isLate: false,
-      remarks: null
-    };
-    res.status(200).json({ success: true, data: attendance });
+    const companyId = req.companyId;
+    const user = req.user;
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'Company ID not found' });
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    tenantConnection = await getTenantConnection(companyId);
+    const Attendance = tenantConnection.model('Attendance', TenantAttendanceSchema);
+
+    const doc = await Attendance.findOne({
+      employeeId: user._id,
+      date: { $gte: startOfDay, $lte: endOfDay }
+    }).lean();
+
+    return res.status(200).json({ success: true, data: doc || null });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
+  } finally {
+    if (tenantConnection) await tenantConnection.close();
   }
 };
 
@@ -34,35 +50,30 @@ exports.getTodayAttendance = async (req, res) => {
  * Get attendance history
  */
 exports.getAttendanceHistory = async (req, res) => {
+  let tenantConnection = null;
+
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit) : 30;
-    const history = [];
-    
-    // Generate mock attendance history for the past days
-    const today = new Date();
-    for (let i = 1; i <= Math.min(limit, 20); i++) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      
-      // Skip weekends
-      if (date.getDay() === 0 || date.getDay() === 6) continue;
-      
-      history.push({
-        _id: `attendance_${i}`,
-        date: date.toISOString().split('T')[0],
-        checkIn: '09:00 AM',
-        checkOut: '06:00 PM',
-        workHours: '9h 0m',
-        status: 'present',
-        location: 'Office',
-        isLate: i % 5 === 0,
-        remarks: null
-      });
+    const companyId = req.companyId;
+    const user = req.user;
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 30;
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'Company ID not found' });
     }
-    
-    res.status(200).json({ success: true, data: history });
+
+    tenantConnection = await getTenantConnection(companyId);
+    const Attendance = tenantConnection.model('Attendance', TenantAttendanceSchema);
+
+    const docs = await Attendance.find({ employeeId: user._id })
+      .sort({ date: -1 })
+      .limit(limit)
+      .lean();
+
+    return res.status(200).json({ success: true, data: docs });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
+  } finally {
+    if (tenantConnection) await tenantConnection.close();
   }
 };
 
@@ -70,13 +81,90 @@ exports.getAttendanceHistory = async (req, res) => {
  * Check in
  */
 exports.checkIn = async (req, res) => {
+  let tenantConnection = null;
+
   try {
-    res.status(200).json({
+    const companyId = req.companyId;
+    const user = req.user;
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'Company ID not found' });
+    }
+
+    const verification = await verifyOfficeNetwork(req);
+    if (!verification.allowed) {
+      return res.status(403).json({
+        success: false,
+        message: 'Attendance allowed only on office WiFi',
+        ip: verification.ip
+      });
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const deviceInfo = req.body?.deviceInfo || req.headers['user-agent'] || '';
+    const locationLat = req.body?.locationLat;
+    const locationLong = req.body?.locationLong;
+    const location = req.body?.location || 'office';
+
+    tenantConnection = await getTenantConnection(companyId);
+    const Attendance = tenantConnection.model('Attendance', TenantAttendanceSchema);
+
+    const existing = await Attendance.findOne({
+      employeeId: user._id,
+      date: { $gte: startOfDay, $lte: endOfDay }
+    });
+
+    if (existing?.checkIn) {
+      return res.status(400).json({ success: false, message: 'Already checked in for today' });
+    }
+
+    if (existing && !existing.checkIn) {
+      existing.checkIn = now;
+      existing.ipAddress = verification.ip;
+      existing.networkName = verification.network;
+      existing.deviceInfo = deviceInfo;
+      existing.location = location;
+      if (locationLat !== undefined) existing.locationLat = locationLat;
+      if (locationLong !== undefined) existing.locationLong = locationLong;
+      await existing.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Check-in successful',
+        time: now.toISOString(),
+        data: existing
+      });
+    }
+
+    const doc = await Attendance.create({
+      employeeId: user._id,
+      employeeEmail: user.email,
+      date: startOfDay,
+      checkIn: now,
+      status: 'present',
+      location,
+      ipAddress: verification.ip,
+      networkName: verification.network,
+      deviceInfo,
+      locationLat,
+      locationLong
+    });
+
+    return res.status(201).json({
       success: true,
-      message: 'Check-in feature coming soon'
+      message: 'Check-in successful',
+      time: now.toISOString(),
+      data: doc
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
+  } finally {
+    if (tenantConnection) await tenantConnection.close();
   }
 };
 
@@ -84,13 +172,69 @@ exports.checkIn = async (req, res) => {
  * Check out
  */
 exports.checkOut = async (req, res) => {
+  let tenantConnection = null;
+
   try {
-    res.status(200).json({
+    const companyId = req.companyId;
+    const user = req.user;
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'Company ID not found' });
+    }
+
+    const verification = await verifyOfficeNetwork(req);
+    if (!verification.allowed) {
+      return res.status(403).json({
+        success: false,
+        message: 'Attendance allowed only on office WiFi',
+        ip: verification.ip
+      });
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const deviceInfo = req.body?.deviceInfo || req.headers['user-agent'] || '';
+    const locationLat = req.body?.locationLat;
+    const locationLong = req.body?.locationLong;
+
+    tenantConnection = await getTenantConnection(companyId);
+    const Attendance = tenantConnection.model('Attendance', TenantAttendanceSchema);
+
+    const doc = await Attendance.findOne({
+      employeeId: user._id,
+      date: { $gte: startOfDay, $lte: endOfDay }
+    });
+
+    if (!doc?.checkIn) {
+      return res.status(400).json({ success: false, message: 'You have not checked in today' });
+    }
+
+    if (doc.checkOut) {
+      return res.status(400).json({ success: false, message: 'Already checked out for today' });
+    }
+
+    doc.checkOut = now;
+    doc.ipAddress = verification.ip;
+    doc.networkName = verification.network;
+    doc.deviceInfo = deviceInfo;
+    if (locationLat !== undefined) doc.locationLat = locationLat;
+    if (locationLong !== undefined) doc.locationLong = locationLong;
+    await doc.save();
+
+    return res.status(200).json({
       success: true,
-      message: 'Check-out feature coming soon'
+      message: 'Check-out successful',
+      time: now.toISOString(),
+      data: doc
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
+  } finally {
+    if (tenantConnection) await tenantConnection.close();
   }
 };
 

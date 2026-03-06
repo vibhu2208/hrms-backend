@@ -11,6 +11,6 @@ router.put('/updatepassword', protect, updatePassword);
 router.get('/companies', getActiveCompanies);
 
 // Admin only route to reset user passwords
-router.put('/admin/reset-password/:userId', protect, authorize('admin'), adminResetPassword);
+router.put('/admin/reset-password/:userId', protect, authorize('admin', 'company_admin'), adminResetPassword);
 
 module.exports = router;

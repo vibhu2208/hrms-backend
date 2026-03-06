@@ -25,23 +25,23 @@ router.use(protect);
 router.use(tenantMiddleware);
 
 // Bulk upload routes
-router.post('/bulk/validate', authorize('admin', 'hr'), validateBulkEmployees);
-router.post('/bulk/create', authorize('admin', 'hr'), bulkCreateEmployees);
+router.post('/bulk/validate', authorize('admin', 'hr', 'company_admin'), validateBulkEmployees);
+router.post('/bulk/create', authorize('admin', 'hr', 'company_admin'), bulkCreateEmployees);
 router.get('/bulk/template', getTemplate);
 
 // Google Sheets integration routes
-router.post('/google-sheets/fetch', authorize('admin', 'hr'), fetchGoogleSheetData);
-router.get('/google-sheets/auth-url', authorize('admin', 'hr'), getAuthUrl);
+router.post('/google-sheets/fetch', authorize('admin', 'hr', 'company_admin'), fetchGoogleSheetData);
+router.get('/google-sheets/auth-url', authorize('admin', 'hr', 'company_admin'), getAuthUrl);
 router.get('/google-sheets/callback', handleOAuthCallback);
 
-router.get('/stats', authorize('admin', 'hr'), getEmployeeStats);
+router.get('/stats', authorize('admin', 'hr', 'company_admin'), getEmployeeStats);
 router.route('/')
   .get(getEmployees)
-  .post(authorize('admin', 'hr'), createEmployee);
+  .post(authorize('admin', 'hr', 'company_admin'), createEmployee);
 
 router.route('/:id')
   .get(getEmployee)
-  .put(authorize('admin', 'hr'), updateEmployee)
-  .delete(authorize('admin'), deleteEmployee);
+  .put(authorize('admin', 'hr', 'company_admin'), updateEmployee)
+  .delete(authorize('admin', 'company_admin'), deleteEmployee);
 
 module.exports = router;

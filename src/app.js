@@ -41,6 +41,7 @@ const superAdminRoutes = require('./routes/superAdminRoutes');
 const testRoutes = require('./routes/testRoutes');
 const managerRoutes = require('./routes/managerRoutes');
 const resumePoolRoutes = require('./routes/resumePoolRoutes');
+const networkRoutes = require('./routes/networkRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -107,6 +108,7 @@ app.use('/api/ai-analysis', aiAnalysisRoutes);
 app.use('/api/talent-pool', talentPoolRoutes);
 app.use('/api/offer-templates', offerTemplateRoutes);
 app.use('/api/employee', employeeDashboardRoutes);
+app.use('/api/network', networkRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/manager', managerRoutes);
