@@ -1,4 +1,7 @@
+const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
 const TenantUserSchema = require('../models/tenant/TenantUser');
+const Department = require('../models/Department');
+const { getTenantModel } = require('../middlewares/tenantMiddleware');
 
 // @desc    Get all employees
 // @route   GET /api/employees
@@ -7,37 +10,74 @@ exports.getEmployees = async (req, res) => {
   try {
     // Get tenant connection from middleware
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const { status, department, search, role } = req.query;
-    let query = { isActive: true };
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
 
-    // Filter by role (default: employees and managers)
-    if (role) {
-      query.role = role;
-    } else {
-      query.role = { $in: ['employee', 'manager'] };
-    }
+    const { status, department, search } = req.query;
+    // Build base query - explicitly exclude ex-employees and inactive employees
+    let query = {
+      isActive: { $ne: false }, // Exclude where isActive is explicitly false
+      $or: [
+        { isExEmployee: { $exists: false } }, // Field doesn't exist (old records)
+        { isExEmployee: null }, // Field is null
+        { isExEmployee: false }, // Field is false
+        { isExEmployee: { $ne: true } } // Field is not true (covers undefined, etc.)
+      ]
+    };
 
+    // Filter by department if specified
     if (department) query.department = department;
+
+    // Search functionality
     if (search) {
       query.$or = [
         { firstName: { $regex: search, $options: 'i' } },
         { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { email: { $regex: search, $options: 'i' } },
+        { employeeCode: { $regex: search, $options: 'i' } }
       ];
     }
 
-    const employees = await TenantUser.find(query)
-      .select('-password')
-      .sort({ createdAt: -1 });
+
+    const employees = await TenantEmployee.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Additional safety filter: explicitly filter out any ex-employees that might have slipped through
+    const filteredEmployees = employees.filter(emp => {
+      return emp.isActive !== false && (emp.isExEmployee !== true);
+    });
+
+    
+    // Also verify specific employees that should be excluded
+    const shouldBeExcluded = await TenantEmployee.find({ employeeCode: { $in: ['EMP0004', 'EMP0005', 'EMP0003', 'EMP0002'] } }).lean();
+
+    // Populate department information manually since department is stored as string
+    const populatedEmployees = await Promise.all(
+      filteredEmployees.map(async (employee) => {
+        // Try to get department from departmentId first, then from department field
+        const deptId = employee.departmentId || employee.department;
+        if (deptId) {
+          try {
+            const department = await TenantDepartment.findById(deptId);
+            employee.department = department ? { _id: department._id, name: department.name } : null;
+          } catch (error) {
+            console.warn(`Failed to populate department for employee ${employee._id}:`, error.message);
+            employee.department = null;
+          }
+        } else {
+          employee.department = null;
+        }
+        return employee;
+      })
+    );
 
     console.log(`📋 Found ${employees.length} employees for company ${req.tenant.companyId}`);
 
     res.status(200).json({
       success: true,
       count: employees.length,
-      data: employees
+      data: populatedEmployees
     });
   } catch (error) {
     console.error('Error fetching employees:', error);
@@ -54,16 +94,31 @@ exports.getEmployees = async (req, res) => {
 exports.getEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const employee = await TenantUser.findById(req.params.id)
-      .select('-password');
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
+
+    const employee = await TenantEmployee.findById(req.params.id).lean();
 
     if (!employee) {
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
       });
+    }
+
+    // Populate department information manually since department is stored as string
+    // Try to get department from departmentId first, then from department field
+    const deptId = employee.departmentId || employee.department;
+    if (deptId) {
+      try {
+        const department = await TenantDepartment.findById(deptId);
+        employee.department = department ? { _id: department._id, name: department.name } : null;
+      } catch (error) {
+        console.warn(`Failed to populate department for employee ${employee._id}:`, error.message);
+        employee.department = null;
+      }
+    } else {
+      employee.department = null;
     }
 
     res.status(200).json({
@@ -85,81 +140,48 @@ exports.getEmployee = async (req, res) => {
 exports.createEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    // Ensure required fields are present
-    const { email, firstName, lastName, role, password, ...otherFields } = req.body;
-    
-    // Validate required fields
-    if (!email || !firstName || !lastName || !role) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email, firstName, lastName, and role are required'
-      });
-    }
-    
-    // Set default role to 'employee' if not provided or invalid
-    const validRoles = ['company_admin', 'hr', 'manager', 'employee'];
-    const userRole = validRoles.includes(role) ? role : 'employee';
-    
-    // Generate default password if not provided
-    const generatePassword = () => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-      let password = '';
-      for (let i = 0; i < 8; i++) {
-        password += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return password;
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+    const { logEmployeeCreated } = require('../services/hrActivityLogService');
+
+    // Generate employee code
+    const employeeCount = await TenantEmployee.countDocuments();
+    const employeeCode = `EMP${String(employeeCount + 1).padStart(4, '0')}`;
+
+    // Prepare employee data
+    const employeeData = {
+      firstName: req.body.firstName,
+      lastName: req.body.lastName,
+      email: req.body.email,
+      phone: req.body.phone,
+      employeeCode,
+      joiningDate: req.body.joiningDate || new Date(),
+      designation: req.body.designation,
+      department: req.body.department, // Store department ID as string
+      departmentId: req.body.department, // Also store as ObjectId reference
+      reportingManager: req.body.reportingManager,
+      salary: req.body.salary || {
+        basic: 0,
+        hra: 0,
+        allowances: 0,
+        total: 0
+      },
+      isActive: req.body.isActive !== undefined ? req.body.isActive : true,
+      isFirstLogin: true,
+      mustChangePassword: true,
+      createdBy: req.user._id
     };
-    
-    const userPassword = password || generatePassword();
-    
-    // Create user with all required fields
-    const userData = {
-      email,
-      firstName,
-      lastName,
-      role: userRole,
-      password: userPassword,
-      authProvider: 'local',
-      ...otherFields
-    };
-    
-    const employee = await TenantUser.create(userData);
 
-    // Send welcome email with credentials
-    let emailSent = false;
-    try {
-      const { sendOnboardingEmail } = require('../services/emailService');
-      await sendOnboardingEmail({
-        employeeName: `${firstName} ${lastName}`,
-        employeeEmail: email,
-        employeeId: employee._id,
-        tempPassword: userPassword,
-        companyName: req.user.companyName || 'Our Company'
-      });
-      console.log(`📧 Welcome email sent to employee: ${email}`);
-      emailSent = true;
-    } catch (emailError) {
-      console.error('❌ Error sending welcome email to employee:', emailError);
-      // Don't fail the employee creation if email fails
-    }
+    const employee = await TenantEmployee.create(employeeData);
 
-    // Log the generated password for admin to share with employee
-    if (!password) {
-      console.log(`🔑 Generated password for ${email}: ${userPassword}`);
-    }
+    console.log(`✅ Created employee: ${employee.firstName} ${employee.lastName} (${employeeCode})`);
 
-    // Remove password from response
-    const employeeResponse = employee.toObject();
-    delete employeeResponse.password;
+    // Log HR activity
+    await logEmployeeCreated(tenantConnection, employee, req);
 
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
-      data: employeeResponse,
-      generatedPassword: !password ? userPassword : undefined,
-      emailSent: emailSent
+      data: employee
     });
   } catch (error) {
     console.error('Error creating employee:', error);
@@ -176,13 +198,34 @@ exports.createEmployee = async (req, res) => {
 exports.updateEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const employee = await TenantUser.findByIdAndUpdate(
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
+    console.log('📝 Updating employee:', req.params.id);
+    console.log('📝 Update data received:', req.body);
+
+    // Get the current employee data before update for logging
+    const previousEmployee = await TenantEmployee.findById(req.params.id).lean();
+
+    // If department is being updated, also update departmentId
+    const updateData = { ...req.body };
+    if (req.body.department !== undefined) {
+      // If department is being set (even if empty string), update both fields
+      if (req.body.department) {
+        updateData.department = req.body.department;
+        updateData.departmentId = req.body.department;
+      } else {
+        // If department is being cleared
+        updateData.department = null;
+        updateData.departmentId = null;
+      }
+      console.log('📝 Department update:', { department: updateData.department, departmentId: updateData.departmentId });
+    }
+
+    const employee = await TenantEmployee.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updateData,
       { new: true, runValidators: true }
-    ).select('-password');
+    ).lean();
 
     if (!employee) {
       return res.status(404).json({
@@ -191,16 +234,112 @@ exports.updateEmployee = async (req, res) => {
       });
     }
 
+    // Populate department information for response
+    const TenantDepartment = getTenantModel(tenantConnection, 'Department', Department.schema);
+    if (employee.departmentId) {
+      try {
+        const department = await TenantDepartment.findById(employee.departmentId);
+        employee.department = department ? { _id: department._id, name: department.name } : null;
+      } catch (error) {
+        console.warn(`Failed to populate department for employee ${employee._id}:`, error.message);
+        employee.department = null;
+      }
+    } else {
+      employee.department = null;
+    }
+
+    console.log('✅ Employee updated successfully:', employee._id);
+    console.log('✅ Updated department:', employee.department);
+
+    // Log HR activity
+    try {
+      const { logEmployeeUpdated } = require('../services/hrActivityLogService');
+      await logEmployeeUpdated(tenantConnection, employee, previousEmployee, req);
+      console.log(`📝 HR activity logged for employee update: ${employee.firstName} ${employee.lastName}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for employee update:', logError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Employee updated successfully',
       data: employee
     });
   } catch (error) {
-    console.error('Error updating employee:', error);
+    console.error('❌ Error updating employee:', error);
     res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
+
+// @desc    Reset employee password
+// @route   PUT /api/employees/:id/reset-password
+// @access  Private (Admin, HR)
+exports.resetEmployeePassword = async (req, res) => {
+  try {
+    console.log('🔄 Reset password request for employee ID:', req.params.id);
+    
+    // Check if tenant connection exists
+    if (!req.tenant || !req.tenant.connection) {
+      console.error('❌ No tenant connection found');
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant connection not found'
+      });
+    }
+
+    const tenantConnection = req.tenant.connection;
+    const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);
+    
+    console.log('✅ Tenant connection established');
+    
+    // Must select password field explicitly since it has select: false
+    const employee = await TenantUser.findById(req.params.id).select('+password');
+
+    if (!employee) {
+      console.error('❌ Employee not found with ID:', req.params.id);
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found'
+      });
+    }
+
+    console.log('✅ Employee found:', employee.email);
+
+    // Generate new temporary password
+    const crypto = require('crypto');
+    const newTempPassword = crypto.randomBytes(8).toString('hex');
+    
+    console.log('🔑 Generated new temporary password');
+    
+    // Update password and force change on next login
+    employee.password = newTempPassword; // Will be hashed by pre-save hook
+    employee.mustChangePassword = true;
+    employee.isFirstLogin = true;
+    
+    console.log('💾 Saving employee with new password...');
+    await employee.save();
+    console.log('✅ Password reset successful');
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully',
+      data: {
+        employeeId: employee._id,
+        email: employee.email,
+        name: `${employee.firstName} ${employee.lastName}`,
+        tempPassword: newTempPassword
+      },
+      note: 'Please share this temporary password with the employee. They must change it on first login.'
+    });
+  } catch (error) {
+    console.error('❌ Error resetting employee password:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: `Failed to reset password: ${error.message}`
     });
   }
 };
@@ -211,15 +350,24 @@ exports.updateEmployee = async (req, res) => {
 exports.deleteEmployee = async (req, res) => {
   try {
     const tenantConnection = req.tenant.connection;
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-    
-    const employee = await TenantUser.findByIdAndDelete(req.params.id);
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+
+    const employee = await TenantEmployee.findByIdAndDelete(req.params.id);
 
     if (!employee) {
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
       });
+    }
+
+    // Log HR activity
+    try {
+      const { logEmployeeDeleted } = require('../services/hrActivityLogService');
+      await logEmployeeDeleted(tenantConnection, employee, req);
+      console.log(`📝 HR activity logged for employee deletion: ${employee.firstName} ${employee.lastName}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for employee deletion:', logError.message);
     }
 
     res.status(200).json({
@@ -240,13 +388,15 @@ exports.deleteEmployee = async (req, res) => {
 exports.getEmployeeStats = async (req, res) => {
   try {
     const Employee = getTenantModel(req.tenant.connection, 'Employee');
-    const total = await Employee.countDocuments();
-    const active = await Employee.countDocuments({ status: 'active' });
-    const inactive = await Employee.countDocuments({ status: 'inactive' });
-    const onLeave = await Employee.countDocuments({ status: 'on-leave' });
+    // Exclude ex-employees from all stats
+    const excludeExEmployees = { isExEmployee: { $ne: true } };
+    const total = await Employee.countDocuments(excludeExEmployees);
+    const active = await Employee.countDocuments({ status: 'active', ...excludeExEmployees });
+    const inactive = await Employee.countDocuments({ status: 'inactive', ...excludeExEmployees });
+    const onLeave = await Employee.countDocuments({ status: 'on-leave', ...excludeExEmployees });
 
     const byDepartment = await Employee.aggregate([
-      { $match: { status: 'active' } },
+      { $match: { status: 'active', isExEmployee: { $ne: true } } },
       { $group: { _id: '$department', count: { $sum: 1 } } },
       { $lookup: { from: 'departments', localField: '_id', foreignField: '_id', as: 'dept' } },
       { $unwind: '$dept' },

@@ -218,6 +218,12 @@ const offboardingRequestSchema = new mongoose.Schema({
   completedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+
+  // Employee Snapshot - stores complete employee data when offboarding is completed
+  employeeSnapshot: {
+    type: mongoose.Schema.Types.Mixed, // Store complete employee data
+    default: {}
   }
 }, {
   timestamps: true,

@@ -13,9 +13,14 @@ const TenantUserSchema = require('../models/tenant/TenantUser');
  * @access Private (Employee)
  */
 exports.getDashboardOverview = async (req, res) => {
+  let tenantConnection = null;
+
   try {
     const user = req.user;
+    const companyId = req.companyId;
     const today = new Date();
+    const startOfToday = new Date(today);
+    startOfToday.setHours(0, 0, 0, 0);
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
 
@@ -45,23 +50,50 @@ exports.getDashboardOverview = async (req, res) => {
     const todayAttendance = null;
     const totalAvailable = 15;
     const totalConsumed = 5;
-    
-    const upcomingHolidays = [
-      {
-        _id: 'holiday_1',
-        name: 'Christmas',
-        date: new Date(currentYear, 11, 25),
-        type: 'public',
-        description: 'Christmas Day'
-      },
-      {
-        _id: 'holiday_2',
-        name: 'New Year',
-        date: new Date(currentYear + 1, 0, 1),
-        type: 'public',
-        description: 'New Year Day'
+
+    let upcomingHolidays = [];
+    try {
+      if (!companyId) {
+        throw new Error('Company ID not available');
       }
-    ];
+
+      tenantConnection = await getTenantConnection(companyId);
+      const HolidayModel = tenantConnection.model('Holiday', require('../models/Holiday').schema);
+
+      const holidayResults = await HolidayModel.find({
+        isActive: true,
+        date: { $gte: startOfToday }
+      })
+      .sort({ date: 1 })
+      .limit(5)
+      .lean();
+
+      upcomingHolidays = holidayResults.map((holiday) => ({
+        _id: holiday._id,
+        name: holiday.name,
+        date: holiday.date,
+        type: holiday.type || 'public',
+        description: holiday.description
+      }));
+    } catch (holidayError) {
+      console.warn('Falling back to default upcoming holidays:', holidayError.message);
+      upcomingHolidays = [
+        {
+          _id: 'holiday_1',
+          name: 'Christmas',
+          date: new Date(currentYear, 11, 25),
+          type: 'public',
+          description: 'Christmas Day'
+        },
+        {
+          _id: 'holiday_2',
+          name: 'New Year',
+          date: new Date(currentYear + 1, 0, 1),
+          type: 'public',
+          description: 'New Year Day'
+        }
+      ];
+    }
 
     const teamOnLeave = [];
     const birthdays = [];
@@ -94,13 +126,7 @@ exports.getDashboardOverview = async (req, res) => {
         status: todayAttendance.status,
         workHours: todayAttendance.workHours
       } : null,
-      upcomingHolidays: upcomingHolidays.map(h => ({
-        _id: h._id,
-        name: h.name,
-        date: h.date,
-        type: h.type || 'public',
-        description: h.description
-      })),
+      upcomingHolidays,
       offThisWeek: teamOnLeave.map(leave => ({
         employee: {
           name: `${leave.employee.firstName} ${leave.employee.lastName}`,
@@ -151,6 +177,10 @@ exports.getDashboardOverview = async (req, res) => {
       success: false,
       message: error.message || 'Failed to fetch dashboard overview'
     });
+  } finally {
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
   }
 };
 
@@ -276,12 +306,82 @@ exports.getPayslipHistory = async (req, res) => {
  */
 exports.getEmployeeProjects = async (req, res) => {
   try {
-    // Mock projects data
-    const projects = [];
+    const tenantConnection = req.tenant.connection;
+    const userId = req.user.id;
+    
+    // Helper to get/create tenant-scoped models safely
+    const getTenantModel = (modelName, modelPath) => {
+      if (tenantConnection.models[modelName]) {
+        return tenantConnection.models[modelName];
+      }
+
+      const modelModule = require(modelPath);
+      const schema = modelModule.schema || modelModule;
+      return tenantConnection.model(modelName, schema);
+    };
+
+    // Register required tenant models (ensures population works)
+    const Project = getTenantModel('Project', '../models/Project');
+    getTenantModel('Client', '../models/Client');
+    getTenantModel('Employee', '../models/Employee');
+    const TenantUser = getTenantModel('User', '../models/tenant/TenantUser');
+
+    // Get current user to find their employee record
+    const currentUser = await TenantUser.findById(userId);
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Find projects where the user is a team member or project manager
+    const projects = await Project.find({
+      $or: [
+        { 'teamMembers.employee': currentUser._id },
+        { projectManager: currentUser._id }
+      ],
+      isActive: true
+    })
+    .populate('client', 'name companyName')
+    .populate('projectManager', 'firstName lastName email')
+    .populate('teamMembers.employee', 'firstName lastName email')
+    .sort({ startDate: -1 });
+
+    // Format projects with user's role
+    const formattedProjects = projects.map(project => {
+      const teamMember = project.teamMembers.find(
+        tm => tm.employee && tm.employee._id.toString() === currentUser._id.toString()
+      );
+      
+      const isManager = project.projectManager && 
+        project.projectManager._id.toString() === currentUser._id.toString();
+
+      return {
+        _id: project._id,
+        name: project.name,
+        projectCode: project.projectCode,
+        description: project.description,
+        status: project.status,
+        startDate: project.startDate,
+        endDate: project.endDate,
+        client: project.client,
+        projectManager: project.projectManager ? {
+          name: `${project.projectManager.firstName} ${project.projectManager.lastName}`,
+          email: project.projectManager.email
+        } : null,
+        myRole: isManager ? 'Project Manager' : (teamMember?.role || 'Team Member'),
+        teamSize: project.teamMembers.length,
+        isActive: project.isActive
+      };
+    });
+
+    console.log(`📋 Found ${formattedProjects.length} projects for user ${currentUser.email}`);
 
     res.status(200).json({
       success: true,
-      data: projects
+      count: formattedProjects.length,
+      data: formattedProjects
     });
   } catch (error) {
     console.error('Error fetching employee projects:', error);

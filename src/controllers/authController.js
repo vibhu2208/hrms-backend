@@ -1,16 +1,18 @@
 const User = require('../models/User');
 const Employee = require('../models/Employee');
 const Company = require('../models/Company');
-const { generateToken } = require('../utils/jwt');
+const { generateToken, generateRefreshToken, createRefreshTokenExpiry, verifyRefreshToken } = require('../utils/jwt');
 const { OAuth2Client } = require('google-auth-library');
 const { getTenantConnection } = require('../config/database.config');
+const emailService = require('../config/email.config');
+const { logSecurityEvent, logAuthEvent } = require('../utils/logger');
 
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
 exports.register = async (req, res) => {
   try {
-    const { email, password, role, employeeId } = req.body;
+    const { email, password, role, employeeId, firstName, lastName, isActive } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -37,7 +39,10 @@ exports.register = async (req, res) => {
       email,
       password,
       role: role || 'employee',
-      employeeId
+      employeeId,
+      firstName,
+      lastName,
+      isActive: isActive !== undefined ? isActive : true
     });
 
     // Generate token
@@ -48,9 +53,12 @@ exports.register = async (req, res) => {
       message: 'User registered successfully',
       data: {
         user: {
-          id: user._id,
+          userId: user._id,
           email: user.email,
-          role: user.role
+          role: user.role,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          isActive: user.isActive
         },
         token
       }
@@ -118,7 +126,7 @@ exports.login = async (req, res) => {
       if (company) {
         try {
           console.log(`🏢 Authenticating against: ${company.companyName} (${company.tenantDatabaseName})`);
-          tenantConnection = await getTenantConnection(company.companyId);
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
           const TenantUser = tenantConnection.model('User', TenantUserSchema);
           
           const tenantUser = await TenantUser.findOne({ email }).select('+password');
@@ -169,7 +177,7 @@ exports.login = async (req, res) => {
       for (const company of companies) {
         try {
           console.log(`🔍 Checking company: ${company.companyName}`);
-          tenantConnection = await getTenantConnection(company.companyId);
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
           const TenantUser = tenantConnection.model('User', TenantUserSchema);
           
           const tenantUser = await TenantUser.findOne({ email }).select('+password');
@@ -190,10 +198,22 @@ exports.login = async (req, res) => {
 
     if (!user) {
       console.log('❌ User not found for email:', email);
-      if (tenantConnection) await tenantConnection.close();
+      // Don't close connection immediately - let it be reused
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
+      });
+    }
+
+    // Check if account is locked
+    if (user.isLocked) {
+      const lockTimeRemaining = Math.ceil((user.lockUntil - Date.now()) / (1000 * 60));
+      console.log(`🔒 Account locked for ${user.email}. ${lockTimeRemaining} minutes remaining`);
+      // Don't close connection immediately
+      return res.status(423).json({
+        success: false,
+        message: `Account temporarily locked due to multiple failed login attempts. Please try again in ${lockTimeRemaining} minutes.`,
+        lockoutRemaining: lockTimeRemaining
       });
     }
 
@@ -206,7 +226,9 @@ exports.login = async (req, res) => {
 
     if (!isMatch) {
       console.log('❌ Password mismatch for user:', user.email);
-      if (tenantConnection) await tenantConnection.close();
+      // Increment login attempts
+      await user.incLoginAttempts();
+      // Don't close connection immediately
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -215,7 +237,7 @@ exports.login = async (req, res) => {
 
     // Check if user is active
     if (!user.isActive) {
-      if (tenantConnection) await tenantConnection.close();
+      // Don't close connection immediately
       return res.status(403).json({
         success: false,
         message: 'Your account has been deactivated'
@@ -231,11 +253,32 @@ exports.login = async (req, res) => {
       user.isFirstLogin = false;
     }
     
-    await user.save();
+    // Reset login attempts on successful login
+    await user.resetLoginAttempts();
+    
+    // Save user changes BEFORE closing connection
+    try {
+      await user.save();
+      console.log('✅ User data saved successfully');
+    } catch (saveError) {
+      console.error('❌ Error saving user data:', saveError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Error updating user data'
+      });
+    }
 
-    // Close tenant connection if used
+    // Close tenant connection if used (AFTER save operation) - but delay it
     if (tenantConnection) {
-      await tenantConnection.close();
+      // Use setTimeout to close connection after response is sent
+      setTimeout(async () => {
+        try {
+          await tenantConnection.close();
+          console.log('🔌 Tenant connection closed');
+        } catch (closeError) {
+          console.error('⚠️  Error closing tenant connection:', closeError.message);
+        }
+      }, 1000);
     }
 
     // Generate token with additional company info for tenant users
@@ -253,12 +296,22 @@ exports.login = async (req, res) => {
 
     const token = generateToken(user._id, tokenPayload);
 
+    // Generate refresh token
+    const refreshToken = generateRefreshToken();
+    const refreshTokenExpiry = createRefreshTokenExpiry();
+    
+    // Add refresh token to user record
+    await user.addRefreshToken(refreshToken, refreshTokenExpiry, {
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+
     res.status(200).json({
       success: true,
       message: 'Login successful',
       data: {
         user: {
-          id: user._id,
+          userId: user._id,
           email: user.email,
           role: user.role,
           employee: user.employeeId,
@@ -274,7 +327,8 @@ exports.login = async (req, res) => {
             companyCode: userCompany.companyCode
           } : {})
         },
-        token
+        token,
+        refreshToken
       }
     });
   } catch (error) {
@@ -364,6 +418,8 @@ exports.adminResetPassword = async (req, res) => {
     const { userId } = req.params;
     const { newPassword, mustChangePassword } = req.body;
 
+    console.log('🔄 Admin reset password request for user ID:', userId);
+
     // Validate new password
     if (!newPassword || newPassword.length < 8) {
       return res.status(400).json({
@@ -372,21 +428,43 @@ exports.adminResetPassword = async (req, res) => {
       });
     }
 
-    // Find the user to reset password
-    const user = await User.findById(userId);
+    // Check if tenant connection exists
+    if (!req.tenant || !req.tenant.connection) {
+      console.error('❌ No tenant connection found');
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant connection not found'
+      });
+    }
+
+    const tenantConnection = req.tenant.connection;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    console.log('✅ Tenant connection established');
+
+    // Find the user to reset password (must select password field)
+    const user = await TenantUser.findById(userId).select('+password');
 
     if (!user) {
+      console.error('❌ User not found with ID:', userId);
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
+    console.log('✅ User found:', user.email);
+
     // Update password
     user.password = newPassword;
     user.mustChangePassword = mustChangePassword !== undefined ? mustChangePassword : true;
     user.passwordChangedAt = Date.now();
+    user.isFirstLogin = true;
+    
+    console.log('💾 Saving user with new password...');
     await user.save();
+    console.log('✅ Password reset successful');
 
     res.status(200).json({
       success: true,
@@ -398,9 +476,11 @@ exports.adminResetPassword = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ Error resetting password:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: `Failed to reset password: ${error.message}`
     });
   }
 };
@@ -506,26 +586,836 @@ exports.googleLogin = async (req, res) => {
 // @access  Public
 exports.getActiveCompanies = async (req, res) => {
   try {
-    // Import global models
-    const { getCompanyRegistry } = require('../models/global');
-    const CompanyRegistry = await getCompanyRegistry();
+    // Connect to global database
+    const { connectGlobalDB } = require('../config/database.config');
+    const globalConnection = await connectGlobalDB();
     
-    const companies = await CompanyRegistry.find({
-      status: 'active',
-      databaseStatus: 'active'
+    // Get CompanyRegistry model
+    const companyRegistrySchema = require('../models/global/CompanyRegistry');
+    const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
+    
+    // Fetch companies from CompanyRegistry
+    const registryCompanies = await CompanyRegistry.find({
+      status: 'active'
     })
-    .select('companyId companyName companyCode tenantDatabaseName status subscription.plan subscription.status')
-    .sort({ companyName: 1 });
+    .select('companyId companyName companyCode tenantDatabaseName status subscription')
+    .sort({ companyName: 1 })
+    .lean();
 
     res.status(200).json({
       success: true,
-      data: companies
+      data: registryCompanies
     });
   } catch (error) {
     console.error('Error fetching companies:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching companies'
+    });
+  }
+};
+
+// @desc    Unlock user account (admin only)
+// @route   POST /api/auth/unlock-account
+// @access  Private/Admin
+exports.unlockAccount = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { email, companyId } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    console.log('🔓 Unlock account request:', { email, companyId });
+
+    // Check if this is a super admin
+    const { getSuperAdmin } = require('../models/global');
+    const SuperAdmin = await getSuperAdmin();
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
+    let user = null;
+    let isTenantUser = false;
+    
+    // Try super admin first
+    try {
+      const superAdmin = await SuperAdmin.findOne({ email });
+      if (superAdmin) {
+        user = superAdmin;
+        isTenantUser = false;
+        console.log('✅ Found super admin to unlock:', email);
+      }
+    } catch (err) {
+      console.log('⚠️  Error checking super admin:', err.message);
+    }
+    
+    // If not super admin and companyId provided, check tenant
+    if (!user && companyId) {
+      const { getCompanyRegistry } = require('../models/global');
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ email });
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+            console.log(`✅ Found tenant user to unlock: ${email} in ${company.companyName}`);
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking tenant:`, tenantError.message);
+        }
+      }
+    }
+    
+    if (!user) {
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    // Reset login attempts
+    await user.resetLoginAttempts();
+    
+    if (tenantConnection) await tenantConnection.close();
+    
+    res.status(200).json({
+      success: true,
+      message: `Account for ${email} has been successfully unlocked`,
+      data: {
+        email: user.email,
+        role: user.role,
+        unlockedAt: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error unlocking account:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({
+      success: false,
+      message: 'Error unlocking account'
+    });
+  }
+};
+
+// @desc    Refresh access token
+// @route   POST /api/auth/refresh-token
+// @access  Public
+exports.refreshToken = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { refreshToken, companyId } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refresh token is required'
+      });
+    }
+
+    console.log('🔄 Refresh token request:', { refreshToken: refreshToken.substring(0, 20) + '...', companyId });
+
+    const { getSuperAdmin, getCompanyRegistry } = require('../models/global');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
+    let user = null;
+    let isTenantUser = false;
+    let userCompany = null;
+    
+    // Try super admin first
+    try {
+      const SuperAdmin = await getSuperAdmin();
+      const superAdmin = await SuperAdmin.findOne({ 'refreshTokens.token': refreshToken });
+      
+      if (superAdmin) {
+        const validToken = await superAdmin.findValidRefreshToken(refreshToken);
+        if (validToken) {
+          console.log('✅ Valid refresh token found for super admin');
+          user = superAdmin;
+          isTenantUser = false;
+        }
+      }
+    } catch (err) {
+      console.log('⚠️  Error checking super admin refresh token:', err.message);
+    }
+    
+    // If not super admin and companyId provided, check specific company database
+    if (!user && companyId) {
+      console.log(`🔍 Checking refresh token in company database: ${companyId}`);
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ 'refreshTokens.token': refreshToken });
+          
+          if (tenantUser) {
+            const validToken = await tenantUser.findValidRefreshToken(refreshToken);
+            if (validToken) {
+              console.log(`✅ Valid refresh token found in ${company.companyName}`);
+              user = tenantUser;
+              isTenantUser = true;
+              userCompany = company;
+            }
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+        }
+      }
+    }
+    
+    // If still not found and no companyId, check all companies (fallback)
+    if (!user && !companyId) {
+      console.log('🔍 Checking refresh token in all company databases...');
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const companies = await CompanyRegistry.find({
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      for (const company of companies) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ 'refreshTokens.token': refreshToken });
+          
+          if (tenantUser) {
+            const validToken = await tenantUser.findValidRefreshToken(refreshToken);
+            if (validToken) {
+              console.log(`✅ Valid refresh token found in ${company.companyName}`);
+              user = tenantUser;
+              isTenantUser = true;
+              userCompany = company;
+              break;
+            }
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+          continue;
+        }
+      }
+    }
+
+    if (!user) {
+      console.log('❌ Invalid or expired refresh token');
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired refresh token'
+      });
+    }
+
+    // Check if user is still active
+    if (!user.isActive) {
+      console.log('❌ User account is inactive');
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated'
+      });
+    }
+
+    // Generate new access token
+    const tokenPayload = {
+      userId: user._id,
+      email: user.email,
+      role: user.role
+    };
+    
+    if (isTenantUser && userCompany) {
+      tokenPayload.companyId = userCompany.companyId;
+      tokenPayload.companyCode = userCompany.companyCode;
+      tokenPayload.tenantDatabaseName = userCompany.tenantDatabaseName;
+    }
+
+    const newAccessToken = generateToken(user._id, tokenPayload);
+
+    // Optionally generate new refresh token (rotation)
+    const newRefreshToken = generateRefreshToken();
+    const newRefreshTokenExpiry = createRefreshTokenExpiry();
+    
+    // Revoke old refresh token and add new one
+    await user.revokeRefreshToken(refreshToken);
+    await user.addRefreshToken(newRefreshToken, newRefreshTokenExpiry, {
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Token refreshed successfully',
+      data: {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        user: {
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          // Add company info for tenant users
+          ...(isTenantUser && userCompany ? {
+            companyId: userCompany.companyId,
+            companyName: userCompany.companyName,
+            companyCode: userCompany.companyCode
+          } : {})
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error refreshing token:', error);
+    if (tenantConnection) {
+      await tenantConnection.close();
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Error refreshing token'
+    });
+  }
+};
+
+// @desc    Logout user (revoke refresh token)
+// @route   POST /api/auth/logout
+// @access  Private
+exports.logout = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refresh token is required'
+      });
+    }
+
+    console.log('🚪 Logout request for user:', req.user?.email);
+
+    const { getSuperAdmin, getCompanyRegistry } = require('../models/global');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
+    let user = null;
+    let isTenantUser = false;
+    
+    // Try super admin first
+    try {
+      const SuperAdmin = await getSuperAdmin();
+      const superAdmin = await SuperAdmin.findById(req.user.userId);
+      
+      if (superAdmin) {
+        user = superAdmin;
+        isTenantUser = false;
+      }
+    } catch (err) {
+      console.log('⚠️  Error finding super admin for logout:', err.message);
+    }
+    
+    // If not super admin, check tenant
+    if (!user && req.user.companyId) {
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: req.user.companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findById(req.user.userId);
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error finding tenant user for logout:`, tenantError.message);
+        }
+      }
+    }
+    
+    if (!user) {
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    // Revoke the specific refresh token
+    await user.revokeRefreshToken(refreshToken);
+    
+    if (tenantConnection) await tenantConnection.close();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Logout successful'
+    });
+  } catch (error) {
+    console.error('❌ Error during logout:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({
+      success: false,
+      message: 'Error during logout'
+    });
+  }
+};
+
+// @desc    Logout from all devices (revoke all refresh tokens)
+// @route   POST /api/auth/logout-all
+// @access  Private
+exports.logoutAll = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    console.log('🚪 Logout all devices request for user:', req.user?.email);
+
+    const { getSuperAdmin, getCompanyRegistry } = require('../models/global');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
+    let user = null;
+    let isTenantUser = false;
+    
+    // Try super admin first
+    try {
+      const SuperAdmin = await getSuperAdmin();
+      const superAdmin = await SuperAdmin.findById(req.user.userId);
+      
+      if (superAdmin) {
+        user = superAdmin;
+        isTenantUser = false;
+      }
+    } catch (err) {
+      console.log('⚠️  Error finding super admin for logout all:', err.message);
+    }
+    
+    // If not super admin, check tenant
+    if (!user && req.user.companyId) {
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: req.user.companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findById(req.user.userId);
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error finding tenant user for logout all:`, tenantError.message);
+        }
+      }
+    }
+    
+    if (!user) {
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    // Revoke all refresh tokens
+    await user.revokeAllRefreshTokens();
+    
+    if (tenantConnection) await tenantConnection.close();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Logged out from all devices successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error during logout all:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({
+      success: false,
+      message: 'Error during logout all'
+    });
+  }
+};
+
+// @desc    Forgot password request
+// @route   POST /api/auth/forgot-password
+// @access  Public
+exports.forgotPassword = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { email, companyId } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    console.log('🔑 Forgot password request:', { email, companyId });
+
+    // Log security event
+    logSecurityEvent('password_reset_requested', {
+      email,
+      companyId: companyId || 'not_provided',
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    });
+
+    const { getSuperAdmin, getCompanyRegistry } = require('../models/global');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
+    let user = null;
+    let isTenantUser = false;
+    let userCompany = null;
+    
+    // Try super admin first
+    try {
+      const SuperAdmin = await getSuperAdmin();
+      const superAdmin = await SuperAdmin.findOne({ email });
+      
+      if (superAdmin) {
+        user = superAdmin;
+        isTenantUser = false;
+        console.log('✅ Found super admin:', email);
+      }
+    } catch (err) {
+      console.log('⚠️  Error checking super admin:', err.message);
+    }
+    
+    // If not super admin and companyId provided, check specific company database
+    if (!user && companyId) {
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          console.log(`🔍 Checking ${company.companyName} for user: ${email}`);
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ email });
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+            userCompany = company;
+            console.log(`✅ Found tenant user: ${email} in ${company.companyName}`);
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+        }
+      }
+    }
+    
+    // If still not found and no companyId, check all companies (fallback)
+    if (!user && !companyId) {
+      console.log('🔍 Checking all company databases for user:', email);
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const companies = await CompanyRegistry.find({
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      for (const company of companies) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({ email });
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+            userCompany = company;
+            console.log(`✅ Found tenant user: ${email} in ${company.companyName}`);
+            break;
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+          continue;
+        }
+      }
+    }
+
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      console.log('⚠️  Password reset requested for non-existent email:', email);
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(200).json({
+        success: true,
+        message: 'If an account with this email exists, a password reset link has been sent.'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = emailService.generateResetToken();
+    const resetTokenExpiry = emailService.generateResetTokenExpiry();
+    
+    console.log('🔑 Generated reset token for:', user.email);
+
+    // Save reset token to user
+    user.passwordResetToken = resetToken;
+    user.passwordResetExpires = resetTokenExpiry;
+    await user.save();
+
+    // Send reset email
+    try {
+      const userName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+      await emailService.sendPasswordResetEmail(user.email, resetToken, userName);
+      console.log('✅ Password reset email sent to:', user.email);
+      
+      // Log successful password reset
+      logSecurityEvent('password_reset_email_sent', {
+        email: user.email,
+        userId: user._id,
+        isTenantUser,
+        companyId: companyId || 'super_admin',
+        ip: req.ip
+      });
+    } catch (emailError) {
+      console.error('❌ Error sending password reset email:', emailError);
+      
+      // Remove the reset token if email fails
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      await user.save();
+      
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(500).json({
+        success: false,
+        message: 'Error sending password reset email. Please try again later.'
+      });
+    }
+
+    if (tenantConnection) await tenantConnection.close();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Password reset link has been sent to your email address.',
+      data: {
+        email: user.email,
+        expiresIn: 15 // minutes
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in forgot password:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({
+      success: false,
+      message: 'Error processing password reset request'
+    });
+  }
+};
+
+// @desc    Reset password with token
+// @route   POST /api/auth/reset-password
+// @access  Public
+exports.resetPassword = async (req, res) => {
+  let tenantConnection = null;
+  
+  try {
+    const { token, newPassword, companyId } = req.body;
+    
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reset token and new password are required'
+      });
+    }
+
+    // Validate new password
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 8 characters long'
+      });
+    }
+
+    console.log('🔑 Reset password request with token:', token.substring(0, 10) + '...');
+
+    const { getSuperAdmin, getCompanyRegistry } = require('../models/global');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    
+    let user = null;
+    let isTenantUser = false;
+    
+    // Try super admin first
+    try {
+      const SuperAdmin = await getSuperAdmin();
+      const superAdmin = await SuperAdmin.findOne({
+        passwordResetToken: token,
+        passwordResetExpires: { $gt: Date.now() }
+      });
+      
+      if (superAdmin) {
+        user = superAdmin;
+        isTenantUser = false;
+        console.log('✅ Found super admin with valid reset token');
+      }
+    } catch (err) {
+      console.log('⚠️  Error checking super admin reset token:', err.message);
+    }
+    
+    // If not super admin and companyId provided, check specific company database
+    if (!user && companyId) {
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const company = await CompanyRegistry.findOne({
+        companyId: companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      if (company) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({
+            passwordResetToken: token,
+            passwordResetExpires: { $gt: Date.now() }
+          });
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+            console.log(`✅ Found tenant user with valid reset token in ${company.companyName}`);
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+        }
+      }
+    }
+    
+    // If still not found and no companyId, check all companies (fallback)
+    if (!user && !companyId) {
+      console.log('🔍 Checking all company databases for reset token');
+      const CompanyRegistry = await getCompanyRegistry();
+      
+      const companies = await CompanyRegistry.find({
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      
+      for (const company of companies) {
+        try {
+          tenantConnection = await getTenantConnection(company.tenantDatabaseName);
+          const TenantUser = tenantConnection.model('User', TenantUserSchema);
+          
+          const tenantUser = await TenantUser.findOne({
+            passwordResetToken: token,
+            passwordResetExpires: { $gt: Date.now() }
+          });
+          
+          if (tenantUser) {
+            user = tenantUser;
+            isTenantUser = true;
+            console.log(`✅ Found tenant user with valid reset token in ${company.companyName}`);
+            break;
+          }
+        } catch (tenantError) {
+          console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
+          continue;
+        }
+      }
+    }
+
+    if (!user) {
+      console.log('❌ Invalid or expired reset token');
+      if (tenantConnection) await tenantConnection.close();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired reset token. Please request a new password reset.'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    user.passwordChangedAt = Date.now();
+    user.mustChangePassword = false;
+    
+    // Reset login attempts on password reset
+    await user.resetLoginAttempts();
+    
+    await user.save();
+    console.log('✅ Password reset successful for:', user.email);
+
+    // Send confirmation email
+    try {
+      const userName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+      await emailService.sendPasswordResetConfirmationEmail(user.email, userName);
+      console.log('✅ Password reset confirmation email sent to:', user.email);
+    } catch (emailError) {
+      console.error('⚠️  Error sending password reset confirmation email:', emailError);
+      // Don't fail the request if confirmation email fails
+    }
+
+    if (tenantConnection) await tenantConnection.close();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Password has been reset successfully. You can now log in with your new password.',
+      data: {
+        email: user.email
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in reset password:', error);
+    if (tenantConnection) await tenantConnection.close();
+    res.status(500).json({
+      success: false,
+      message: 'Error resetting password'
     });
   }
 };

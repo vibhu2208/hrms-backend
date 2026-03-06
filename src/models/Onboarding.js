@@ -52,6 +52,8 @@ const onboardingSchema = new mongoose.Schema({
     type: String,
     enum: [
       'preboarding',           // Initial state after send to onboarding
+      'pending_approval',      // Waiting for admin approval before offer
+      'approval_rejected',     // Admin rejected, candidate on hold
       'offer_sent',            // Offer letter sent to candidate
       'offer_accepted',        // Candidate accepted offer
       'docs_pending',          // Waiting for document submission
@@ -61,6 +63,40 @@ const onboardingSchema = new mongoose.Schema({
       'rejected'               // Onboarding rejected/cancelled
     ],
     default: 'preboarding'
+  },
+  
+  // Approval Status for onboarding (requires admin approval before offer)
+  approvalStatus: {
+    status: {
+      type: String,
+      enum: ['not_requested', 'pending', 'approved', 'rejected'],
+      default: 'not_requested'
+    },
+    approvalInstanceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ApprovalInstance'
+    },
+    requestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    requestedAt: Date,
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    approvedAt: Date,
+    rejectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    rejectedAt: Date,
+    rejectionReason: String,
+    comments: String,
+    canReRequest: {
+      type: Boolean,
+      default: true
+    }
   },
   
   // Offer Management
@@ -363,5 +399,6 @@ onboardingSchema.index({ status: 1, createdAt: -1 });
 onboardingSchema.index({ applicationId: 1 });
 onboardingSchema.index({ candidateEmail: 1 });
 onboardingSchema.index({ 'offer.expiryDate': 1 });
+onboardingSchema.index({ 'approvalStatus.status': 1 });
 
 module.exports = mongoose.model('Onboarding', onboardingSchema);

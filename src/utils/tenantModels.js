@@ -10,7 +10,9 @@ const Asset = require('../models/Asset');
 const JobPosting = require('../models/JobPosting');
 const Onboarding = require('../models/Onboarding');
 const Offboarding = require('../models/Offboarding');
+const Client = require('../models/Client');
 const Project = require('../models/Project');
+const TeamMeeting = require('../models/TeamMeeting');
 const Timesheet = require('../models/Timesheet');
 const Document = require('../models/Document');
 const Compliance = require('../models/Compliance');
@@ -20,9 +22,20 @@ const Notification = require('../models/Notification');
 const ExitProcess = require('../models/ExitProcess');
 const TalentPool = require('../models/TalentPool');
 const OfferTemplate = require('../models/OfferTemplate');
+const ResumePool = require('../models/ResumePool');
+const JobDescription = require('../models/JobDescription');
+
+// Import tenant-specific models
+const TenantUser = require('../models/tenant/TenantUser');
+const LeaveAccrualPolicy = require('../models/tenant/LeaveAccrualPolicy');
+const LeaveBalance = require('../models/tenant/LeaveBalance');
+const LeaveRequest = require('../models/tenant/LeaveRequest');
+const ApprovalWorkflow = require('../models/tenant/ApprovalWorkflow');
+const ApprovalInstance = require('../models/tenant/ApprovalInstance');
 
 // Import offboarding related models (if they exist)
 let OffboardingRequest, OffboardingTask, HandoverDetail, AssetClearance, FinalSettlement, ExitFeedback;
+let CandidateDocumentUploadToken, CandidateDocument, DocumentConfiguration;
 
 try {
   OffboardingRequest = require('../models/tenant/OffboardingRequest');
@@ -60,6 +73,33 @@ try {
   ExitFeedback = null;
 }
 
+// Import document upload models
+try {
+  CandidateDocumentUploadToken = require('../models/tenant/CandidateDocumentUploadToken');
+} catch (e) {
+  CandidateDocumentUploadToken = null;
+}
+
+try {
+  CandidateDocument = require('../models/tenant/CandidateDocument');
+} catch (e) {
+  CandidateDocument = null;
+}
+
+try {
+  DocumentConfiguration = require('../models/tenant/DocumentConfiguration');
+} catch (e) {
+  DocumentConfiguration = null;
+}
+
+// Import HR Activity History model
+let HRActivityHistory;
+try {
+  HRActivityHistory = require('../models/tenant/HRActivityHistory');
+} catch (e) {
+  HRActivityHistory = null;
+}
+
 /**
  * Get tenant-specific models using the tenant's database connection
  * @param {mongoose.Connection} tenantConnection - Tenant database connection
@@ -76,15 +116,34 @@ function getTenantModels(tenantConnection) {
   // Helper function to safely create tenant model
   const createTenantModel = (modelName, originalModel) => {
     try {
-      // Get schema from the original model
-      const schema = originalModel.schema || originalModel.prototype.schema;
+      // Check if originalModel is already a schema (for tenant-specific models)
+      let schema;
+      if (originalModel instanceof mongoose.Schema) {
+        schema = originalModel;
+      } else if (originalModel.jobPostingSchema) {
+        // Special case for JobPosting which exports schema separately
+        schema = originalModel.jobPostingSchema;
+      } else if (originalModel.schema) {
+        schema = originalModel.schema;
+      } else if (originalModel.prototype && originalModel.prototype.schema) {
+        schema = originalModel.prototype.schema;
+      }
+      
       if (schema) {
+        // Check if model already exists to avoid "Cannot overwrite model" error
+        if (tenantConnection.models[modelName]) {
+          return tenantConnection.models[modelName];
+        }
         return tenantConnection.model(modelName, schema);
       } else {
         console.warn(`⚠️ No schema found for ${modelName}, skipping tenant model creation`);
         return null;
       }
     } catch (error) {
+      // If model already exists, return it
+      if (error.message.includes('Cannot overwrite') && tenantConnection.models[modelName]) {
+        return tenantConnection.models[modelName];
+      }
       console.warn(`⚠️ Failed to create tenant model for ${modelName}:`, error.message);
       return null;
     }
@@ -100,7 +159,9 @@ function getTenantModels(tenantConnection) {
   models.JobPosting = createTenantModel('JobPosting', JobPosting);
   models.Onboarding = createTenantModel('Onboarding', Onboarding);
   models.Offboarding = createTenantModel('Offboarding', Offboarding);
+  models.Client = createTenantModel('Client', Client);
   models.Project = createTenantModel('Project', Project);
+  models.TeamMeeting = createTenantModel('TeamMeeting', TeamMeeting);
   models.Timesheet = createTenantModel('Timesheet', Timesheet);
   models.Document = createTenantModel('Document', Document);
   models.Compliance = createTenantModel('Compliance', Compliance);
@@ -110,6 +171,16 @@ function getTenantModels(tenantConnection) {
   models.ExitProcess = createTenantModel('ExitProcess', ExitProcess);
   models.TalentPool = createTenantModel('TalentPool', TalentPool);
   models.OfferTemplate = createTenantModel('OfferTemplate', OfferTemplate);
+  models.ResumePool = createTenantModel('ResumePool', ResumePool);
+  models.JobDescription = createTenantModel('JobDescription', JobDescription);
+  
+  // Tenant-specific models
+  models.TenantUser = createTenantModel('TenantUser', TenantUser);
+  models.LeaveAccrualPolicy = createTenantModel('LeaveAccrualPolicy', LeaveAccrualPolicy);
+  models.LeaveBalance = createTenantModel('LeaveBalance', LeaveBalance);
+  models.LeaveRequest = createTenantModel('LeaveRequest', LeaveRequest);
+  models.ApprovalWorkflow = createTenantModel('ApprovalWorkflow', ApprovalWorkflow);
+  models.ApprovalInstance = createTenantModel('ApprovalInstance', ApprovalInstance);
 
   // Tenant-specific offboarding models (only if they exist)
   if (OffboardingRequest) models.OffboardingRequest = createTenantModel('OffboardingRequest', OffboardingRequest);
@@ -118,6 +189,14 @@ function getTenantModels(tenantConnection) {
   if (AssetClearance) models.AssetClearance = createTenantModel('AssetClearance', AssetClearance);
   if (FinalSettlement) models.FinalSettlement = createTenantModel('FinalSettlement', FinalSettlement);
   if (ExitFeedback) models.ExitFeedback = createTenantModel('ExitFeedback', ExitFeedback);
+
+  // Tenant-specific document upload models
+  if (CandidateDocumentUploadToken) models.CandidateDocumentUploadToken = createTenantModel('CandidateDocumentUploadToken', CandidateDocumentUploadToken);
+  if (CandidateDocument) models.CandidateDocument = createTenantModel('CandidateDocument', CandidateDocument);
+  if (DocumentConfiguration) models.DocumentConfiguration = createTenantModel('DocumentConfiguration', DocumentConfiguration);
+
+  // HR Activity History model
+  if (HRActivityHistory) models.HRActivityHistory = createTenantModel('HRActivityHistory', HRActivityHistory);
 
   // Cache models on connection
   tenantConnection._tenantModels = models;

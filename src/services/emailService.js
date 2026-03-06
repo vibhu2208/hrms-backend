@@ -6,6 +6,39 @@ const nodemailer = require('nodemailer');
  * Uses Gmail SMTP with app password for secure authentication
  */
 
+/**
+ * Generic email sending function
+ * @param {Object} options - Email options
+ * @param {string} options.to - Recipient email
+ * @param {string} options.subject - Email subject
+ * @param {string} options.html - HTML content
+ * @param {string} options.text - Plain text content (optional)
+ */
+const sendEmail = async (options) => {
+  try {
+    const transporter = createTransporter();
+
+    if (!transporter) {
+      throw new Error('Email transporter not configured');
+    }
+
+    const mailOptions = {
+      from: `"${process.env.EMAIL_FROM_NAME || 'HRMS System'}" <${process.env.EMAIL_USER}>`,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text || ''
+    };
+
+    const result = await sendEmailWithRetry(transporter, mailOptions);
+    console.log(`✅ Email sent successfully to ${options.to}`);
+    return result;
+  } catch (error) {
+    console.error('❌ Failed to send email:', error);
+    throw error;
+  }
+};
+
 // Create reusable transporter with timeout and retry configuration
 const createTransporter = () => {
   // Check for Gmail configuration first
@@ -787,6 +820,251 @@ const sendApplicationReceivedEmail = async ({
 };
 
 /**
+ * Send interview scheduled notification email
+ */
+const sendInterviewScheduledEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  interviewDate,
+  interviewTime,
+  interviewType,
+  interviewLocation,
+  meetingLink,
+  meetingPlatform,
+  interviewerName,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { padding: 30px; }
+    .info-box { background: #e0e7ff; border-left: 4px solid #667eea; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .detail-item { margin: 12px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; }
+    .detail-label { font-weight: 600; color: #555; }
+    .detail-value { color: #333; margin-top: 5px; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📅 Interview Scheduled</h1>
+    </div>
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      <div class="info-box">
+        <p><strong>Your interview has been scheduled!</strong></p>
+        <p>We are pleased to invite you for an interview for the <strong>${position}</strong> position at ${companyName}.</p>
+      </div>
+      <h3>Interview Details:</h3>
+      <div class="detail-item">
+        <div class="detail-label">📅 Date:</div>
+        <div class="detail-value">${interviewDate}</div>
+      </div>
+      <div class="detail-item">
+        <div class="detail-label">⏰ Time:</div>
+        <div class="detail-value">${interviewTime}</div>
+      </div>
+      <div class="detail-item">
+        <div class="detail-label">📍 Type:</div>
+        <div class="detail-value">${interviewType}</div>
+      </div>
+      ${interviewLocation ? `<div class="detail-item"><div class="detail-label">📍 Location:</div><div class="detail-value">${interviewLocation}</div></div>` : ''}
+      ${meetingPlatform ? `<div class="detail-item"><div class="detail-label">💻 Platform:</div><div class="detail-value">${meetingPlatform}</div></div>` : ''}
+      ${meetingLink ? `
+      <div class="detail-item" style="background: #e8f5e8; border-left: 4px solid #28a745;">
+        <div class="detail-label">🔗 Meeting Link:</div>
+        <div class="detail-value">
+          <a href="${meetingLink}" 
+             style="display: inline-block; background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; margin-top: 10px;"
+             target="_blank">
+            🎥 Join Meeting
+          </a>
+          <br>
+          <small style="color: #666; margin-top: 8px; display: block;">Click the button above to join the interview</small>
+        </div>
+      </div>
+      ` : ''}
+      ${interviewerName ? `<div class="detail-item"><div class="detail-label">👤 Interviewer:</div><div class="detail-value">${interviewerName}</div></div>` : ''}
+      <p><strong>Please arrive 10 minutes early and bring:</strong></p>
+      <ul>
+        <li>Updated resume</li>
+        <li>Valid ID proof</li>
+        <li>Any relevant certificates</li>
+      </ul>
+      <p>If you need to reschedule, please contact us as soon as possible.</p>
+      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendEmailWithRetry(transporter, {
+      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
+      to: candidateEmail,
+      subject: `📅 Interview Scheduled - ${position} at ${companyName}`,
+      html: htmlContent,
+      priority: 'high'
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending interview scheduled email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send interview reminder email
+ */
+const sendInterviewReminderEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  interviewDate,
+  interviewTime,
+  interviewType,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px; text-align: center; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { padding: 30px; }
+    .reminder-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⏰ Interview Reminder</h1>
+    </div>
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      <div class="reminder-box">
+        <p><strong>⏰ Reminder: Your interview is coming up!</strong></p>
+        <p>This is a friendly reminder about your upcoming interview for the <strong>${position}</strong> position at ${companyName}.</p>
+        <p><strong>Date:</strong> ${interviewDate}<br>
+        <strong>Time:</strong> ${interviewTime}<br>
+        <strong>Type:</strong> ${interviewType}</p>
+      </div>
+      <p>Please ensure you are prepared and arrive on time. We look forward to meeting you!</p>
+      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendEmailWithRetry(transporter, {
+      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
+      to: candidateEmail,
+      subject: `⏰ Interview Reminder - ${position} Tomorrow`,
+      html: htmlContent
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending interview reminder email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send interview cancelled notification email
+ */
+const sendInterviewCancelledEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  reason,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 30px; text-align: center; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { padding: 30px; }
+    .alert-box { background: #fee2e2; border-left: 4px solid #ef4444; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>❌ Interview Cancelled</h1>
+    </div>
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      <div class="alert-box">
+        <p><strong>We regret to inform you that your interview has been cancelled.</strong></p>
+        <p>Position: <strong>${position}</strong></p>
+        ${reason ? `<p>Reason: ${reason}</p>` : ''}
+      </div>
+      <p>We apologize for any inconvenience this may cause. We will contact you if we wish to reschedule or if any other opportunities arise.</p>
+      <p>Thank you for your interest in ${companyName}.</p>
+      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendEmailWithRetry(transporter, {
+      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
+      to: candidateEmail,
+      subject: `Interview Cancelled - ${position} at ${companyName}`,
+      html: htmlContent
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending interview cancelled email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
  * Send shortlisted notification email
  */
 const sendShortlistedEmail = async ({
@@ -1403,15 +1681,524 @@ This is an automated email from the HRMS system. Please do not reply to this ema
   }
 };
 
+/**
+ * Send welcome email to new employee
+ */
+const sendWelcomeEmail = async ({
+  employeeName,
+  employeeEmail,
+  employeeId,
+  department,
+  position,
+  joiningDate,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 40px; text-align: center; }
+    .header h1 { margin: 0; font-size: 28px; }
+    .content { padding: 30px; }
+    .welcome-box { background: #d1fae5; border-left: 4px solid #10b981; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .info-item { margin: 10px 0; padding: 8px; background: #f8f9fa; border-radius: 4px; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎉 Welcome to ${companyName}!</h1>
+    </div>
+    <div class="content">
+      <p>Dear <strong>${employeeName}</strong>,</p>
+      <div class="welcome-box">
+        <p><strong>🎊 Welcome aboard!</strong></p>
+        <p>We are thrilled to have you join our team at ${companyName}. Your skills and experience will be a great addition to our organization.</p>
+      </div>
+      <h3>Your Details:</h3>
+      <div class="info-item"><strong>Employee ID:</strong> ${employeeId}</div>
+      <div class="info-item"><strong>Position:</strong> ${position}</div>
+      <div class="info-item"><strong>Department:</strong> ${department}</div>
+      ${joiningDate ? `<div class="info-item"><strong>Joining Date:</strong> ${new Date(joiningDate).toLocaleDateString()}</div>` : ''}
+      <p><strong>What's Next:</strong></p>
+      <ul>
+        <li>Check your email for login credentials</li>
+        <li>Complete your profile in the HRMS portal</li>
+        <li>Review company policies and guidelines</li>
+        <li>Meet your team and manager</li>
+      </ul>
+      <p>If you have any questions, please don't hesitate to reach out to the HR team.</p>
+      <p>We look forward to working with you!</p>
+      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendEmailWithRetry(transporter, {
+      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
+      to: employeeEmail,
+      subject: `🎉 Welcome to ${companyName}!`,
+      html: htmlContent,
+      priority: 'high'
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending welcome email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send document request email with upload portal link
+ * @param {Object} options - Email options
+ * @param {string} options.candidateName - Full name of the candidate
+ * @param {string} options.candidateEmail - Email address of the candidate
+ * @param {string} options.position - Position/role
+ * @param {string} options.uploadUrl - Public upload portal URL with token
+ * @param {string} options.companyName - Company name (optional)
+ * @returns {Promise<Object>} Email send result
+ */
+const sendDocumentRequestEmail = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  uploadUrl,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      throw new Error('Email transporter not configured');
+    }
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .header {
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+    .content {
+      padding: 30px;
+    }
+    .info-box {
+      background: #dbeafe;
+      border-left: 4px solid #3b82f6;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .cta-button {
+      display: inline-block;
+      background: #3b82f6;
+      color: white;
+      padding: 15px 40px;
+      text-decoration: none;
+      border-radius: 5px;
+      margin: 20px 0;
+      font-weight: 600;
+      font-size: 16px;
+    }
+    .document-list {
+      background: #f8f9fa;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .document-list ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .document-list li {
+      margin: 8px 0;
+    }
+    .footer {
+      background: #f8f9fa;
+      padding: 20px;
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+    }
+    .emoji {
+      font-size: 24px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="emoji">📄</div>
+      <h1>Document Submission Required</h1>
+    </div>
+    
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      
+      <p>We are pleased to inform you that your onboarding process for the <strong>${position}</strong> position at ${companyName} is progressing well.</p>
+      
+      <div class="info-box">
+        <p><strong>📋 Action Required: Submit Your Documents</strong></p>
+        <p>To proceed with your onboarding, we need you to upload the required documents through our secure document portal.</p>
+      </div>
+      
+      <div class="document-list">
+        <h3>📎 Required Documents:</h3>
+        <ul>
+          <li>Aadhaar Card (both sides)</li>
+          <li>PAN Card</li>
+          <li>Educational Certificates</li>
+          <li>Address Proof</li>
+          <li>Bank Account Details (cancelled cheque or passbook)</li>
+          <li>Passport-size Photograph</li>
+          <li>Previous Employment Documents (if applicable)</li>
+        </ul>
+      </div>
+      
+      <p style="text-align: center;">
+        <a href="${uploadUrl}" class="cta-button">
+          📤 Upload Documents Now
+        </a>
+      </p>
+      
+      <p><strong>Important Notes:</strong></p>
+      <ul>
+        <li>All documents should be clear and legible</li>
+        <li>Accepted formats: PDF, JPG, PNG</li>
+        <li>Maximum file size: 10MB per document</li>
+        <li>This link is secure and unique to you</li>
+      </ul>
+      
+      <p>If you face any issues or have questions, please don't hesitate to contact our HR team.</p>
+      
+      <p style="margin-top: 30px;">
+        Best regards,<br>
+        <strong>HR Team</strong><br>
+        ${companyName}
+      </p>
+    </div>
+    
+    <div class="footer">
+      <p>This is an automated email from the HRMS system. Please do not reply to this email.</p>
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const textContent = `
+Document Submission Required
+
+Dear ${candidateName},
+
+We are pleased to inform you that your onboarding process for the ${position} position at ${companyName} is progressing well.
+
+Action Required: Submit Your Documents
+To proceed with your onboarding, we need you to upload the required documents through our secure document portal.
+
+Required Documents:
+- Aadhaar Card (both sides)
+- PAN Card
+- Educational Certificates
+- Address Proof
+- Bank Account Details (cancelled cheque or passbook)
+- Passport-size Photograph
+- Previous Employment Documents (if applicable)
+
+Upload Link: ${uploadUrl}
+
+Important Notes:
+- All documents should be clear and legible
+- Accepted formats: PDF, JPG, PNG
+- Maximum file size: 10MB per document
+- This link is secure and unique to you
+
+If you face any issues or have questions, please contact our HR team.
+
+Best regards,
+HR Team
+${companyName}
+
+---
+This is an automated email from the HRMS system. Please do not reply to this email.
+    `;
+
+    const mailOptions = {
+      from: {
+        name: `${companyName} - HRMS`,
+        address: process.env.EMAIL_USER
+      },
+      to: candidateEmail,
+      subject: `📄 Document Submission Required - ${position} at ${companyName}`,
+      text: textContent,
+      html: htmlContent,
+      priority: 'high'
+    };
+
+    const info = await sendEmailWithRetry(transporter, mailOptions);
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      recipient: candidateEmail
+    };
+
+  } catch (error) {
+    console.error('❌ Error sending document request email:', error);
+    throw new Error(`Failed to send document request email: ${error.message}`);
+  }
+};
+
+/**
+ * Send document rejection/re-submission email
+ */
+const sendDocumentRejectionEmail = async ({
+  candidateName,
+  candidateEmail,
+  documentName,
+  rejectionReason,
+  uploadUrl,
+  rejectedDocuments = []
+}) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+
+    const rejectedDocsList = rejectedDocuments.map(doc => 
+      `<li><strong>${doc.documentType.replace(/_/g, ' ').toUpperCase()}</strong>: ${doc.reason}</li>`
+    ).join('');
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 30px; text-align: center; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { padding: 30px; }
+    .alert-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .rejected-docs { background: #fee2e2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; border-radius: 4px; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📄 Document Re-submission Required</h1>
+    </div>
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      <div class="alert-box">
+        <p>Thank you for submitting your onboarding documents. After careful review, we need you to re-submit some documents to proceed with your onboarding.</p>
+      </div>
+      <div class="rejected-docs">
+        <p><strong>Documents requiring re-submission:</strong></p>
+        <ul>
+          ${rejectedDocsList}
+        </ul>
+      </div>
+      <p><strong>What you need to do:</strong></p>
+      <ol>
+        <li>Review the reasons mentioned above for each document</li>
+        <li>Prepare corrected/updated versions of the documents</li>
+        <li>Click the button below to re-upload the documents</li>
+        <li>Ensure documents are clear, complete, and meet the specified requirements</li>
+      </ol>
+      <div style="text-align: center;">
+        <a href="${uploadUrl}" class="cta-button">Re-Upload Documents</a>
+      </div>
+      <p><strong>Important Guidelines:</strong></p>
+      <ul>
+        <li>Ensure all documents are clear and readable</li>
+        <li>Upload documents in the correct format (PDF, JPG, PNG)</li>
+        <li>Make sure all required information is visible</li>
+        <li>Double-check document accuracy before uploading</li>
+      </ul>
+      <p>If you have any questions or need assistance, please don't hesitate to contact our HR team.</p>
+      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong></p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} HRMS. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendEmailWithRetry(transporter, {
+      from: { name: 'HRMS - Document Verification', address: process.env.EMAIL_USER },
+      to: candidateEmail,
+      subject: '📄 Action Required: Re-submit Onboarding Documents',
+      html: htmlContent,
+      priority: 'high'
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending document rejection email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send offer letter with document upload link
+ */
+const sendOfferLetterWithDocumentLink = async ({
+  candidateName,
+  candidateEmail,
+  position,
+  joiningDate,
+  uploadUrl,
+  companyName = 'Our Company'
+}) => {
+  try {
+    const transporter = createTransporter();
+    if (!transporter) throw new Error('Email transporter not configured');
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { padding: 30px; }
+    .offer-box { background: #d1fae5; border-left: 4px solid #10b981; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .document-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0; border-radius: 4px; }
+    .cta-button { display: inline-block; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎊 Congratulations!</h1>
+    </div>
+    <div class="content">
+      <p>Dear <strong>${candidateName}</strong>,</p>
+      <div class="offer-box">
+        <p><strong>🎊 We are delighted to extend an offer!</strong></p>
+        <p>We are pleased to offer you the <strong>${position}</strong> position at ${companyName}.</p>
+        ${joiningDate ? `<p><strong>Proposed Joining Date:</strong> ${new Date(joiningDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+      </div>
+      
+      <div class="document-box">
+        <p><strong>📄 Next Step: Upload Your Documents</strong></p>
+        <p>To complete your onboarding process, please upload the required documents using the secure link below:</p>
+        <div style="text-align: center;">
+          <a href="${uploadUrl}" class="cta-button">Upload Your Documents</a>
+        </div>
+        <p style="margin-top: 15px;"><strong>Required Documents:</strong></p>
+        <ul>
+          <li>Educational/Qualification Certificates</li>
+          <li>Aadhaar Card</li>
+          <li>PAN Card</li>
+          <li>Experience Letters (if applicable)</li>
+          <li>Latest Resume</li>
+          <li>Passport-size Photograph</li>
+          <li>Address Proof</li>
+          <li>Bank Account Details</li>
+        </ul>
+        <p><em>Please upload all documents within 7 days to ensure a smooth onboarding process.</em></p>
+      </div>
+
+      <p><strong>What's Next:</strong></p>
+      <ol>
+        <li>Review the offer letter (attached or sent separately)</li>
+        <li>Upload all required documents using the link above</li>
+        <li>Confirm your acceptance at your earliest convenience</li>
+        <li>Contact us if you have any questions</li>
+      </ol>
+      
+      <p>We are excited about the possibility of you joining our team!</p>
+      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
+    </div>
+    <div class="footer">
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+      <p style="margin-top: 10px; font-size: 12px;">This is an automated email. Please do not reply directly to this message.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await sendEmailWithRetry(transporter, {
+      from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
+      to: candidateEmail,
+      subject: `🎊 Offer Letter & Document Upload - ${position} at ${companyName}`,
+      html: htmlContent,
+      priority: 'high'
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending document request email:', error);
+    throw new Error(`Failed to send document request email: ${error.message}`);
+  }
+};
+
 module.exports = {
+  sendEmail, // Generic email function
   sendOnboardingEmail,
   sendHRNotification,
-  sendInterviewNotification,
-  sendApplicationReceivedEmail,
+  sendInterviewScheduledEmail,
+  sendInterviewReminderEmail,
+  sendInterviewCancelledEmail,
   sendShortlistedEmail,
   sendInterviewCompletedEmail,
   sendOfferExtendedEmail,
   sendRejectionEmail,
+  sendOfferLetterWithDocumentLink,
+  sendWelcomeEmail,
+  sendDocumentRequestEmail,
+  sendDocumentRejectionEmail,
   sendCompanyAdminCredentials,
-  verifyEmailConfig
+  verifyEmailConfig,
+  sendApplicationReceivedEmail
 };

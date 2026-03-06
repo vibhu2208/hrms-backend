@@ -2,6 +2,7 @@ const { verifyToken } = require('../utils/jwt');
 const TenantUserSchema = require('../models/tenant/TenantUser');
 const { getTenantConnection } = require('../config/database.config');
 const { getSuperAdmin } = require('../models/global');
+const tokenBlacklistService = require('../services/tokenBlacklistService');
 
 const protect = async (req, res, next) => {
   let tenantConnection = null;
@@ -29,42 +30,101 @@ const protect = async (req, res, next) => {
       });
     }
 
+    // SECURITY: Check if token is blacklisted
+    const isBlacklisted = await tokenBlacklistService.isBlacklisted(token);
+    if (isBlacklisted) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token has been revoked. Please login again.',
+        code: 'TOKEN_REVOKED'
+      });
+    }
+
+    // Handle both 'id' and 'userId' fields for backward compatibility
+    const userId = decoded.userId || decoded.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token: missing user identifier'
+      });
+    }
+
     let user = null;
 
     // Check if token contains company info (tenant user)
     if (decoded.companyId) {
       // User is from a tenant database
       try {
-        console.log(`🔍 Auth middleware: Fetching user from tenant DB for company: ${decoded.companyId}`);
+        console.log(`🔍 Auth middleware: Fetching user from tenant DB for company: ${decoded.companyId}, userId: ${userId}`);
         tenantConnection = await getTenantConnection(decoded.companyId);
         const TenantUser = tenantConnection.model('User', TenantUserSchema);
-        user = await TenantUser.findById(decoded.userId).select('-password');
+        user = await TenantUser.findById(userId).select('-password');
         
-        console.log(`✅ User found in tenant DB: ${user?.email}`);
-        
-        if (tenantConnection) {
-          await tenantConnection.close();
+        if (user) {
+          console.log(`✅ User found in tenant DB: ${user.email}`);
+        } else {
+          console.error(`❌ User not found in tenant DB. userId: ${userId}, companyId: ${decoded.companyId}`);
+          // Try to find user by email if available in token
+          if (decoded.email) {
+            console.log(`🔍 Trying to find user by email: ${decoded.email}`);
+            user = await TenantUser.findOne({ email: decoded.email }).select('-password');
+            if (user) {
+              console.log(`✅ User found by email: ${user.email}`);
+            }
+          }
         }
+        
+        // Don't close the connection - it's cached and reused by getTenantConnection
       } catch (tenantError) {
-        console.error('Error accessing tenant database:', tenantError);
-        if (tenantConnection) await tenantConnection.close();
+        console.error('❌ Error accessing tenant database:', tenantError);
+        console.error('Error details:', {
+          message: tenantError.message,
+          stack: tenantError.stack,
+          companyId: decoded.companyId,
+          userId: userId
+        });
         return res.status(500).json({
           success: false,
-          message: 'Error accessing company database'
+          message: 'Error accessing company database',
+          error: tenantError.message
         });
       }
     } else {
       // User is from main database (super admin, etc.)
-      console.log('🔍 Auth middleware: Fetching super admin from global DB');
+      console.log('🔍 Auth middleware: Fetching super admin from global DB, userId:', userId);
       const SuperAdmin = await getSuperAdmin();
-      user = await SuperAdmin.findById(decoded.userId).select('-password');
-      console.log(`✅ Super admin found: ${user?.email}`);
+      user = await SuperAdmin.findById(userId).select('-password');
+      if (user) {
+        console.log(`✅ Super admin found: ${user.email}`);
+      } else {
+        console.error(`❌ Super admin not found. userId: ${userId}`);
+      }
     }
 
     if (!user) {
+      console.error('❌ User not found. Token details:', {
+        userId: userId,
+        companyId: decoded.companyId || 'none',
+        email: decoded.email || 'none',
+        tokenIssuedAt: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : 'unknown'
+      });
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found. Please login again.',
+        code: 'USER_NOT_FOUND',
+        details: decoded.companyId 
+          ? `User ${userId} not found in company ${decoded.companyId}` 
+          : `User ${userId} not found in system`
+      });
+    }
+
+    // SECURITY: Check if all user tokens are blacklisted (for exited employees)
+    const isUserBlacklisted = await tokenBlacklistService.isUserBlacklisted(userId);
+    if (isUserBlacklisted) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access has been revoked. Please contact HR.',
+        code: 'ACCESS_REVOKED'
       });
     }
 
@@ -86,9 +146,7 @@ const protect = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
+    // Don't close tenant connection - it's cached and reused
     res.status(401).json({
       success: false,
       message: 'Not authorized to access this route'
@@ -98,22 +156,27 @@ const protect = async (req, res, next) => {
 
 const authorize = (...roles) => {
   return (req, res, next) => {
-    console.log('Authorize check:', {
-      userRole: req.user?.role,
-      requiredRoles: roles,
-      userEmail: req.user?.email
-    });
+    const userRole = req.user.role;
     
-    if (!roles.includes(req.user.role)) {
-      console.log('Authorization failed:', {
-        userRole: req.user?.role,
-        requiredRoles: roles
-      });
+    console.log('🔐 Authorization check:');
+    console.log('   User role:', userRole);
+    console.log('   Allowed roles:', roles);
+    
+    // Map company_admin to admin for authorization checks
+    const normalizedRole = userRole === 'company_admin' ? 'admin' : userRole;
+    
+    console.log('   Normalized role:', normalizedRole);
+    
+    // Check if user's role (or normalized role) is in allowed roles
+    if (!roles.includes(userRole) && !roles.includes(normalizedRole)) {
+      console.log('❌ Authorization failed');
       return res.status(403).json({
         success: false,
-        message: `User role '${req.user.role}' is not authorized to access this route`
+        message: `User role '${userRole}' is not authorized to access this route`
       });
     }
+    
+    console.log('✅ Authorization passed');
     next();
   };
 };

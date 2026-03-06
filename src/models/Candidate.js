@@ -33,6 +33,11 @@ const candidateSchema = new mongoose.Schema({
     enum: ['internal', 'linkedin', 'naukri', 'referral', 'job-portal', 'walk-in', 'other'],
     default: 'other'
   },
+  employmentType: {
+    type: String,
+    enum: ['full-time', 'part-time', 'contract', 'intern', 'contract-based', 'deliverable-based', 'rate-based', 'hourly-based'],
+    default: 'full-time'
+  },
   referredBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee'
@@ -40,7 +45,11 @@ const candidateSchema = new mongoose.Schema({
   appliedFor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'JobPosting',
-    required: true
+    required: false
+  },
+  appliedForTitle: {
+    type: String,
+    trim: true
   },
   experience: {
     years: Number,
@@ -75,13 +84,39 @@ const candidateSchema = new mongoose.Schema({
     passingYear: Number,
     percentage: Number
   }],
+  trainingCertificates: [{
+    type: {
+      type: String,
+      enum: ['training', 'certificate'],
+      default: 'training'
+    },
+    name: {
+      type: String,
+      required: true
+    },
+    issuingOrganization: {
+      type: String,
+      required: true
+    },
+    completionDate: {
+      type: Date,
+      required: true
+    },
+    expiryDate: Date,
+    credentialId: String,
+    credentialUrl: String,
+    description: String
+  }],
   resume: {
     url: String,
     filename: String,
     originalName: String,
     size: Number,
     mimetype: String,
-    uploadedAt: Date
+    uploadedAt: Date,
+    s3Key: String,      // S3 object key
+    s3Bucket: String,   // S3 bucket name
+    signedUrl: String   // Temporary signed URL for access
   },
   stage: {
     type: String,
@@ -216,6 +251,87 @@ const candidateSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Duplicate Detection Fields
+  isDuplicate: {
+    type: Boolean,
+    default: false
+  },
+  duplicateOf: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Candidate'
+  },
+  // Flexible Workflow Fields
+  canSkipStages: {
+    type: Boolean,
+    default: true
+  },
+  workflowHistory: [{
+    fromStage: String,
+    toStage: String,
+    skippedStages: [String],
+    movedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    reason: String,
+    timestamp: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  // Cross-Application History Fields
+  masterCandidateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Candidate'
+  },
+  // Link to employee if candidate becomes employee
+  employeeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
+  },
+  isEmployee: {
+    type: Boolean,
+    default: false
+  },
+  isExEmployee: {
+    type: Boolean,
+    default: false
+  },
+  exEmployeeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employee'
+  },
+  exEmployeeCode: String,
+  applicationHistory: [{
+    jobId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'JobPosting'
+    },
+    jobTitle: String,
+    appliedDate: {
+      type: Date,
+      default: Date.now
+    },
+    stage: String,
+    status: String,
+    outcome: {
+      type: String,
+      enum: ['hired', 'rejected', 'withdrawn', 'ongoing', null],
+      default: null
+    },
+    interviews: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Interview'
+    }],
+    onboardingRecord: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Onboarding'
+    },
+    offboardingRecord: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Offboarding'
+    }
+  }],
   // AI Analysis Fields
   aiAnalysis: {
     matchScore: {
@@ -256,17 +372,149 @@ const candidateSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     }
+  },
+  // Resume Parsing Fields (Reducto Integration)
+  resumeParsing: {
+    rawText: String, // Full extracted text from resume
+    confidence: {
+      type: Map,
+      of: Number
+    }, // Confidence scores per field
+    parsedAt: Date, // When parsing was done
+    parserVersion: String, // Version of parser used
+    parsingSource: {
+      type: String,
+      enum: ['reducto', 'manual', 'other'],
+      default: 'manual'
+    },
+    parsingMetadata: {
+      fileName: String,
+      fileSize: Number,
+      mimeType: String,
+      uploadedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      }
+    },
+    // Store complete Reducto JSON response for auditing/debugging
+    reductoResponse: {
+      type: mongoose.Schema.Types.Mixed // Store full JSON from Reducto
+    },
+    // Store the extracted data object from Reducto
+    extractedData: {
+      type: mongoose.Schema.Types.Mixed // Store the extractedData object
+    }
   }
 }, {
   timestamps: true
 });
 
-// Generate candidate code
+// Indexes for duplicate detection
+candidateSchema.index({ email: 1 });
+candidateSchema.index({ phone: 1 });
+candidateSchema.index({ email: 1, phone: 1 });
+candidateSchema.index({ isDuplicate: 1 });
+candidateSchema.index({ duplicateOf: 1 });
+
+// Helper function to normalize phone number
+const normalizePhone = (phone) => {
+  if (!phone) return null;
+  // Remove all non-digit characters
+  return phone.replace(/\D/g, '');
+};
+
+// Pre-save hook to check for duplicates (non-blocking, just flag)
 candidateSchema.pre('save', async function(next) {
-  if (!this.candidateCode) {
-    const count = await mongoose.model('Candidate').countDocuments();
-    this.candidateCode = `CAN${String(count + 1).padStart(5, '0')}`;
+  // Skip candidate code generation if already set (done in controller)
+  console.log(`Pre-save hook triggered for candidate: ${this.email || 'unknown'}, candidateCode: ${this.candidateCode || 'not set'}`);
+  if (!this.candidateCode || this.candidateCode.trim() === '') {
+    try {
+      // Find the highest existing candidate code and increment it
+      const lastCandidate = await mongoose.model('Candidate').findOne({})
+        .sort({ candidateCode: -1 })
+        .select('candidateCode')
+        .lean();
+
+      let nextNumber = 1; // Default for first candidate
+
+      if (lastCandidate && lastCandidate.candidateCode) {
+        // Extract number from last code (e.g., "CAN00008" -> 8)
+        const lastNumber = parseInt(lastCandidate.candidateCode.replace('CAN', '')) || 0;
+        nextNumber = lastNumber + 1;
+      }
+
+      // Generate unique code with retry logic for race conditions
+      let candidateCode;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      console.log(`Starting candidate code generation for ${this.email || 'new candidate'}. Next number should be: ${nextNumber}`);
+
+      while (attempts < maxAttempts) {
+        candidateCode = `CAN${String(nextNumber + attempts).padStart(5, '0')}`;
+        console.log(`Attempting candidate code: ${candidateCode} (attempt ${attempts + 1})`);
+
+        // Check if this code already exists
+        const existing = await mongoose.model('Candidate').findOne({ candidateCode });
+        if (!existing) {
+          console.log(`✅ Candidate code ${candidateCode} is unique, using it`);
+          // Code is unique, use it
+          break;
+        } else {
+          console.log(`❌ Candidate code ${candidateCode} already exists, trying next`);
+        }
+
+        attempts++;
+      }
+
+      // If we couldn't find a unique code after max attempts, use timestamp fallback
+      if (attempts >= maxAttempts) {
+        candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+        console.log(`⚠️ Max attempts reached, using timestamp fallback: ${candidateCode}`);
+      }
+
+      this.candidateCode = candidateCode;
+      console.log(`🎯 Final candidate code: ${this.candidateCode} for ${this.email || 'new candidate'}`);
+
+    } catch (error) {
+      console.error('Error generating candidate code:', error);
+      // Fallback to timestamp-based code
+      this.candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+    }
   }
+
+  // Check for duplicates only if this is a new document and not already marked as duplicate
+  if (this.isNew && !this.isDuplicate) {
+    const Candidate = mongoose.model('Candidate');
+    const normalizedPhone = normalizePhone(this.phone);
+    const normalizedEmail = this.email?.toLowerCase().trim();
+
+    // Check for existing candidate by email OR phone
+    const duplicateQuery = {
+      _id: { $ne: this._id },
+      $or: []
+    };
+
+    if (normalizedEmail) {
+      duplicateQuery.$or.push({ email: normalizedEmail });
+    }
+
+    if (normalizedPhone) {
+      duplicateQuery.$or.push({ phone: normalizedPhone });
+      // Also check alternatePhone
+      duplicateQuery.$or.push({ alternatePhone: normalizedPhone });
+    }
+
+    if (duplicateQuery.$or.length > 0) {
+      const duplicate = await Candidate.findOne(duplicateQuery);
+      if (duplicate) {
+        // Flag as duplicate but don't block save (non-blocking)
+        this.isDuplicate = true;
+        this.duplicateOf = duplicate._id;
+      }
+    }
+  }
+
   next();
 });
 

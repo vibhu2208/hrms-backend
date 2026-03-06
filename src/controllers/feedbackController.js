@@ -1,4 +1,7 @@
 const Feedback = require('../models/Feedback');
+const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
+const { getTenantConnection } = require('../config/database.config');
+const { getTenantModel } = require('../middlewares/tenantMiddleware');
 
 exports.getFeedbacks = async (req, res) => {
   try {
@@ -44,7 +47,34 @@ exports.getFeedback = async (req, res) => {
 
 exports.createFeedback = async (req, res) => {
   try {
-    req.body.submittedBy = req.user.employeeId;
+    let submittedByEmployeeId = req.user.employeeId;
+    
+    // If user doesn't have employeeId, try to find Employee by email
+    if (!submittedByEmployeeId && req.user.email && req.companyId) {
+      try {
+        const tenantConnection = await getTenantConnection(req.companyId);
+        const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+        const employee = await TenantEmployee.findOne({ email: req.user.email.toLowerCase() }).select('_id');
+        
+        if (employee) {
+          submittedByEmployeeId = employee._id;
+          // Optionally update the user's employeeId for future use
+          // This would require access to TenantUser model
+        }
+      } catch (tenantError) {
+        console.warn('Could not find employee by email:', tenantError.message);
+      }
+    }
+    
+    // If still no employeeId found, return error
+    if (!submittedByEmployeeId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Your user account is not linked to an employee record. Please contact HR to link your account.' 
+      });
+    }
+    
+    req.body.submittedBy = submittedByEmployeeId;
     const feedback = await Feedback.create(req.body);
     res.status(201).json({ success: true, message: 'Feedback submitted successfully', data: feedback });
   } catch (error) {
@@ -99,8 +129,33 @@ exports.acknowledgeFeedback = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Feedback not found' });
     }
 
+    let acknowledgedByEmployeeId = req.user.employeeId;
+    
+    // If user doesn't have employeeId, try to find Employee by email
+    if (!acknowledgedByEmployeeId && req.user.email && req.companyId) {
+      try {
+        const tenantConnection = await getTenantConnection(req.companyId);
+        const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+        const employee = await TenantEmployee.findOne({ email: req.user.email.toLowerCase() }).select('_id');
+        
+        if (employee) {
+          acknowledgedByEmployeeId = employee._id;
+        }
+      } catch (tenantError) {
+        console.warn('Could not find employee by email:', tenantError.message);
+      }
+    }
+
+    // If still no employeeId found, return error
+    if (!acknowledgedByEmployeeId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Your user account is not linked to an employee record. Please contact HR to link your account.' 
+      });
+    }
+
     feedback.status = 'acknowledged';
-    feedback.acknowledgedBy = req.user.employeeId;
+    feedback.acknowledgedBy = acknowledgedByEmployeeId;
     feedback.acknowledgedAt = Date.now();
     await feedback.save();
 

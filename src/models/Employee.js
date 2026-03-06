@@ -53,6 +53,20 @@ const employeeSchema = new mongoose.Schema({
     zipCode: String,
     country: String
   },
+  permanentAddress: {
+    street: String,
+    city: String,
+    state: String,
+    zipCode: String,
+    country: String
+  },
+  correspondenceAddress: {
+    street: String,
+    city: String,
+    state: String,
+    zipCode: String,
+    country: String
+  },
   department: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Department',
@@ -86,11 +100,20 @@ const employeeSchema = new mongoose.Schema({
     ref: 'Employee'
   },
   salary: {
-    basic: Number,
-    hra: Number,
-    allowances: Number,
-    deductions: Number,
-    total: Number
+    currency: {
+      type: String,
+      enum: ['USD', 'INR', 'AED'],
+      default: 'INR'
+    },
+    basic: String,  // Encrypted
+    hra: String,    // Encrypted
+    allowances: String,  // Encrypted
+    deductions: String,  // Encrypted
+    total: String,  // Encrypted
+    isEncrypted: {
+      type: Boolean,
+      default: true
+    }
   },
   bankDetails: {
     accountNumber: String,
@@ -114,7 +137,17 @@ const employeeSchema = new mongoose.Schema({
     specialization: String,
     institution: String,
     passingYear: Number,
-    percentage: Number
+    percentage: Number,
+    documentUrl: String,
+    verified: {
+      type: Boolean,
+      default: false
+    },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    verifiedAt: Date
   }],
   experience: [{
     company: String,
@@ -162,8 +195,61 @@ employeeSchema.pre('save', async function(next) {
     const count = await mongoose.model('Employee').countDocuments();
     this.employeeCode = `EMP${String(count + 1).padStart(5, '0')}`;
   }
+  
+  // Encrypt salary data if modified and not already encrypted
+  if (this.isModified('salary') && this.salary) {
+    try {
+      const encryptionService = require('../services/encryptionService');
+      
+      // Only encrypt if values are not already encrypted (backward compatibility)
+      if (this.salary.basic && !String(this.salary.basic).includes(':')) {
+        this.salary.basic = encryptionService.encryptField(this.salary.basic, 'basic');
+      }
+      if (this.salary.hra && !String(this.salary.hra).includes(':')) {
+        this.salary.hra = encryptionService.encryptField(this.salary.hra, 'hra');
+      }
+      if (this.salary.allowances && !String(this.salary.allowances).includes(':')) {
+        this.salary.allowances = encryptionService.encryptField(this.salary.allowances, 'allowances');
+      }
+      if (this.salary.deductions && !String(this.salary.deductions).includes(':')) {
+        this.salary.deductions = encryptionService.encryptField(this.salary.deductions, 'deductions');
+      }
+      if (this.salary.total && !String(this.salary.total).includes(':')) {
+        this.salary.total = encryptionService.encryptField(this.salary.total, 'total');
+      }
+      
+      this.salary.isEncrypted = true;
+    } catch (error) {
+      console.error('Error encrypting salary:', error.message);
+      // Continue without encryption if key not configured
+    }
+  }
+  
   next();
 });
+
+// Method to decrypt salary for authorized users
+employeeSchema.methods.getDecryptedSalary = function(requestingUser) {
+  const encryptionService = require('../services/encryptionService');
+  
+  // Check authorization
+  if (!encryptionService.isAuthorizedToViewSalary(requestingUser, this._id)) {
+    return {
+      basic: encryptionService.maskSalary(),
+      hra: encryptionService.maskSalary(),
+      allowances: encryptionService.maskSalary(),
+      deductions: encryptionService.maskSalary(),
+      total: encryptionService.maskSalary()
+    };
+  }
+  
+  // Decrypt and return
+  if (this.salary && this.salary.isEncrypted) {
+    return encryptionService.decryptSalary(this.salary);
+  }
+  
+  return this.salary;
+};
 
 const Employee = mongoose.model('Employee', employeeSchema);
 Employee.schema = employeeSchema;

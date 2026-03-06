@@ -398,7 +398,15 @@ exports.resumeSearchAndShortlist = async (req, res) => {
       minimumExperience = 0,
       candidateIds = [],
       maxResults = 10,
-      includeAllCandidates = false
+      includeAllCandidates = false,
+      // CTC filters
+      currentCTCMin,
+      currentCTCMax,
+      expectedCTCMin,
+      expectedCTCMax,
+      // Geolocation filters
+      currentLocation,
+      preferredLocation
     } = req.body;
 
     // Build query to get candidates
@@ -408,9 +416,42 @@ exports.resumeSearchAndShortlist = async (req, res) => {
       query._id = { $in: candidateIds };
     }
 
+    // Add CTC filters
+    if (currentCTCMin !== undefined || currentCTCMax !== undefined) {
+      query.currentCTC = {};
+      if (currentCTCMin !== undefined) query.currentCTC.$gte = Number(currentCTCMin);
+      if (currentCTCMax !== undefined) query.currentCTC.$lte = Number(currentCTCMax);
+    }
+
+    if (expectedCTCMin !== undefined || expectedCTCMax !== undefined) {
+      query.expectedCTC = {};
+      if (expectedCTCMin !== undefined) query.expectedCTC.$gte = Number(expectedCTCMin);
+      if (expectedCTCMax !== undefined) query.expectedCTC.$lte = Number(expectedCTCMax);
+    }
+
+    // Add geolocation filters
+    if (currentLocation) {
+      if (Array.isArray(currentLocation)) {
+        query.currentLocation = { $in: currentLocation.map(loc => new RegExp(loc, 'i')) };
+      } else {
+        query.currentLocation = { $regex: currentLocation, $options: 'i' };
+      }
+    }
+
+    if (preferredLocation) {
+      if (Array.isArray(preferredLocation)) {
+        query.$or = query.$or || [];
+        preferredLocation.forEach(loc => {
+          query.$or.push({ preferredLocation: { $regex: loc, $options: 'i' } });
+        });
+      } else {
+        query.preferredLocation = { $regex: preferredLocation, $options: 'i' };
+      }
+    }
+
     // Fetch candidates
     const candidates = await TenantCandidate.find(query)
-      .select('firstName lastName email phone skills experience currentCompany currentDesignation education resume resumeText')
+      .select('firstName lastName email phone skills experience currentCompany currentDesignation education resume resumeText currentCTC expectedCTC currentLocation preferredLocation')
       .populate('appliedFor', 'title department');
 
     if (candidates.length === 0) {

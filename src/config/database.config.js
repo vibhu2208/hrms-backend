@@ -43,6 +43,17 @@ const connectGlobalDB = async () => {
       family: 4, // Force IPv4
     });
 
+    // Wait for connection to be ready before returning
+    await new Promise((resolve, reject) => {
+      if (globalConnection.readyState === 1) {
+        resolve();
+      } else {
+        globalConnection.once('open', resolve);
+        globalConnection.once('error', reject);
+        setTimeout(() => reject(new Error('Connection timeout')), 30000);
+      }
+    });
+
     console.log('✅ Connected to Global Database (hrms_global)');
     return globalConnection;
   } catch (error) {
@@ -52,29 +63,33 @@ const connectGlobalDB = async () => {
     console.error('   2. Verify network access (IP whitelist)');
     console.error('   3. Check if credentials are correct');
     console.error('   4. Try accessing from MongoDB Compass');
-    throw error;
+    throw new Error(`Failed to connect to global database: ${error.message}`);
   }
 };
 
 /**
  * Get or Create Tenant Database Connection
- * @param {string} companyId - Company ID for tenant database
+ * @param {string} companyIdOrDbName - Company ID or full database name (e.g., 'tenant_xxx')
  * @returns {Connection} Mongoose connection to tenant database
  */
-const getTenantConnection = async (companyId) => {
+const getTenantConnection = async (companyIdOrDbName) => {
   try {
+    // Determine the actual database name
+    // If it already starts with 'tenant_', use it as-is
+    // Otherwise, add the 'tenant_' prefix
+    const tenantDbName = companyIdOrDbName.startsWith('tenant_') 
+      ? companyIdOrDbName 
+      : `tenant_${companyIdOrDbName}`;
+    
     // Check if connection already exists and is active
-    if (tenantConnections.has(companyId)) {
-      const connection = tenantConnections.get(companyId);
+    if (tenantConnections.has(tenantDbName)) {
+      const connection = tenantConnections.get(tenantDbName);
       if (connection.readyState === 1) {
         return connection;
       }
       // If connection is dead, remove it
-      tenantConnections.delete(companyId);
+      tenantConnections.delete(tenantDbName);
     }
-
-    // Create new tenant database connection
-    const tenantDbName = `tenant_${companyId}`;
     
     const baseUri = process.env.MONGODB_URI.split('?')[0];
     const queryParams = process.env.MONGODB_URI.split('?')[1] || 'retryWrites=true&w=majority';
@@ -91,13 +106,24 @@ const getTenantConnection = async (companyId) => {
       family: 4, // Force IPv4
     });
 
-    // Cache the connection
-    tenantConnections.set(companyId, connection);
+    // Wait for connection to be ready before returning
+    await new Promise((resolve, reject) => {
+      if (connection.readyState === 1) {
+        resolve();
+      } else {
+        connection.once('open', resolve);
+        connection.once('error', reject);
+        setTimeout(() => reject(new Error('Connection timeout')), 30000);
+      }
+    });
+
+    // Cache the connection using the database name as key
+    tenantConnections.set(tenantDbName, connection);
     
     console.log(`✅ Connected to Tenant Database: ${tenantDbName}`);
     return connection;
   } catch (error) {
-    console.error(`❌ Tenant DB Connection Error for ${companyId}:`, error);
+    console.error(`❌ Tenant DB Connection Error for ${companyIdOrDbName}:`, error);
     throw error;
   }
 };
@@ -107,11 +133,15 @@ const getTenantConnection = async (companyId) => {
  * @param {string} companyId - Company ID
  */
 const closeTenantConnection = async (companyId) => {
-  if (tenantConnections.has(companyId)) {
-    const connection = tenantConnections.get(companyId);
-    await connection.close();
-    tenantConnections.delete(companyId);
-    console.log(`🔌 Closed tenant connection: tenant_${companyId}`);
+  const tenantDbName = companyId.startsWith('tenant_') ? companyId : `tenant_${companyId}`;
+  
+  if (tenantConnections.has(tenantDbName)) {
+    const connection = tenantConnections.get(tenantDbName);
+    if (connection.readyState === 1) {
+      await connection.close();
+      console.log(`🔌 Closed tenant connection: ${tenantDbName}`);
+    }
+    tenantConnections.delete(tenantDbName);
   }
 };
 
@@ -120,19 +150,27 @@ const closeTenantConnection = async (companyId) => {
  */
 const closeAllTenantConnections = async () => {
   const closePromises = [];
-  for (const [companyId, connection] of tenantConnections.entries()) {
-    closePromises.push(connection.close());
+  for (const [tenantDbName, connection] of tenantConnections.entries()) {
+    if (connection.readyState === 1) {
+      closePromises.push(connection.close());
+    }
   }
-  await Promise.all(closePromises);
-  tenantConnections.clear();
-  console.log('🔌 Closed all tenant connections');
+  
+  try {
+    await Promise.all(closePromises);
+    tenantConnections.clear();
+    console.log('🔌 All tenant connections closed');
+  } catch (error) {
+    console.error('⚠️  Error closing tenant connections:', error);
+    tenantConnections.clear(); // Clear cache even if some connections fail to close
+  }
 };
 
 /**
  * Close global connection
  */
 const closeGlobalConnection = async () => {
-  if (globalConnection) {
+  if (globalConnection && globalConnection.readyState === 1) {
     await globalConnection.close();
     globalConnection = null;
     console.log('🔌 Closed global connection');

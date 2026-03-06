@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // Import controllers
 const employeeDashboardController = require('../controllers/employeeDashboardController');
@@ -14,8 +15,9 @@ const employeeRequestController = require('../controllers/employeeRequestControl
  * @module routes/employeeDashboard
  */
 
-// Apply authentication and authorization middleware to all routes
+// Apply authentication, authorization, and tenant middleware to all routes
 router.use(protect);
+router.use(tenantMiddleware);
 router.use(authorize('employee', 'hr', 'manager', 'company_admin'));
 
 // ==================== Dashboard Routes ====================
@@ -48,6 +50,27 @@ router.put('/profile', employeeDashboardController.updateEmployeeProfile);
  * @access  Private (Employee)
  */
 router.get('/leaves/summary', employeeDashboardController.getLeaveSummary);
+
+/**
+ * @route   GET /api/employee/leaves/types
+ * @desc    Get available leave types
+ * @access  Private (Employee)
+ */
+router.get('/leaves/types', employeeLeaveController.getAvailableLeaveTypes);
+
+/**
+ * @route   POST /api/employee/leaves/fix-negative
+ * @desc    Fix all negative leave balances
+ * @access  Private (Employee)
+ */
+router.post('/leaves/fix-negative', employeeLeaveController.fixNegativeBalances);
+
+/**
+ * @route   POST /api/employee/leaves/refresh
+ * @desc    Refresh leave balances to match current admin configuration
+ * @access  Private (Employee)
+ */
+router.post('/leaves/refresh', employeeLeaveController.refreshLeaveBalances);
 
 /**
  * @route   GET /api/employee/leaves/balance

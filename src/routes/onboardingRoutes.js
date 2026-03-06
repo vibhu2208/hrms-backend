@@ -18,8 +18,14 @@ const {
   uploadDocument,
   verifyDocument,
   getDocuments,
-  requestDocumentResubmission
+  requestDocumentResubmission,
+  requestDocuments,
+  // Onboarding Approval Routes
+  requestOnboardingApproval,
+  getOnboardingApprovalStatus,
+  processOnboardingApproval
 } = require('../controllers/onboardingController');
+const { sendTestOnboardingEmail } = require('../controllers/testEmailController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
@@ -46,14 +52,23 @@ router.put('/:id/status', updateOnboardingStatus);
 router.post('/:id/send-offer', sendOffer);
 router.post('/:id/set-joining-date', setJoiningDateAndNotify);
 
+// Onboarding Approval Routes - HR requests approval, Admin approves/rejects
+router.post('/:id/request-approval', requestOnboardingApproval);
+router.get('/:id/approval-status', getOnboardingApprovalStatus);
+router.put('/:id/process-approval', processOnboardingApproval);
+
 // Document management routes
 router.get('/:id/documents', getDocuments);
 router.post('/:id/documents', uploadDocument);
 router.put('/:id/documents/:docId/verify', verifyDocument);
 router.post('/:id/documents/:docId/request-resubmission', requestDocumentResubmission);
+router.post('/:id/request-documents', requestDocuments);
 
 // Complete onboarding and create employee account
 router.post('/:id/complete', completeOnboardingProcess);
+
+// Test email endpoint
+router.post('/:onboardingId/send-test-email', sendTestOnboardingEmail);
 
 router.route('/:id')
   .get(getOnboarding)

@@ -19,7 +19,9 @@ const auditLogSchema = new mongoose.Schema({
       'subscription_create', 'subscription_update', 'subscription_cancel',
       'client_create', 'client_update', 'client_suspend', 'client_activate',
       'package_create', 'package_update', 'package_delete',
-      'config_update', 'data_export', 'data_import'
+      'config_update', 'data_export', 'data_import',
+      'PERMISSION_GRANTED', 'PERMISSION_REVOKED', 'SALARY_VIEWED', 'SALARY_MODIFIED',
+      'ATTENDANCE_MODIFIED', 'PAYROLL_ACCESSED', 'APPROVAL_PROCESSED', 'ACCESS_REVOKED'
     ]
   },
   resource: {
@@ -32,11 +34,36 @@ const auditLogSchema = new mongoose.Schema({
   details: {
     type: mongoose.Schema.Types.Mixed // Store additional details about the action
   },
+  beforeValue: {
+    type: mongoose.Schema.Types.Mixed // Value before change (encrypted if sensitive)
+  },
+  afterValue: {
+    type: mongoose.Schema.Types.Mixed // Value after change (encrypted if sensitive)
+  },
   ipAddress: {
     type: String
   },
   userAgent: {
     type: String
+  },
+  deviceFingerprint: {
+    type: String
+  },
+  geolocation: {
+    latitude: Number,
+    longitude: Number,
+    city: String,
+    country: String
+  },
+  riskLevel: {
+    type: String,
+    enum: ['low', 'medium', 'high', 'critical'],
+    default: 'low'
+  },
+  category: {
+    type: String,
+    enum: ['auth', 'data_access', 'data_modification', 'permission_change', 'payroll', 'attendance', 'system'],
+    default: 'system'
   },
   status: {
     type: String,

@@ -35,6 +35,33 @@ const projectSchema = new mongoose.Schema({
     enum: ['planning', 'active', 'on-hold', 'completed', 'cancelled'],
     default: 'planning'
   },
+  approvalStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'approved'
+  },
+  submittedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  submittedAt: {
+    type: Date
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvedAt: {
+    type: Date
+  },
+  rejectionReason: {
+    type: String
+  },
+  priority: {
+    type: String,
+    enum: ['low', 'medium', 'high'],
+    default: 'medium'
+  },
   projectManager: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee'
@@ -86,6 +113,24 @@ const projectSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
+  progress: {
+    percentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0
+    },
+    status: {
+      type: String,
+      enum: ['not-started', 'in-progress', 'at-risk', 'completed'],
+      default: 'not-started'
+    },
+    updatedAt: Date,
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  },
   isActive: {
     type: Boolean,
     default: true

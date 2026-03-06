@@ -3,6 +3,7 @@ const User = require('../models/User'); // User model stays global
 const OfferTemplate = require('../models/OfferTemplate'); // Global model
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
+const employeeCreationService = require('../services/employeeCreationService');
 
 // Configure email transporter using existing email config
 const createTransporter = () => {
@@ -33,7 +34,67 @@ const createTransporter = () => {
 };
 
 const { generatePassword, generateEmployeeId } = require('../utils/passwordGenerator');
-const { sendOnboardingEmail, sendHRNotification, sendOfferEmail, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail } = require('../services/emailService');
+const { sendOnboardingEmail, sendHRNotification, sendOfferEmail, sendDocumentRequestEmail, sendITNotification, sendFacilitiesNotification, sendOfferExtendedEmail, sendOfferLetterWithDocumentLink } = require('../services/emailService');
+
+/**
+ * Helper function to update candidate's applicationHistory when onboarding is created/updated
+ */
+const updateCandidateApplicationHistory = async (candidate, onboarding, Candidate) => {
+  try {
+    if (!candidate || !onboarding) {
+      console.warn('⚠️ Cannot update applicationHistory: missing candidate or onboarding');
+      return;
+    }
+
+    // Reload candidate to ensure we have the latest data
+    const updatedCandidate = await Candidate.findById(candidate._id);
+    if (!updatedCandidate) {
+      console.warn('⚠️ Candidate not found for applicationHistory update');
+      return;
+    }
+
+    // Initialize applicationHistory if it doesn't exist
+    updatedCandidate.applicationHistory = updatedCandidate.applicationHistory || [];
+    
+    // Find the application entry for this job
+    const jobId = onboarding.jobId || candidate.appliedFor?._id || candidate.appliedFor;
+    const applicationEntry = updatedCandidate.applicationHistory.find(
+      entry => entry.jobId && entry.jobId.toString() === jobId?.toString()
+    );
+
+    if (applicationEntry) {
+      // Update existing entry
+      applicationEntry.stage = 'sent-to-onboarding';
+      applicationEntry.status = 'active';
+      applicationEntry.outcome = 'ongoing'; // Fixed: 'onboarding' is not a valid enum value
+      applicationEntry.onboardingRecord = onboarding._id;
+    } else {
+      // Add new entry
+      updatedCandidate.applicationHistory.push({
+        jobId: jobId,
+        jobTitle: onboarding.position || candidate.appliedFor?.title || 'Position',
+        appliedDate: candidate.createdAt || new Date(),
+        stage: 'sent-to-onboarding',
+        status: 'active',
+        outcome: 'ongoing', // Fixed: 'onboarding' is not a valid enum value
+        onboardingRecord: onboarding._id,
+        interviews: []
+      });
+    }
+
+    // Also update the stage
+    if (updatedCandidate.stage !== 'sent-to-onboarding') {
+      updatedCandidate.stage = 'sent-to-onboarding';
+    }
+
+    await updatedCandidate.save();
+    console.log('✅ Updated candidate applicationHistory');
+  } catch (error) {
+    console.error('⚠️ Error updating applicationHistory:', error.message);
+    console.error('Error stack:', error.stack);
+    // Don't throw - this is a non-critical update
+  }
+};
 
 /**
  * Send candidate to onboarding - Phase 2 Implementation
@@ -50,8 +111,7 @@ exports.sendToOnboarding = async (req, res) => {
 
     // Find and validate the candidate application
     const candidate = await Candidate.findById(applicationId)
-      .populate('appliedFor')
-      .populate('appliedFor.department');
+      .populate('appliedFor');
 
     if (!candidate) {
       return res.status(404).json({
@@ -60,8 +120,11 @@ exports.sendToOnboarding = async (req, res) => {
       });
     }
 
+    console.log(`📋 Processing sendToOnboarding for: ${candidate.firstName} ${candidate.lastName}`);
+    console.log(`   Stage: ${candidate.stage}, AppliedFor: ${candidate.appliedFor?._id}, Department: ${candidate.appliedFor?.department}`);
+
     // Validate candidate stage allows transition to onboarding
-    const allowedStages = ['offer-accepted', 'interview-completed'];
+    const allowedStages = ['offer-accepted', 'interview-completed', 'offer-extended', 'shortlisted'];
     if (!allowedStages.includes(candidate.stage)) {
       return res.status(400).json({
         success: false,
@@ -69,64 +132,153 @@ exports.sendToOnboarding = async (req, res) => {
       });
     }
 
-    // Check if already sent to onboarding
-    if (candidate.stage === 'sent-to-onboarding' || candidate.onboardingRecord) {
+    // Check if already sent to onboarding - allow re-initialization if not completed
+    const existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+    console.log(`🔍 Checking existing onboarding for ${candidate.email}:`, {
+      exists: !!existingOnboarding,
+      status: existingOnboarding?.status,
+      isCompleted: existingOnboarding?.status === 'completed'
+    });
+
+    if (existingOnboarding && existingOnboarding.status === 'completed') {
       return res.status(400).json({
         success: false,
-        message: 'Candidate has already been sent to onboarding',
-        data: { onboardingRecord: candidate.onboardingRecord }
+        message: 'Candidate has already completed onboarding'
       });
     }
 
     // Validate required data
-    if (!candidate.appliedFor || !candidate.appliedFor.department) {
+    if (!candidate.appliedFor) {
       return res.status(400).json({
         success: false,
-        message: 'Job posting or department information is missing'
+        message: 'Job posting information is missing'
       });
     }
 
-    // Create onboarding record
-    const onboardingData = {
-      applicationId: candidate._id,
-      jobId: candidate.appliedFor._id,
-      candidateName: `${candidate.firstName} ${candidate.lastName}`,
-      candidateEmail: candidate.email,
-      candidatePhone: candidate.phone,
-      position: candidate.appliedFor.title,
-      department: candidate.appliedFor.department._id,
-      status: 'preboarding',
-      createdBy: hrUserId,
-      assignedHR: hrUserId,
-      
-      // Initialize required documents checklist
-      requiredDocuments: [
-        { type: 'aadhar', isRequired: true },
-        { type: 'pan', isRequired: true },
-        { type: 'bank_details', isRequired: true },
-        { type: 'address_proof', isRequired: true },
-        { type: 'education_certificates', isRequired: true },
-        { type: 'photo', isRequired: true }
-      ],
+    if (!candidate.appliedFor.department) {
+      return res.status(400).json({
+        success: false,
+        message: 'Department information is missing from job posting'
+      });
+    }
 
-      // Add initial audit trail entry
-      auditTrail: [{
-        action: 'sent_to_onboarding',
-        description: 'Candidate sent to onboarding process',
+    // If existing onboarding exists but not completed, update it
+    let onboarding;
+    if (existingOnboarding) {
+      console.log(`♻️ Updating existing onboarding record for ${candidate.email}`);
+      existingOnboarding.applicationId = candidate._id;
+      existingOnboarding.jobId = candidate.appliedFor._id;
+      existingOnboarding.candidateName = `${candidate.firstName} ${candidate.lastName}`;
+      existingOnboarding.candidatePhone = candidate.phone;
+      existingOnboarding.position = candidate.appliedFor.title;
+      existingOnboarding.department = candidate.appliedFor.department; // This is already an ObjectId
+      existingOnboarding.status = 'preboarding';
+      existingOnboarding.createdBy = hrUserId;
+      existingOnboarding.assignedHR = hrUserId;
+      
+      if (!existingOnboarding.auditTrail) existingOnboarding.auditTrail = [];
+      existingOnboarding.auditTrail.push({
+        action: 'reinitialized',
+        description: 'Onboarding record reinitialized',
         performedBy: hrUserId,
-        previousStatus: candidate.stage,
+        previousStatus: existingOnboarding.status,
         newStatus: 'preboarding',
         metadata: { notes },
         timestamp: new Date()
-      }],
+      });
+      
+      await existingOnboarding.save();
+      onboarding = existingOnboarding;
+      
+      // Update candidate's applicationHistory
+      await updateCandidateApplicationHistory(candidate, onboarding, Candidate);
+      
+      // Log HR activity
+      console.log(`📝 Attempting to log HR activity for send to onboarding (existing record)`);
 
-      // Set SLA expectations (default 7 days)
-      sla: {
-        expectedCompletionDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      }
-    };
+      const { logSendToOnboarding } = require('../services/hrActivityLogService');
+      await logSendToOnboarding(req.tenant.connection, candidate, onboarding, req);
+    } else {
+      // Create new onboarding record
+      const onboardingData = {
+        applicationId: candidate._id,
+        jobId: candidate.appliedFor._id,
+        candidateName: `${candidate.firstName} ${candidate.lastName}`,
+        candidateEmail: candidate.email,
+        candidatePhone: candidate.phone,
+        position: candidate.appliedFor.title,
+        department: candidate.appliedFor.department, // This is already an ObjectId, not ._id
+        status: 'preboarding',
+        createdBy: hrUserId,
+        assignedHR: hrUserId,
+        
+        // Initialize required documents checklist
+        requiredDocuments: [
+          { type: 'aadhar', isRequired: true },
+          { type: 'pan', isRequired: true },
+          { type: 'bank_details', isRequired: true },
+          { type: 'address_proof', isRequired: true },
+          { type: 'education_certificates', isRequired: true },
+          { type: 'photo', isRequired: true }
+        ],
 
-    const onboarding = await Onboarding.create(onboardingData);
+        // Add initial audit trail entry
+        auditTrail: [{
+          action: 'sent_to_onboarding',
+          description: 'Candidate sent to onboarding process',
+          performedBy: hrUserId,
+          previousStatus: candidate.stage,
+          newStatus: 'preboarding',
+          metadata: { notes },
+          timestamp: new Date()
+        }],
+
+        // Set SLA expectations (default 7 days)
+        sla: {
+          expectedCompletionDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        }
+      };
+
+      onboarding = await Onboarding.create(onboardingData);
+      console.log(`✅ Created new onboarding record for ${candidate.email}: ${onboarding.onboardingId}`);
+      
+      // Update candidate's applicationHistory
+      await updateCandidateApplicationHistory(candidate, onboarding, Candidate);
+      
+      // Log HR activity
+      console.log(`📝 Attempting to log HR activity for send to onboarding (new record)`);
+
+      const { logSendToOnboarding } = require('../services/hrActivityLogService');
+      await logSendToOnboarding(req.tenant.connection, candidate, onboarding, req);
+    }
+
+    // Auto-generate document upload token
+    const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
+    let uploadUrl = null;
+    
+    try {
+      const token = require('crypto').randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30); // 30 days validity
+
+      const uploadToken = await CandidateDocumentUploadToken.create({
+        onboardingId: onboarding._id,
+        candidateId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        candidateEmail: onboarding.candidateEmail,
+        position: onboarding.position,
+        token,
+        expiresAt,
+        generatedBy: hrUserId
+      });
+
+      const tenantId = req.tenant.companyId || req.tenant.clientId;
+      // Hard-coded public upload documents base URL as requested
+      uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+      console.log(`✅ Upload token generated for ${onboarding.candidateName}: ${uploadUrl}`);
+    } catch (tokenError) {
+      console.error('Error generating upload token:', tokenError);
+    }
 
     // Update candidate record
     const updatedCandidate = await Candidate.findByIdAndUpdate(applicationId, {
@@ -144,12 +296,21 @@ exports.sendToOnboarding = async (req, res) => {
       }
     }, { new: true });
 
-    // Send onboarding email with candidate ID and document submission link
-    try {
-      await sendOnboardingDocumentEmail(updatedCandidate, onboarding);
-    } catch (emailError) {
-      console.error('Error sending onboarding email:', emailError);
-      // Don't fail the whole operation if email fails
+    // Send offer letter with document upload link
+    if (uploadUrl) {
+      try {
+        await sendOfferLetterWithDocumentLink({
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          joiningDate: onboarding.joiningDate,
+          uploadUrl,
+          companyName: req.tenant?.companyName || 'Our Company'
+        });
+        console.log(`📧 Offer letter with document link sent to ${onboarding.candidateEmail}`);
+      } catch (emailError) {
+        console.error('Error sending offer letter email:', emailError);
+      }
     }
 
     // Populate the created onboarding record for response
@@ -185,6 +346,10 @@ exports.sendToOnboarding = async (req, res) => {
 
 exports.getOnboardingList = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     // Get tenant-specific models
     const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     
@@ -214,6 +379,12 @@ exports.getOnboardingList = async (req, res) => {
       ];
     }
 
+    console.log('📋 Fetching onboarding list with query:', JSON.stringify(query));
+    
+    // First check total count without filters
+    const totalCount = await Onboarding.countDocuments({});
+    console.log(`   Total onboarding records in DB: ${totalCount}`);
+    
     const onboardingList = await Onboarding.find(query)
       .populate('applicationId', 'firstName lastName email candidateCode')
       .populate('jobId', 'title')
@@ -222,6 +393,11 @@ exports.getOnboardingList = async (req, res) => {
       .populate('assignedHR', 'firstName lastName email')
       .populate('tasks.assignedTo', 'firstName lastName')
       .sort({ createdAt: -1 });
+    
+    console.log(`   Found ${onboardingList.length} records matching query`);
+    if (onboardingList.length > 0) {
+      console.log(`   Sample record: ${onboardingList[0].candidateName} - Status: ${onboardingList[0].status}`);
+    }
 
     // Calculate summary statistics
     const summary = {
@@ -429,7 +605,9 @@ exports.updateOnboardingStatus = async (req, res) => {
 
     // Define allowed state transitions
     const allowedTransitions = {
-      'preboarding': ['offer_sent', 'rejected'],
+      'preboarding': ['pending_approval', 'offer_sent', 'rejected'], // Can request approval or send offer (if approved)
+      'pending_approval': ['preboarding', 'approval_rejected'], // Admin can approve (returns to preboarding) or reject
+      'approval_rejected': ['pending_approval', 'rejected'], // HR can re-request or reject candidate
       'offer_sent': ['offer_accepted', 'rejected'],
       'offer_accepted': ['docs_pending', 'rejected'],
       'docs_pending': ['docs_verified', 'rejected'],
@@ -471,6 +649,15 @@ exports.updateOnboardingStatus = async (req, res) => {
     });
 
     await onboarding.save();
+
+    // Log HR activity
+    try {
+      const { logOnboardingStatusChanged } = require('../services/hrActivityLogService');
+      await logOnboardingStatusChanged(req.tenant.connection, onboarding, previousStatus, status, req);
+      console.log(`📝 HR activity logged for onboarding status change: ${onboarding.candidateName} - ${previousStatus} → ${status}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for onboarding status change:', logError.message);
+    }
 
     res.status(200).json({
       success: true,
@@ -523,6 +710,36 @@ exports.sendOffer = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Onboarding record has no status'
+      });
+    }
+
+    // Check approval status - MANDATORY: Cannot send offer without admin approval
+    // This ensures the approval workflow is not skippable
+    if (onboarding.approvalStatus?.status !== 'approved') {
+      // Check if approval is pending
+      if (onboarding.approvalStatus?.status === 'pending') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot send offer. Approval is pending from admin. Please wait for approval.',
+          code: 'APPROVAL_PENDING'
+        });
+      }
+      
+      // Check if approval was rejected
+      if (onboarding.approvalStatus?.status === 'rejected') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot send offer. Previous approval request was rejected. Please re-request approval.',
+          code: 'APPROVAL_REJECTED',
+          rejectionReason: onboarding.approvalStatus?.rejectionReason
+        });
+      }
+      
+      // No approval requested yet
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot send offer without admin approval. Please request approval first.',
+        code: 'APPROVAL_REQUIRED'
       });
     }
 
@@ -616,7 +833,7 @@ exports.sendOffer = async (req, res) => {
 
     // Get candidate details
     const candidate = await Candidate.findById(onboarding.candidateId);
-    
+
     // Send offer email to candidate
     try {
       await sendOfferExtendedEmail({
@@ -630,6 +847,17 @@ exports.sendOffer = async (req, res) => {
     } catch (emailError) {
       console.error('⚠️ Failed to send offer email:', emailError.message);
       // Don't fail the request if email fails
+    }
+
+    // Log HR activity
+    try {
+
+      const { logOfferSent } = require('../services/hrActivityLogService');
+      await logOfferSent(req.tenant.connection, onboarding, req);
+      console.log(`📝 HR activity logged for offer sent to ${candidate.firstName} ${candidate.lastName}`);
+    } catch (logError) {
+      console.error('⚠️ Failed to log HR activity for offer sent:', logError.message);
+      // Don't fail the request if logging fails
     }
 
     res.status(200).json({
@@ -769,10 +997,10 @@ exports.setJoiningDateAndNotify = async (req, res) => {
 
     // Validate joining date
     const joinDate = new Date(joiningDate);
-    if (joinDate <= new Date()) {
+    if (isNaN(joinDate.getTime())) {
       return res.status(400).json({
         success: false,
-        message: 'Joining date must be in the future'
+        message: 'Invalid joining date'
       });
     }
 
@@ -938,6 +1166,8 @@ exports.verifyDocument = async (req, res) => {
       });
     }
 
+    // Get tenant-specific Onboarding model
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
     const onboarding = await Onboarding.findById(id);
     if (!onboarding) {
       return res.status(404).json({
@@ -999,8 +1229,20 @@ exports.verifyDocument = async (req, res) => {
 
     // Send notification email to candidate if document was rejected
     if (action === 'reject') {
-      // TODO: Send document rejection email
-      // await sendDocumentRejectionEmail(onboarding, document, notes);
+      try {
+        const { sendDocumentRejectionEmail } = require('../services/emailService');
+        await sendDocumentRejectionEmail({
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          documentName: document.name || document.type,
+          rejectionReason: notes,
+          uploadUrl: document.uploadUrl || `http://3.108.172.119/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
+          companyName: process.env.COMPANY_NAME || 'Our Company'
+        });
+        console.log(`✅ Document rejection email sent to ${onboarding.candidateEmail}`);
+      } catch (emailError) {
+        console.error('❌ Failed to send document rejection email:', emailError);
+      }
     }
 
     res.status(200).json({
@@ -1160,270 +1402,87 @@ exports.completeOnboardingProcess = async (req, res) => {
   try {
     const { id } = req.params;
     const { companyName } = req.body;
-    const hrUserId = req.user.id;
+    const tenantConnection = req.tenant.connection;
 
-    // Find onboarding record with all related data
-    const onboarding = await Onboarding.findById(id)
-      .populate('department')
-      .populate('applicationId');
 
-    if (!onboarding) {
-      return res.status(404).json({
-        success: false,
-        message: 'Onboarding record not found'
-      });
-    }
+    // Validate onboarding completion readiness
+    const validation = await employeeCreationService.validateOnboardingCompletion(id, tenantConnection);
 
-    // Validate onboarding is ready for completion
-    if (onboarding.status !== 'ready_for_joining') {
+    
+    if (!validation.valid) {
       return res.status(400).json({
         success: false,
-        message: `Cannot complete onboarding. Current status: ${onboarding.status}. Required: ready_for_joining`
+        message: 'Onboarding validation failed',
+        errors: validation.errors,
+        warnings: validation.warnings
       });
     }
 
-    // Check if already completed
-    if (onboarding.status === 'completed' || onboarding.candidateId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Onboarding has already been completed',
-        data: {
-          employeeId: onboarding.candidateId,
-          completedAt: onboarding.completedAt
-        }
-      });
-    }
+    // Use the employee creation service to complete onboarding
 
-    // Validate all required documents are verified
-    const allRequiredVerified = onboarding.requiredDocuments
-      .filter(doc => doc.isRequired)
-      .every(doc => doc.verified);
-
-    if (!allRequiredVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'All required documents must be verified before completing onboarding'
-      });
-    }
-
-    // Validate required fields
-    if (!onboarding.candidateEmail || !onboarding.candidateName) {
-      return res.status(400).json({
-        success: false,
-        message: 'Candidate email and name are required'
-      });
-    }
-
-    if (!onboarding.department || !onboarding.joiningDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'Department and joining date are required'
-      });
-    }
-
-    // Check if user already exists with this email
-    const existingUser = await User.findOne({ email: onboarding.candidateEmail });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'A user account already exists with this email address'
-      });
-    }
-
-    // Check if employee already exists with this email
-    const existingEmployee = await Employee.findOne({ email: onboarding.candidateEmail });
-    if (existingEmployee) {
-      return res.status(400).json({
-        success: false,
-        message: 'An employee record already exists with this email address'
-      });
-    }
-
-    // Split candidate name into first and last name
-    const nameParts = onboarding.candidateName.trim().split(' ');
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(' ') || firstName;
-
-    // Generate secure random password
-    const tempPassword = generatePassword(12, {
-      includeUppercase: true,
-      includeLowercase: true,
-      includeNumbers: true,
-      includeSymbols: true
-    });
-
-    // Prepare employee data from onboarding and offer details
-    const employeeData = {
-      firstName,
-      lastName,
-      email: onboarding.candidateEmail,
-      phone: onboarding.candidatePhone || 'N/A',
-      department: onboarding.department._id,
-      designation: onboarding.offer?.offeredDesignation || onboarding.position,
-      joiningDate: onboarding.joiningDate,
-      employmentType: 'full-time',
-      status: 'active'
-    };
-
-    // Add salary information if available from offer
-    if (onboarding.offer?.salary) {
-      employeeData.salary = onboarding.offer.salary;
-    }
-
-    // Create employee record
-    const employee = await Employee.create(employeeData);
-
-    console.log(`✅ Employee created: ${employee.employeeCode} - ${employee.firstName} ${employee.lastName}`);
-
-    // Create user account with temporary password
-    const user = await User.create({
-      email: onboarding.candidateEmail,
-      password: tempPassword, // Will be hashed by pre-save hook
-      role: 'employee',
-      employeeId: employee._id,
-      isActive: true,
-      isFirstLogin: true,
-      mustChangePassword: true
-    });
-
-    console.log(`✅ User account created for: ${user.email}`);
-
-    // Send onboarding completion email with credentials
-    let emailSent = false;
-    let emailError = null;
-
-    try {
-      const emailResult = await sendOnboardingEmail({
-        employeeName: `${firstName} ${lastName}`,
-        employeeEmail: onboarding.candidateEmail,
-        employeeId: employee.employeeCode,
-        tempPassword: tempPassword,
-        companyName: companyName || 'Our Company',
-        joiningDate: onboarding.joiningDate,
-        designation: employee.designation,
-        department: onboarding.department.name
-      });
-
-      emailSent = emailResult.success;
-      console.log(`✅ Welcome email sent to: ${onboarding.candidateEmail}`);
-
-      // Send HR notification (non-blocking)
-      sendHRNotification({
-        employeeName: `${firstName} ${lastName}`,
-        employeeId: employee.employeeCode,
-        department: onboarding.department.name,
-        designation: employee.designation,
-        joiningDate: onboarding.joiningDate
-      }).catch(err => {
-        console.error('HR notification failed:', err.message);
-      });
-
-    } catch (error) {
-      console.error('❌ Failed to send welcome email:', error.message);
-      emailError = error.message;
-      // Don't fail the entire process if email fails
-    }
-
-    // Update onboarding record
-    onboarding.candidateId = employee._id;
-    onboarding.status = 'completed';
-    onboarding.completedAt = new Date();
-    onboarding.completedBy = hrUserId;
-    onboarding.actualJoiningDate = new Date(); // Assuming they join on completion
-
-    // Update SLA completion
-    onboarding.sla.actualCompletionDate = new Date();
-
-    // Add completion audit trail
-    onboarding.auditTrail.push({
-      action: 'onboarding_completed',
-      description: 'Onboarding process completed and employee account created',
-      performedBy: hrUserId,
-      previousStatus: 'ready_for_joining',
-      newStatus: 'completed',
-      metadata: { 
-        employeeId: employee._id,
-        employeeCode: employee.employeeCode,
-        emailSent
-      },
-      timestamp: new Date()
-    });
-
-    await onboarding.save();
-
-    // Update candidate status if linked
-    if (onboarding.applicationId) {
-      try {
-        await Candidate.findByIdAndUpdate(onboarding.applicationId, {
-          status: 'hired',
-          stage: 'joined',
-          $push: {
-            timeline: {
-              action: 'joined_company',
-              description: 'Successfully completed onboarding and joined as employee',
-              performedBy: hrUserId,
-              metadata: { 
-                employeeId: employee._id,
-                employeeCode: employee.employeeCode,
-                onboardingId: onboarding._id
-              }
-            }
-          }
-        });
-        console.log(`✅ Candidate status updated to 'joined'`);
-      } catch (error) {
-        console.error('Failed to update candidate status:', error.message);
+    const result = await employeeCreationService.completeOnboardingAndCreateEmployee(
+      id,
+      tenantConnection,
+      {
+        // Any additional employee data from request
+        createdBy: req.user._id
       }
-    }
+    );
 
-    // Prepare response
-    const response = {
+    console.log(`✅ Onboarding completed successfully for ${result.employee.email}`);
+
+    // Log HR activity
+    const { logOnboardingCompleted } = require('../services/hrActivityLogService');
+    await logOnboardingCompleted(tenantConnection, result.onboarding, result.employee, req);
+
+    return res.status(200).json({
       success: true,
-      message: 'Onboarding completed successfully! Employee account created and welcome email sent.',
+      message: 'Onboarding completed successfully. Employee and user accounts created.',
       data: {
-        onboarding: {
-          id: onboarding._id,
-          onboardingId: onboarding.onboardingId,
-          status: onboarding.status,
-          completedAt: onboarding.completedAt
-        },
-        employee: {
-          id: employee._id,
-          employeeCode: employee.employeeCode,
-          name: `${employee.firstName} ${employee.lastName}`,
-          email: employee.email,
-          department: onboarding.department.name,
-          designation: employee.designation,
-          joiningDate: employee.joiningDate
-        },
-        user: {
-          id: user._id,
-          email: user.email,
-          role: user.role,
-          mustChangePassword: user.mustChangePassword
-        },
-        credentials: {
-          sent: emailSent,
-          sentAt: emailSent ? new Date() : null
-        }
+        employeeCode: result.employeeCode,
+        employeeId: result.employee._id,
+        email: result.employee.email,
+        name: `${result.employee.firstName} ${result.employee.lastName}`,
+        joiningDate: result.employee.joiningDate,
+        designation: result.employee.designation,
+        userAccount: result.userAccount,
+        tempPassword: result.tempPassword, // Only shown once for admin
+        onboardingId: result.onboarding._id,
+        completedAt: result.onboarding.completedAt
       }
-    };
-
-    // Add warning if email failed
-    if (!emailSent && emailError) {
-      response.warning = `Employee account created successfully, but failed to send welcome email: ${emailError}`;
-      response.data.tempPassword = tempPassword; // Include in response if email failed
-    }
-
-    res.status(201).json(response);
-
+    });
   } catch (error) {
     console.error('❌ Error completing onboarding:', error);
+    console.error('Error stack:', error.stack);
     
-    res.status(500).json({
+    // Provide more detailed error messages
+    let errorMessage = 'Failed to complete onboarding process';
+    let statusCode = 500;
+    
+    if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    // Handle specific error types
+    if (error.name === 'ValidationError') {
+      statusCode = 400;
+      errorMessage = `Validation error: ${Object.values(error.errors).map(e => e.message).join(', ')}`;
+    } else if (error.code === 11000) {
+      statusCode = 409;
+      errorMessage = 'Employee with this email or employee code already exists';
+    } else if (error.message.includes('not found')) {
+      statusCode = 404;
+      errorMessage = error.message;
+    } else if (error.message.includes('required') || error.message.includes('must be')) {
+      statusCode = 400;
+      errorMessage = error.message;
+    }
+    
+    return res.status(statusCode).json({
       success: false,
-      message: 'Failed to complete onboarding process',
-      error: error.message
+      message: errorMessage,
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
@@ -1524,3 +1583,494 @@ async function sendOnboardingDocumentEmail(candidate, onboarding) {
     throw error;
   }
 }
+
+/**
+ * Request documents from candidate - generates/reuses upload token and emails link
+ * @route POST /api/onboarding/:id/request-documents
+ * @access Private (HR/Admin only)
+ */
+exports.requestDocuments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
+    const { sendDocumentRequestEmail } = require('../services/emailService');
+
+    const onboarding = await Onboarding.findById(id);
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Check for existing active token
+    let uploadToken = await CandidateDocumentUploadToken.findOne({
+      onboardingId: onboarding._id,
+      isActive: true,
+      revokedAt: null
+    });
+
+    let uploadUrl;
+    const tenantId = req.tenant.companyId || req.tenant.clientId;
+
+      if (uploadToken) {
+        // Reuse existing token
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+        console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
+      } else {
+        // Generate new token
+        const token = require('crypto').randomBytes(32).toString('hex');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30); // 30 days validity
+
+        uploadToken = await CandidateDocumentUploadToken.create({
+          onboardingId: onboarding._id,
+          candidateId: onboarding.onboardingId,
+          candidateName: onboarding.candidateName,
+          candidateEmail: onboarding.candidateEmail,
+          position: onboarding.position,
+          token,
+          expiresAt,
+          generatedBy: req.user._id
+        });
+
+        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+        console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
+      }
+
+    // Send email with upload link
+    try {
+      await sendDocumentRequestEmail({
+        candidateName: onboarding.candidateName,
+        candidateEmail: onboarding.candidateEmail,
+        position: onboarding.position,
+        uploadUrl,
+        companyName: req.tenant?.companyName || 'Our Company'
+      });
+
+      // Add audit trail
+      onboarding.auditTrail.push({
+        action: 'document_request_sent',
+        description: `Document upload link sent to candidate via email`,
+        performedBy: req.user._id,
+        metadata: { uploadUrl, tokenId: uploadToken._id },
+        timestamp: new Date()
+      });
+
+      await onboarding.save();
+
+      console.log(`📧 Document request email sent to ${onboarding.candidateEmail}`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Document request email sent successfully',
+        data: {
+          uploadUrl,
+          sentTo: onboarding.candidateEmail,
+          tokenId: uploadToken._id
+        }
+      });
+    } catch (emailError) {
+      console.error('Error sending document request email:', emailError);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send document request email',
+        error: emailError.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Error requesting documents:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to request documents',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Request approval from admin before sending offer
+ * @route POST /api/onboarding/:id/request-approval
+ * @access Private (HR only)
+ */
+exports.requestOnboardingApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, offerDetails } = req.body;
+    const hrUserId = req.user.id || req.user._id;
+    const tenantConnection = req.tenant.connection;
+    
+    const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+    const Candidate = getTenantModel(tenantConnection, 'Candidate');
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+    const ApprovalInstanceSchema = require('../models/tenant/ApprovalInstance');
+    const ApprovalInstance = tenantConnection.model('ApprovalInstance', ApprovalInstanceSchema);
+    
+    // Get onboarding record with full details
+    const onboarding = await Onboarding.findById(id)
+      .populate('applicationId')
+      .populate('department', 'name')
+      .populate('jobId', 'title')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('assignedHR', 'firstName lastName email');
+
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Validate status - can only request approval in preboarding or after rejection
+    const allowedStatuses = ['preboarding', 'approval_rejected'];
+    if (!allowedStatuses.includes(onboarding.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot request approval in current status: ${onboarding.status}. Approval can only be requested in preboarding or after rejection.`
+      });
+    }
+
+    // Check if approval is already pending
+    if (onboarding.approvalStatus?.status === 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'An approval request is already pending for this candidate'
+      });
+    }
+
+    // Get HR user details
+    const hrUser = await TenantUser.findById(hrUserId).select('firstName lastName email role');
+    if (!hrUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'HR user not found'
+      });
+    }
+
+    // Get candidate details
+    const candidate = await Candidate.findById(onboarding.applicationId)
+      .populate('appliedFor', 'title department');
+
+    // Find company admin to be the approver
+    const companyAdmin = await TenantUser.findOne({ 
+      role: 'company_admin', 
+      isActive: true 
+    }).select('firstName lastName email');
+
+    if (!companyAdmin) {
+      return res.status(400).json({
+        success: false,
+        message: 'No company admin found to approve this request. Please contact system administrator.'
+      });
+    }
+
+    // Create approval instance with comprehensive metadata
+    const approvalInstance = await ApprovalInstance.create({
+      requestType: 'onboarding_approval',
+      requestId: onboarding._id,
+      requestedBy: hrUserId,
+      currentLevel: 1,
+      totalLevels: 1,
+      status: 'pending',
+      approvalChain: [{
+        level: 1,
+        approverType: 'company_admin',
+        approverId: companyAdmin._id,
+        status: 'pending',
+        sla: {
+          dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+          escalationDate: new Date(Date.now() + 36 * 60 * 60 * 1000),
+          isEscalated: false
+        }
+      }],
+      metadata: {
+        priority: 'high',
+        // Candidate details
+        candidateName: onboarding.candidateName,
+        candidateEmail: onboarding.candidateEmail,
+        candidatePhone: onboarding.candidatePhone,
+        candidateCode: candidate?.candidateCode || 'N/A',
+        // Job details
+        position: onboarding.position,
+        department: onboarding.department?.name || 'N/A',
+        jobTitle: onboarding.jobId?.title || onboarding.position,
+        // HR details
+        requestedByName: `${hrUser.firstName} ${hrUser.lastName}`,
+        requestedByEmail: hrUser.email,
+        requestedByRole: hrUser.role,
+        // Offer details (if provided)
+        offerDetails: offerDetails || {},
+        // Additional notes
+        notes: notes || '',
+        // Onboarding ID for reference
+        onboardingId: onboarding.onboardingId
+      },
+      slaStatus: {
+        startDate: new Date(),
+        expectedCompletionDate: new Date(Date.now() + 24 * 60 * 60 * 1000)
+      },
+      history: [{
+        action: 'CREATED',
+        performedBy: hrUserId,
+        timestamp: new Date(),
+        details: { 
+          notes: notes || 'Onboarding approval request created',
+          candidateName: onboarding.candidateName,
+          position: onboarding.position
+        }
+      }]
+    });
+
+    // Update onboarding record
+    onboarding.status = 'pending_approval';
+    onboarding.approvalStatus = {
+      status: 'pending',
+      approvalInstanceId: approvalInstance._id,
+      requestedBy: hrUserId,
+      requestedAt: new Date(),
+      canReRequest: false
+    };
+
+    // Add audit trail
+    onboarding.auditTrail.push({
+      action: 'approval_requested',
+      description: `Approval requested from admin by ${hrUser.firstName} ${hrUser.lastName}`,
+      performedBy: hrUserId,
+      previousStatus: onboarding.status === 'approval_rejected' ? 'approval_rejected' : 'preboarding',
+      newStatus: 'pending_approval',
+      metadata: { 
+        approvalInstanceId: approvalInstance._id,
+        approverEmail: companyAdmin.email,
+        notes 
+      },
+      timestamp: new Date()
+    });
+
+    await onboarding.save();
+
+    console.log(`✅ Onboarding approval requested for ${onboarding.candidateName} by ${hrUser.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Approval request sent to admin successfully',
+      data: {
+        onboardingId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        approvalInstanceId: approvalInstance._id,
+        status: 'pending',
+        approverEmail: companyAdmin.email,
+        requestedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error requesting onboarding approval:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to request approval',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get approval status for an onboarding record
+ * @route GET /api/onboarding/:id/approval-status
+ * @access Private (HR/Admin)
+ */
+exports.getOnboardingApprovalStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tenantConnection = req.tenant.connection;
+    
+    const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+    const ApprovalInstanceSchema = require('../models/tenant/ApprovalInstance');
+    const ApprovalInstance = tenantConnection.model('ApprovalInstance', ApprovalInstanceSchema);
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    const onboarding = await Onboarding.findById(id);
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Get approval instance if exists
+    let approvalInstance = null;
+    if (onboarding.approvalStatus?.approvalInstanceId) {
+      approvalInstance = await ApprovalInstance.findById(onboarding.approvalStatus.approvalInstanceId)
+        .populate('requestedBy', 'firstName lastName email')
+        .populate('approvalChain.approverId', 'firstName lastName email');
+    }
+
+    // Get history of approval requests for this onboarding
+    const approvalHistory = await ApprovalInstance.find({
+      requestType: 'onboarding_approval',
+      requestId: onboarding._id
+    })
+    .populate('requestedBy', 'firstName lastName email')
+    .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        onboardingId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        currentStatus: onboarding.status,
+        approvalStatus: onboarding.approvalStatus || { status: 'not_requested' },
+        currentApprovalInstance: approvalInstance,
+        approvalHistory: approvalHistory,
+        canRequestApproval: ['preboarding', 'approval_rejected'].includes(onboarding.status) && 
+                           onboarding.approvalStatus?.status !== 'pending',
+        canSendOffer: onboarding.approvalStatus?.status === 'approved'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting approval status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get approval status',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Process onboarding approval (Admin action)
+ * @route PUT /api/onboarding/:id/process-approval
+ * @access Private (Admin only)
+ */
+exports.processOnboardingApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, comments } = req.body; // action: 'approve' or 'reject'
+    const adminUserId = req.user.id || req.user._id;
+    const tenantConnection = req.tenant.connection;
+    
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be either "approve" or "reject"'
+      });
+    }
+
+    const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
+    const ApprovalInstanceSchema = require('../models/tenant/ApprovalInstance');
+    const ApprovalInstance = tenantConnection.model('ApprovalInstance', ApprovalInstanceSchema);
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const TenantUser = tenantConnection.model('User', TenantUserSchema);
+
+    const onboarding = await Onboarding.findById(id);
+    if (!onboarding) {
+      return res.status(404).json({
+        success: false,
+        message: 'Onboarding record not found'
+      });
+    }
+
+    // Validate status
+    if (onboarding.status !== 'pending_approval') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot process approval. Current status: ${onboarding.status}`
+      });
+    }
+
+    // Get admin user details
+    const adminUser = await TenantUser.findById(adminUserId).select('firstName lastName email role');
+    
+    // Validate admin role
+    if (!adminUser || adminUser.role !== 'company_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only company admin can approve or reject onboarding requests'
+      });
+    }
+
+    // Get and update approval instance
+    const approvalInstance = await ApprovalInstance.findById(onboarding.approvalStatus.approvalInstanceId);
+    if (approvalInstance) {
+      const currentApprover = approvalInstance.getCurrentApprover();
+      if (currentApprover) {
+        currentApprover.status = action === 'approve' ? 'approved' : 'rejected';
+        currentApprover.actionDate = new Date();
+        currentApprover.comments = comments;
+      }
+      approvalInstance.status = action === 'approve' ? 'approved' : 'rejected';
+      approvalInstance.slaStatus.actualCompletionDate = new Date();
+      approvalInstance.history.push({
+        action: action.toUpperCase(),
+        performedBy: adminUserId,
+        timestamp: new Date(),
+        details: { comments, level: 1 }
+      });
+      await approvalInstance.save();
+    }
+
+    // Update onboarding record
+    const previousStatus = onboarding.status;
+    
+    if (action === 'approve') {
+      onboarding.status = 'preboarding'; // Return to preboarding so HR can send offer
+      onboarding.approvalStatus.status = 'approved';
+      onboarding.approvalStatus.approvedBy = adminUserId;
+      onboarding.approvalStatus.approvedAt = new Date();
+      onboarding.approvalStatus.comments = comments;
+      onboarding.approvalStatus.canReRequest = false;
+    } else {
+      onboarding.status = 'approval_rejected';
+      onboarding.approvalStatus.status = 'rejected';
+      onboarding.approvalStatus.rejectedBy = adminUserId;
+      onboarding.approvalStatus.rejectedAt = new Date();
+      onboarding.approvalStatus.rejectionReason = comments;
+      onboarding.approvalStatus.canReRequest = true; // Allow HR to re-request
+    }
+
+    // Add audit trail
+    onboarding.auditTrail.push({
+      action: action === 'approve' ? 'approval_granted' : 'approval_rejected',
+      description: action === 'approve' 
+        ? `Approval granted by ${adminUser.firstName} ${adminUser.lastName}` 
+        : `Approval rejected by ${adminUser.firstName} ${adminUser.lastName}`,
+      performedBy: adminUserId,
+      previousStatus,
+      newStatus: onboarding.status,
+      metadata: { comments },
+      timestamp: new Date()
+    });
+
+    await onboarding.save();
+
+    console.log(`✅ Onboarding ${action === 'approve' ? 'approved' : 'rejected'} for ${onboarding.candidateName} by ${adminUser.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: action === 'approve' 
+        ? 'Onboarding approved. HR can now send offer letter.' 
+        : 'Onboarding rejected. Candidate is on hold.',
+      data: {
+        onboardingId: onboarding.onboardingId,
+        candidateName: onboarding.candidateName,
+        status: onboarding.status,
+        approvalStatus: onboarding.approvalStatus,
+        action,
+        processedBy: `${adminUser.firstName} ${adminUser.lastName}`,
+        processedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing onboarding approval:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process approval',
+      error: error.message
+    });
+  }
+};

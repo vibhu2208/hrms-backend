@@ -1,13 +1,30 @@
-const JobPosting = require('../models/JobPosting');
-const Candidate = require('../models/Candidate');
+const { getTenantModel } = require('../utils/tenantModels');
+const { getTenantConnection } = require('../config/database.config');
 const { getFileUrl } = require('../middlewares/fileUpload');
 
 // @desc    Get all active public job postings
-// @route   GET /api/public/jobs
+// @route   GET /api/public/jobs?companyId=xxx
 // @access  Public
 exports.getPublicJobs = async (req, res) => {
   try {
-    const { department, location, employmentType } = req.query;
+    const { department, location, employmentType, companyId } = req.query;
+    
+    // Default to the tenant from seed script if no companyId provided
+    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    
+    console.log('📋 Fetching public jobs for company:', tenantId);
+    
+    // Get tenant connection
+    const tenantConnection = await getTenantConnection(tenantId);
+    const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+    
+    if (!JobPosting) {
+      console.error('❌ JobPosting model not found for tenant');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'JobPosting model not available' 
+      });
+    }
     
     // Build query for active jobs only
     let query = { status: 'active' };
@@ -16,30 +33,51 @@ exports.getPublicJobs = async (req, res) => {
     if (location) query.location = { $regex: location, $options: 'i' };
     if (employmentType) query.employmentType = employmentType;
 
+    console.log('   Query:', JSON.stringify(query));
+    
+    const totalCount = await JobPosting.countDocuments({});
+    console.log(`   Total jobs in DB: ${totalCount}`);
+
     const jobs = await JobPosting.find(query)
       .populate('department', 'name')
       .select('-postedBy -applications -__v')
       .sort({ postedDate: -1 });
 
+    console.log(`   Found ${jobs.length} active jobs`);
+
+    // Add cache-control headers
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     res.status(200).json({ 
       success: true, 
       count: jobs.length, 
-      data: jobs 
+      data: jobs,
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Get public jobs error:', error);
+    console.error('❌ Get public jobs error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to fetch job postings' 
+      message: 'Failed to fetch job postings',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
 
 // @desc    Get single public job posting
-// @route   GET /api/public/jobs/:id
+// @route   GET /api/public/jobs/:id?companyId=xxx
 // @access  Public
 exports.getPublicJob = async (req, res) => {
   try {
+    const { companyId } = req.query;
+    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    
+    // Get tenant connection
+    const tenantConnection = await getTenantConnection(tenantId);
+    const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+    
     const job = await JobPosting.findOne({ 
       _id: req.params.id, 
       status: 'active' 
@@ -59,7 +97,7 @@ exports.getPublicJob = async (req, res) => {
       data: job 
     });
   } catch (error) {
-    console.error('Get public job error:', error);
+    console.error('❌ Get public job error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to fetch job posting' 
@@ -68,11 +106,35 @@ exports.getPublicJob = async (req, res) => {
 };
 
 // @desc    Submit job application
-// @route   POST /api/public/jobs/:id/apply
+// @route   POST /api/public/jobs/:id/apply?companyId=xxx
 // @access  Public
 exports.submitApplication = async (req, res) => {
   try {
     const jobId = req.params.id;
+    const { companyId } = req.query;
+    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    
+    // Get tenant connection
+    const tenantConnection = await getTenantConnection(tenantId);
+    const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+    const Candidate = getTenantModel(tenantConnection, 'Candidate');
+
+    // Verify models are available
+    if (!JobPosting) {
+      console.error('❌ JobPosting model not found for tenant:', tenantId);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'JobPosting model not available' 
+      });
+    }
+
+    if (!Candidate) {
+      console.error('❌ Candidate model not found for tenant:', tenantId);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Candidate model not available' 
+      });
+    }
 
     // Verify job exists and is active
     console.log('Looking for job with ID:', jobId);
@@ -93,9 +155,39 @@ exports.submitApplication = async (req, res) => {
       });
     }
 
-    // Check if candidate already applied for this job
+    // Helper function to normalize phone
+    const normalizePhone = (phone) => {
+      if (!phone) return null;
+      return phone.replace(/\D/g, '');
+    };
+
+    // Check for global duplicate (any application by this email/phone)
+    const normalizedEmail = req.body.email?.toLowerCase().trim();
+    const normalizedPhone = normalizePhone(req.body.phone);
+    
+    const globalDuplicateQuery = {
+      $or: []
+    };
+
+    if (normalizedEmail) {
+      globalDuplicateQuery.$or.push({ email: normalizedEmail });
+    }
+
+    if (normalizedPhone) {
+      globalDuplicateQuery.$or.push({ phone: normalizedPhone });
+      globalDuplicateQuery.$or.push({ alternatePhone: normalizedPhone });
+    }
+
+    const globalDuplicate = globalDuplicateQuery.$or.length > 0 
+      ? await Candidate.findOne(globalDuplicateQuery)
+          .select('candidateCode firstName lastName email phone appliedFor stage status timeline')
+          .populate('appliedFor', 'title')
+          .sort({ createdAt: -1 })
+      : null;
+
+    // Check if candidate already applied for this specific job
     const existingApplication = await Candidate.findOne({
-      email: req.body.email.toLowerCase(),
+      email: normalizedEmail,
       appliedFor: jobId
     });
 
@@ -104,6 +196,12 @@ exports.submitApplication = async (req, res) => {
         success: false,
         message: 'You have already applied for this position'
       });
+    }
+
+    // If global duplicate found, include info in response (non-blocking)
+    if (globalDuplicate) {
+      // Still allow application, but include duplicate info
+      console.log(`Duplicate candidate found: ${globalDuplicate.email} - Previous applications: ${globalDuplicate.timeline?.length || 0}`);
     }
 
     // Handle resume file if uploaded
@@ -130,8 +228,42 @@ exports.submitApplication = async (req, res) => {
     // Parse JSON fields from FormData
     const parseJsonField = (field) => {
       try {
-        if (!field || field === 'undefined' || field === 'null') return [];
-        return JSON.parse(field);
+        if (!field || field === 'undefined' || field === 'null' || field === '[]') return [];
+        
+        // Handle string representation of arrays
+        if (typeof field === 'string') {
+          // Remove extra quotes if the string is double-quoted
+          const cleanField = field.replace(/^"(.*)"$/, '$1');
+          const parsed = JSON.parse(cleanField);
+          
+          // Special handling for trainingCertificates - convert date strings to Date objects
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].completionDate) {
+            return parsed.map(item => ({
+              ...item,
+              completionDate: item.completionDate ? new Date(item.completionDate) : undefined,
+              expiryDate: item.expiryDate ? new Date(item.expiryDate) : undefined
+            }));
+          }
+          
+          // Special handling for professionalExperience - convert date strings to Date objects
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].company) {
+            return parsed.map(item => ({
+              ...item,
+              startDate: item.startDate ? new Date(item.startDate) : undefined,
+              endDate: item.endDate ? new Date(item.endDate) : undefined,
+              ctc: item.ctc ? parseFloat(item.ctc) : undefined
+            }));
+          }
+          
+          return parsed;
+        }
+        
+        // Handle if it's already an object/array
+        if (typeof field === 'object') {
+          return field;
+        }
+        
+        return [];
       } catch (error) {
         console.error('JSON parse error for field:', field, error);
         return [];
@@ -150,7 +282,32 @@ exports.submitApplication = async (req, res) => {
     });
     console.log('Has file:', !!req.file);
 
-    // Create candidate application with only the required fields first
+    // Parse experience object from FormData
+    let experienceData = { years: 0, months: 0 };
+    if (req.body.experience) {
+      // If experience is sent as a JSON string or object
+      try {
+        if (typeof req.body.experience === 'string') {
+          experienceData = JSON.parse(req.body.experience);
+        } else if (typeof req.body.experience === 'object') {
+          experienceData = req.body.experience;
+        }
+      } catch (error) {
+        console.error('Error parsing experience:', error);
+      }
+    } else {
+      // Try to get experience from individual fields
+      experienceData = {
+        years: parseInt(req.body['experience[years]']) || 0,
+        months: parseInt(req.body['experience[months]']) || 0
+      };
+    }
+
+    // Ensure experience years and months are numbers
+    experienceData.years = parseInt(experienceData.years) || 0;
+    experienceData.months = parseInt(experienceData.months) || 0;
+
+    // Create candidate application with all required fields
     const candidateData = {
       firstName: req.body.firstName,
       lastName: req.body.lastName,
@@ -168,11 +325,9 @@ exports.submitApplication = async (req, res) => {
       skills: parseJsonField(req.body.skills),
       education: parseJsonField(req.body.education),
       professionalExperience: parseJsonField(req.body.professionalExperience),
+      trainingCertificates: parseJsonField(req.body.trainingCertificates),
       // Handle experience object
-      experience: {
-        years: parseInt(req.body['experience[years]']) || 0,
-        months: parseInt(req.body['experience[months]']) || 0
-      },
+      experience: experienceData,
       // Optional fields
       currentCompany: req.body.currentCompany || '',
       currentDesignation: req.body.currentDesignation || '',
@@ -190,10 +345,60 @@ exports.submitApplication = async (req, res) => {
       firstName: candidateData.firstName,
       lastName: candidateData.lastName,
       email: candidateData.email,
-      appliedFor: candidateData.appliedFor
+      appliedFor: candidateData.appliedFor,
+      experience: candidateData.experience,
+      professionalExperience: candidateData.professionalExperience?.length || 0,
+      education: candidateData.education?.length || 0,
+      skills: candidateData.skills?.length || 0
     });
 
-    const candidate = await Candidate.create(candidateData);
+    // Validate required fields before creating candidate
+    const validationErrors = [];
+    if (!candidateData.firstName?.trim()) validationErrors.push('First name is required');
+    if (!candidateData.lastName?.trim()) validationErrors.push('Last name is required');
+    if (!candidateData.email?.trim()) validationErrors.push('Email is required');
+    if (!candidateData.phone?.trim()) validationErrors.push('Phone is required');
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    // Generate unique candidate code (handle race conditions)
+    let candidateCode;
+    let attempts = 0;
+    const maxAttempts = 20;
+    let candidate;
+    
+    // For debugging, try a simple timestamp-based code first
+    candidateCode = `CAN${Date.now().toString().slice(-8)}`;
+    candidateData.candidateCode = candidateCode;
+    
+    console.log(`🔍 Using timestamp-based candidate code: ${candidateCode}`);
+    
+    try {
+      console.log(`🔍 Attempting to create candidate with code: ${candidateCode}`);
+      console.log(`🔍 Candidate data keys:`, Object.keys(candidateData));
+      console.log(`🔍 Experience data:`, candidateData.experience);
+      
+      candidate = await Candidate.create(candidateData);
+      console.log(`✅ Successfully created candidate with ID: ${candidate._id}`);
+    } catch (createError) {
+      console.error(`❌ Candidate creation error:`, createError);
+      console.error(`❌ Error name:`, createError.name);
+      console.error(`❌ Error message:`, createError.message);
+      if (createError.errors) {
+        console.error(`❌ Validation errors:`, Object.values(createError.errors).map(e => ({
+          field: e.path,
+          message: e.message,
+          value: e.value
+        })));
+      }
+      throw createError;
+    }
 
     // Increment application count on job posting
     await JobPosting.findByIdAndUpdate(jobId, {
@@ -203,6 +408,12 @@ exports.submitApplication = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Application submitted successfully! We will review your application and get back to you soon.',
+      isDuplicate: candidate.isDuplicate || false,
+      duplicateInfo: globalDuplicate ? {
+        previousApplications: globalDuplicate.timeline?.length || 0,
+        lastApplication: globalDuplicate.appliedFor?.title,
+        candidateCode: globalDuplicate.candidateCode
+      } : null,
       data: {
         candidateCode: candidate.candidateCode,
         appliedFor: job.title,
@@ -217,7 +428,8 @@ exports.submitApplication = async (req, res) => {
     // Handle validation errors
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
-      console.error('Validation errors:', messages);
+      console.error('❌ Validation errors:', messages);
+      console.error('❌ Error details:', error.errors);
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
@@ -243,10 +455,26 @@ exports.submitApplication = async (req, res) => {
 };
 
 // @desc    Get job statistics for public display
-// @route   GET /api/public/jobs/stats
+// @route   GET /api/public/jobs/stats?companyId=xxx
 // @access  Public
 exports.getJobStats = async (req, res) => {
   try {
+    const { companyId } = req.query;
+    
+    // Default to the tenant from seed script if no companyId provided
+    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    
+    // Get tenant connection
+    const tenantConnection = await getTenantConnection(tenantId);
+    const JobPosting = getTenantModel(tenantConnection, 'JobPosting');
+    
+    if (!JobPosting) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'JobPosting model not available' 
+      });
+    }
+    
     const totalJobs = await JobPosting.countDocuments({ status: 'active' });
     
     const departmentStats = await JobPosting.aggregate([
@@ -292,7 +520,7 @@ exports.getJobStats = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get job stats error:', error);
+    console.error('❌ Get job stats error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to fetch job statistics' 

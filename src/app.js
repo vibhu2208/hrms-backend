@@ -1,4 +1,24 @@
 require('dotenv').config();
+
+// Global error handlers to prevent crashes
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Promise Rejection:', err.message);
+  console.error('Stack:', err.stack);
+  // Don't exit - allow server to continue running
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err.message);
+  console.error('Stack:', err.stack);
+  // Only exit for critical errors
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n⚠️  Port ${apiConfig.port} is already in use.`);
+    console.error(`Please ensure no other process is using port ${apiConfig.port}`);
+    console.error(`Or set a different PORT environment variable.\n`);
+    process.exit(1);
+  }
+});
+
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -40,8 +60,25 @@ const userRoutes = require('./routes/userRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
 const testRoutes = require('./routes/testRoutes');
 const managerRoutes = require('./routes/managerRoutes');
+const spcManagerRoutes = require('./routes/spcManagerRoutes');
 const resumePoolRoutes = require('./routes/resumePoolRoutes');
 const networkRoutes = require('./routes/networkRoutes');
+const jobDescriptionRoutes = require('./routes/jobDescriptionRoutes');
+const workScheduleRoutes = require('./routes/workScheduleRoutes');
+const holidayRoutes = require('./routes/holidayRoutes');
+const biometricRoutes = require('./routes/biometricRoutes');
+const sapRoutes = require('./routes/sapRoutes');
+const leaveAccrualRoutes = require('./routes/leaveAccrualRoutes');
+const leaveManagementRoutes = require('./routes/leaveManagementRoutes');
+const approvalWorkflowRoutes = require('./routes/approvalWorkflowRoutes');
+const approvalRoutes = require('./routes/approvalRoutes');
+const employeeProfileRoutes = require('./routes/employeeProfileRoutes');
+const leaveEncashmentRoutes = require('./routes/leaveEncashmentRoutes');
+const advancedReportsRoutes = require('./routes/advancedReportsRoutes');
+const publicDocumentUploadRoutes = require('./routes/publicDocumentUploadRoutes');
+const documentVerificationRoutes = require('./routes/documentVerificationRoutes');
+const hrActivityHistoryRoutes = require('./routes/hrActivityHistoryRoutes');
+const contractRoutes = require('./routes/contractRoutes');
 
 // Import tenant middleware
 const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
@@ -54,6 +91,8 @@ const { startCronJobs } = require('./utils/cronJobs');
 startCronJobs();
 
 const app = express();
+
+app.set('etag', false);
 
 // Middleware - Use centralized CORS configuration
 app.use(cors(apiConfig.corsOptions));
@@ -74,11 +113,62 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Config routes
+app.get('/api/config/zoom-status', (req, res) => {
+  const zoomOAuthService = require('./services/zoomOAuthService');
+  res.status(200).json({
+    success: true,
+    configured: zoomOAuthService.isEnabled()
+  });
+});
+
 // Static file serving for uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const uploadsPath = path.join(__dirname, '../uploads');
+const resumesPath = path.join(uploadsPath, 'resumes');
+console.log('📁 Uploads directory path:', uploadsPath);
+console.log('📁 Resumes directory path:', resumesPath);
+
+// Serve resume files with proper headers and CORS
+app.use('/uploads/resumes', (req, res, next) => {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+}, express.static(resumesPath, {
+  setHeaders: (res, filePath) => {
+    // Set appropriate content type
+    if (filePath.endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline'); // Display in browser instead of download
+    }
+    // Cache control
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+  },
+  dotfiles: 'allow',
+  index: false
+}));
+
+// Serve other uploads
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res, filePath) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (filePath.endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
+  },
+  dotfiles: 'allow',
+  index: false
+}));
 
 // Public API Routes (no authentication required)
 app.use('/api/public/jobs', publicJobRoutes);
+app.use('/api/public/document-upload', publicDocumentUploadRoutes);
 app.use('/api/candidate-documents', candidateDocumentRoutes);
 
 // Protected API Routes (tenant isolation handled within route files)
@@ -86,7 +176,18 @@ app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/leave', leaveRoutes);
+app.use('/api/leave-accrual', leaveAccrualRoutes);
+app.use('/api/leave-management', leaveManagementRoutes);
+app.use('/api/approval-workflow', approvalWorkflowRoutes);
+app.use('/api/approvals', approvalRoutes);
+app.use('/api/employee/profile', employeeProfileRoutes);
+app.use('/api/leave-encashment', leaveEncashmentRoutes);
+app.use('/api/reports', advancedReportsRoutes);
 app.use('/api/attendance', attendanceRoutes);
+app.use('/api/work-schedule', workScheduleRoutes);
+app.use('/api/holidays', holidayRoutes);
+app.use('/api/biometric', biometricRoutes);
+app.use('/api/sap', sapRoutes);
 app.use('/api/payroll', payrollRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/jobs', jobPostingRoutes);
@@ -100,6 +201,7 @@ app.use('/api/timesheets', timesheetRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/candidates', candidateRoutes);
+app.use('/api/job-descriptions', jobDescriptionRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/exit-process', exitProcessRoutes);
@@ -112,8 +214,12 @@ app.use('/api/network', networkRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/manager', managerRoutes);
+app.use('/api/spc-manager', spcManagerRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/resume-pool', resumePoolRoutes);
+app.use('/api/document-verification', documentVerificationRoutes);
+app.use('/api/contracts', contractRoutes);
+app.use('/api/hr-activity-history', hrActivityHistoryRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);
@@ -126,7 +232,7 @@ app.use((req, res) => {
   });
 });
 
-app.listen(apiConfig.port, () => {
+app.listen(apiConfig.port, '0.0.0.0', () => {
   console.log(`🚀 Server running in ${apiConfig.env} mode on port ${apiConfig.port}`);
   console.log(`📡 API Base URL: ${apiConfig.backendUrl}`);
   console.log(`🌐 Allowed Origins: ${apiConfig.allowedOrigins.join(', ')}`);

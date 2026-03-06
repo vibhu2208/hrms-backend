@@ -1,8 +1,10 @@
 const Department = require('../models/Department');
+const { getTenantModel } = require('../middlewares/tenantMiddleware');
 
 exports.getDepartments = async (req, res) => {
   try {
-    const departments = await Department.find().populate('head', 'firstName lastName email');
+    const DepartmentModel = getTenantModel(req.tenant.connection, 'Department', Department.schema);
+    const departments = await DepartmentModel.find({ isActive: true }).populate('head', 'firstName lastName email');
     res.status(200).json({ success: true, data: departments });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -11,7 +13,8 @@ exports.getDepartments = async (req, res) => {
 
 exports.getDepartment = async (req, res) => {
   try {
-    const department = await Department.findById(req.params.id).populate('head');
+    const DepartmentModel = getTenantModel(req.tenant.connection, 'Department', Department.schema);
+    const department = await DepartmentModel.findById(req.params.id).populate('head');
     if (!department) {
       return res.status(404).json({ success: false, message: 'Department not found' });
     }
@@ -23,7 +26,8 @@ exports.getDepartment = async (req, res) => {
 
 exports.createDepartment = async (req, res) => {
   try {
-    const department = await Department.create(req.body);
+    const DepartmentModel = getTenantModel(req.tenant.connection, 'Department', Department.schema);
+    const department = await DepartmentModel.create(req.body);
     res.status(201).json({ success: true, message: 'Department created successfully', data: department });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -32,7 +36,8 @@ exports.createDepartment = async (req, res) => {
 
 exports.updateDepartment = async (req, res) => {
   try {
-    const department = await Department.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const DepartmentModel = getTenantModel(req.tenant.connection, 'Department', Department.schema);
+    const department = await DepartmentModel.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!department) {
       return res.status(404).json({ success: false, message: 'Department not found' });
     }
@@ -44,7 +49,8 @@ exports.updateDepartment = async (req, res) => {
 
 exports.deleteDepartment = async (req, res) => {
   try {
-    const department = await Department.findByIdAndDelete(req.params.id);
+    const DepartmentModel = getTenantModel(req.tenant.connection, 'Department', Department.schema);
+    const department = await DepartmentModel.findByIdAndDelete(req.params.id);
     if (!department) {
       return res.status(404).json({ success: false, message: 'Department not found' });
     }

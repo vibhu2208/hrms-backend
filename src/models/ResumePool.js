@@ -59,6 +59,26 @@ const resumePoolSchema = new mongoose.Schema({
     languages: [String]
   },
   
+  // CTC Information
+  currentCTC: {
+    type: Number,
+    default: null
+  },
+  expectedCTC: {
+    type: Number,
+    default: null
+  },
+  
+  // Location Information
+  currentLocation: {
+    type: String,
+    trim: true
+  },
+  preferredLocation: [{
+    type: String,
+    trim: true
+  }],
+  
   // Processing Status
   processingStatus: {
     type: String,
@@ -74,6 +94,15 @@ const resumePoolSchema = new mongoose.Schema({
     overallFit: String,
     recommendations: [String],
     confidenceScore: Number
+  },
+
+  // Reducto AI Parsing Data (store complete response)
+  reductoData: {
+    type: mongoose.Schema.Types.Mixed, // Store complete Reducto JSON response
+    response: mongoose.Schema.Types.Mixed, // Full API response
+    extractedData: mongoose.Schema.Types.Mixed, // Processed extracted data
+    confidence: mongoose.Schema.Types.Mixed, // Confidence scores
+    metadata: mongoose.Schema.Types.Mixed // Parsing metadata
   },
   
   // Metadata
@@ -122,6 +151,10 @@ resumePoolSchema.index({ processingStatus: 1 });
 resumePoolSchema.index({ status: 1 });
 resumePoolSchema.index({ createdAt: -1 });
 resumePoolSchema.index({ tags: 1 });
+resumePoolSchema.index({ currentCTC: 1 });
+resumePoolSchema.index({ expectedCTC: 1 });
+resumePoolSchema.index({ currentLocation: 1 });
+resumePoolSchema.index({ preferredLocation: 1 });
 
 // Pre-save middleware to update searchableText
 resumePoolSchema.pre('save', function(next) {

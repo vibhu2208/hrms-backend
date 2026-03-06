@@ -78,6 +78,16 @@ const leaveRequestSchema = new mongoose.Schema({
   rejectionReason: {
     type: String
   },
+  // Link to approval workflow instance
+  approvalInstanceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ApprovalInstance'
+  },
+  // Link to approval workflow instance
+  approvalInstanceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ApprovalInstance'
+  },
   // Cancellation
   cancelledOn: {
     type: Date
@@ -88,6 +98,79 @@ const leaveRequestSchema = new mongoose.Schema({
   appliedOn: {
     type: Date,
     default: Date.now
+  },
+  // Multi-level approval fields
+  workflowId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ApprovalWorkflow'
+  },
+  currentLevel: {
+    type: Number,
+    default: 1
+  },
+  approvalLevels: [{
+    level: {
+      type: Number,
+      required: true
+    },
+    approverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    approverEmail: {
+      type: String,
+      lowercase: true
+    },
+    approverName: {
+      type: String
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected', 'delegated'],
+      default: 'pending'
+    },
+    comments: {
+      type: String
+    },
+    approvedAt: {
+      type: Date
+    },
+    rejectedAt: {
+      type: Date
+    },
+    delegatedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    delegatedToEmail: {
+      type: String,
+      lowercase: true
+    },
+    slaDeadline: {
+      type: Date
+    },
+    isEscalated: {
+      type: Boolean,
+      default: false
+    },
+    escalatedAt: {
+      type: Date
+    }
+  }],
+  slaDeadline: {
+    type: Date,
+    index: true
+  },
+  isEscalated: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  escalatedAt: {
+    type: Date
+  },
+  escalationReason: {
+    type: String
   }
 }, {
   timestamps: true
