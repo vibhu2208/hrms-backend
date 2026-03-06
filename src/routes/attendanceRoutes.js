@@ -12,14 +12,14 @@ const { protect, authorize } = require('../middlewares/auth');
 
 router.use(protect);
 
-router.get('/stats', authorize('admin', 'hr'), getAttendanceStats);
+router.get('/stats', authorize('admin', 'hr', 'company_admin'), getAttendanceStats);
 router.route('/')
   .get(getAttendance)
-  .post(authorize('admin', 'hr'), markAttendance);
+  .post(authorize('admin', 'hr', 'company_admin'), markAttendance);
 
 router.route('/:id')
   .get(getSingleAttendance)
-  .put(authorize('admin', 'hr'), updateAttendance)
-  .delete(authorize('admin', 'hr'), deleteAttendance);
+  .put(authorize('admin', 'hr', 'company_admin'), updateAttendance)
+  .delete(authorize('admin', 'hr', 'company_admin'), deleteAttendance);
 
 module.exports = router;

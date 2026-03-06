@@ -6,6 +6,14 @@ const clientSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  companyId: {
+    type: String,
+    index: true
+  },
+  tenantDatabaseName: {
+    type: String,
+    index: true
+  },
   name: {
     type: String,
     required: [true, 'Client name is required'],

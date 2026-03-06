@@ -10,7 +10,8 @@ const companyRegistrySchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    uppercase: true
+    uppercase: true,
+    default: 'COMP_PENDING'
   },
   companyName: {
     type: String,
@@ -22,13 +23,17 @@ const companyRegistrySchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    index: true
+    index: true,
+    default: () => new mongoose.Types.ObjectId().toString()
   },
   // Database reference
   tenantDatabaseName: {
     type: String,
     required: true,
-    unique: true
+    unique: true,
+    default: function () {
+      return this.companyId ? `tenant_${this.companyId}` : undefined;
+    }
     // Format: tenant_{companyId}
   },
   // Company contact details
@@ -167,24 +172,30 @@ const companyRegistrySchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate company code before saving
-companyRegistrySchema.pre('save', async function(next) {
-  if (!this.companyCode) {
-    const count = await this.constructor.countDocuments();
-    this.companyCode = `COMP${String(count + 1).padStart(5, '0')}`;
+// Generate required identifiers before validation
+companyRegistrySchema.pre('validate', async function(next) {
+  try {
+    // Generate companyId if not set
+    if (!this.companyId) {
+      this.companyId = new mongoose.Types.ObjectId().toString();
+    }
+
+    // Generate tenant database name
+    if (!this.tenantDatabaseName) {
+      this.tenantDatabaseName = `tenant_${this.companyId}`;
+    }
+
+    // Generate company code if not set (or still placeholder)
+    // Note: Use companyId-derived code to avoid collisions under retries/concurrency.
+    if (!this.companyCode || this.companyCode === 'COMP_PENDING') {
+      const suffix = String(this.companyId).replace(/[^a-zA-Z0-9]/g, '').slice(-8).toUpperCase();
+      this.companyCode = `COMP${suffix.padStart(8, '0')}`;
+    }
+
+    next();
+  } catch (error) {
+    next(error);
   }
-  
-  // Generate companyId if not set
-  if (!this.companyId) {
-    this.companyId = new mongoose.Types.ObjectId().toString();
-  }
-  
-  // Generate tenant database name
-  if (!this.tenantDatabaseName) {
-    this.tenantDatabaseName = `tenant_${this.companyId}`;
-  }
-  
-  next();
 });
 
 // Indexes for faster queries
