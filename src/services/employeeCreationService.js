@@ -9,7 +9,7 @@ const TenantEmployeeSchema = require('../models/tenant/TenantEmployee');
 
 // Create a new schema instance to avoid modifying the shared schema
 const employeeSchema = TenantEmployeeSchema.clone();
-employeeSchema.set('collection', 'employees');
+// Collection is now set in the schema itself
 const TenantUserSchema = require('../models/tenant/TenantUser');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('./emailService');
@@ -29,8 +29,8 @@ class EmployeeCreationService {
       const Candidate = getTenantModel(tenantConnection, 'Candidate');
 
       // Get Employee model using the correct TenantEmployeeSchema
-      // Use a unique name to avoid conflicts with models created with wrong schema
-      const TenantEmployee = getTenantModel(tenantConnection, 'TenantEmployee', employeeSchema);
+      // Use 'Employee' as model name to match what employee controller expects
+      const TenantEmployee = getTenantModel(tenantConnection, 'Employee', employeeSchema);
 
 
       // Get Department model for fetching department details
@@ -94,10 +94,8 @@ class EmployeeCreationService {
       let employmentType = 'full-time'; // default
       if (onboarding.jobId && onboarding.jobId.employmentType) {
         employmentType = onboarding.jobId.employmentType;
-        console.log(`✅ Using employment type from job posting: ${employmentType}`);
       } else if (candidate && candidate.employmentType) {
         employmentType = candidate.employmentType;
-        console.log(`✅ Using employment type from candidate preference: ${employmentType}`);
       }
 
       // Prepare employee data with candidate personal details
@@ -158,19 +156,15 @@ class EmployeeCreationService {
       
       // Fallback: Try to get department from jobId if available
       if (!departmentId && !departmentName && onboarding.jobId) {
-        console.log('🔍 Trying to get department from jobId...');
         if (typeof onboarding.jobId === 'object' && onboarding.jobId.department) {
           if (typeof onboarding.jobId.department === 'object' && onboarding.jobId.department._id) {
             departmentId = onboarding.jobId.department._id;
             departmentName = onboarding.jobId.department.name || onboarding.jobId.department.departmentName || null;
-            console.log('✅ Got department from jobId (populated):', departmentId, departmentName);
           } else if (onboarding.jobId.department instanceof mongoose.Types.ObjectId) {
             departmentId = onboarding.jobId.department;
-            console.log('✅ Got department from jobId (ObjectId):', departmentId);
           } else if (typeof onboarding.jobId.department === 'string') {
             if (mongoose.Types.ObjectId.isValid(onboarding.jobId.department) && onboarding.jobId.department.length === 24) {
               departmentId = new mongoose.Types.ObjectId(onboarding.jobId.department);
-              console.log('✅ Got department from jobId (ObjectId string):', departmentId);
             } else {
               departmentName = onboarding.jobId.department.trim();
               console.log('⚠️ Got department name from jobId, will lookup:', departmentName);
@@ -182,14 +176,12 @@ class EmployeeCreationService {
       // If we have department name but not ID, look it up in Department collection
       if (departmentName && !departmentId && Department) {
         try {
-          console.log(`🔍 Looking up department by name: "${departmentName}"`);
           const departmentDoc = await Department.findOne({ 
             name: { $regex: new RegExp(`^${departmentName}$`, 'i') } 
           });
           if (departmentDoc) {
             departmentId = departmentDoc._id;
             departmentName = departmentDoc.name; // Use the exact name from DB
-            console.log(`✅ Found department: ${departmentName} (${departmentId})`);
           } else {
             throw new Error(`Department "${departmentName}" not found in the system. Please ensure the department exists.`);
           }
@@ -205,11 +197,9 @@ class EmployeeCreationService {
       // If we have departmentId but not name, fetch it
       if (departmentId && !departmentName && Department) {
         try {
-          console.log(`🔍 Fetching department name for ID: ${departmentId}`);
           const departmentDoc = await Department.findById(departmentId);
           if (departmentDoc) {
             departmentName = departmentDoc.name || departmentDoc.departmentName || null;
-            console.log(`✅ Fetched department name: ${departmentName}`);
           } else {
             throw new Error(`Department with ID ${departmentId} not found in the system.`);
           }
@@ -269,7 +259,6 @@ class EmployeeCreationService {
           employeeData.department = String(employeeData.department);
         }
         
-        console.log(`✅ Set employee department: departmentId=${departmentId} (${typeof employeeData.departmentId}), department="${employeeData.department}" (${typeof employeeData.department})`);
       } else {
         // If no department found, throw error
         throw new Error('Department is required for employee creation. Please ensure the onboarding record has a valid department assigned.');
@@ -343,11 +332,11 @@ class EmployeeCreationService {
       try {
         employee = await TenantEmployee.create(employeeData);
       } catch (createError) {
+        console.error('❌ Failed to create employee:', createError);
         throw createError;
       }
 
 
-      console.log(`✅ Employee created: ${employee.email} (${employeeCode})`);
 
       // Handle contract workflow for contract-requiring employment types
       let contractWorkflowResult = null;
@@ -359,7 +348,6 @@ class EmployeeCreationService {
         );
         
         if (contractWorkflowResult.success && contractWorkflowResult.contractId) {
-          console.log(`✅ Contract workflow initiated for ${employee.firstName} ${employee.lastName}: ${contractWorkflowResult.message}`);
         }
       } catch (contractError) {
         console.error('Error in contract workflow during onboarding:', contractError);
@@ -392,7 +380,6 @@ class EmployeeCreationService {
           });
 
           await userAccount.save();
-          console.log(`✅ User account created for ${employee.email} with role 'employee'`);
         } else {
           console.log(`⚠️ User account already exists for ${employee.email}`);
         }
@@ -465,7 +452,6 @@ class EmployeeCreationService {
             });
             
             await candidate.save();
-            console.log(`✅ Candidate status updated to 'joined' and linked to employee for ${candidate.email}`);
           } else {
             console.warn(`⚠️ Candidate with ID ${candidateId} not found`);
           }
@@ -503,7 +489,7 @@ class EmployeeCreationService {
    */
   async generateEmployeeCode(tenantConnection) {
     // Use the same Employee model with correct schema
-    const TenantEmployee = getTenantModel(tenantConnection, 'TenantEmployee', employeeSchema);
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', employeeSchema);
 
     // Get count of existing employees
     const employeeCount = await TenantEmployee.countDocuments();
@@ -624,7 +610,7 @@ class EmployeeCreationService {
     const Onboarding = getTenantModel(tenantConnection, 'Onboarding');
 
     // Use the same Employee model with correct schema
-    const TenantEmployee = getTenantModel(tenantConnection, 'TenantEmployee', employeeSchema);
+    const TenantEmployee = getTenantModel(tenantConnection, 'Employee', employeeSchema);
     
     const onboarding = await Onboarding.findById(onboardingId)
       .populate('department');
@@ -681,7 +667,6 @@ class EmployeeCreationService {
               department: job.department._id 
             });
             departmentResolved = true;
-            console.log(`✅ Updated onboarding ${onboardingId} with department from job posting: ${job.department.name}`);
           }
         } catch (jobError) {
           console.warn('⚠️ Could not fetch department from job posting:', jobError.message);
