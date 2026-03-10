@@ -296,7 +296,7 @@ const sendOnboardingEmail = async ({
       </div>
       
       <p style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" class="cta-button">
+        <a href="${process.env.FRONTEND_URL || 'http://3.108.172.119:8080'}/login/spc-management" class="cta-button">
           👉 Login to HRMS Portal
         </a>
       </p>
@@ -1063,45 +1063,170 @@ const sendShortlistedEmail = async ({
 
     const htmlContent = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>You're Shortlisted – ${position} at ${companyName}</title>
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }
-    .header h1 { margin: 0; font-size: 24px; }
-    .content { padding: 30px; }
-    .success-box { background: #d1fae5; border-left: 4px solid #10b981; padding: 20px; margin: 20px 0; border-radius: 4px; }
-    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
+    }
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
+      border: 1px solid #000000;
+    }
+    .header {
+      padding: 28px 40px;
+      border-bottom: 2px solid #000000;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
+    }
+    .body {
+      padding: 36px 40px;
+    }
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 20px;
+    }
+    .notice-box {
+      border: 1px solid #000000;
+      padding: 18px 22px;
+      margin-bottom: 24px;
+    }
+    .notice-box p {
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .notice-box strong {
+      font-weight: bold;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #000000;
+      padding-bottom: 6px;
+    }
+    .steps-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 28px;
+    }
+    .steps-list li {
+      font-size: 14px;
+      line-height: 1.7;
+      padding: 6px 0;
+      border-bottom: 1px dashed #cccccc;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .steps-list li::before {
+      content: "—";
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+    .closing {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 28px;
+    }
+    .signature {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
+    }
+    .footer {
+      border-top: 1px solid #000000;
+      padding: 16px 40px;
+      text-align: center;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="wrapper">
+
+    <!-- Header -->
     <div class="header">
-      <h1>🎉 Congratulations! You're Shortlisted</h1>
+      <h1>${companyName}</h1>
+      <p>Human Resources Department</p>
     </div>
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      <div class="success-box">
-        <p><strong>🎉 Great News!</strong></p>
-        <p>We are pleased to inform you that you have been shortlisted for the <strong>${position}</strong> position at ${companyName}.</p>
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
+
+      <!-- Notice Box -->
+      <div class="notice-box">
+        <p>
+          We are pleased to inform you that you have been <strong>shortlisted</strong>
+          for the position of <strong>${position}</strong> at
+          <strong>${companyName}</strong>. Your profile has been reviewed and
+          selected to move forward in our recruitment process.
+        </p>
       </div>
-      <p><strong>Next Steps:</strong></p>
-      <ul>
-        <li>You will be contacted soon to schedule an interview</li>
-        <li>Please keep your phone and email accessible</li>
-        <li>Prepare your documents and portfolio</li>
+
+      <!-- Next Steps -->
+      <p class="section-title">Next Steps</p>
+      <ul class="steps-list">
+        <li>You will be contacted shortly to schedule a formal interview.</li>
+        <li>Please ensure your phone and email address remain accessible.</li>
+        <li>Kindly prepare your documents and portfolio in advance.</li>
       </ul>
-      <p>We look forward to meeting you!</p>
-      <p style="margin-top: 30px;">Best regards,<br><strong>HR Team</strong><br>${companyName}</p>
+
+      <!-- Closing -->
+      <p class="closing">
+        We look forward to meeting you and learning more about your experience.
+        Should you have any questions in the meantime, please do not hesitate
+        to reach out to our HR team.
+      </p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Yours sincerely,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span><br/>
+        <span>hr@techthriversystem.com</span>
+      </div>
+
     </div>
+
+    <!-- Footer -->
     <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+      &copy; ${new Date().getFullYear()} ${companyName}. All rights reserved. &nbsp;|&nbsp;
+      This is an automated notification. Please do not reply directly to this email.
     </div>
+
   </div>
 </body>
-</html>`;
+</html>
+`;
 
     await sendEmailWithRetry(transporter, {
       from: { name: `${companyName} - HRMS`, address: process.env.EMAIL_USER },
@@ -1465,7 +1590,7 @@ const sendCompanyAdminCredentials = async ({
   companyName,
   adminEmail,
   adminPassword,
-  loginUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
+  loginUrl = process.env.FRONTEND_URL || 'http://3.108.172.119:8080'
 }) => {
   try {
     const transporter = createTransporter();
