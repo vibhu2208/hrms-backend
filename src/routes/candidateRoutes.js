@@ -24,7 +24,9 @@ const {
   getCandidatePoolForJD,
   compareCandidatesForJD,
   fixExEmployeeCandidateNames,
-  cleanupDuplicateExEmployeeCandidates
+  cleanupDuplicateExEmployeeCandidates,
+  moveCandidateToSection,
+  getJobPostingsForCandidateMove
 } = require('../controllers/candidateController');
 const {
   validateBulkUpload,
@@ -51,6 +53,9 @@ router.post('/apply', uploadResume, createCandidate);
 // Check for duplicate candidate
 router.get('/check-duplicate', checkDuplicate);
 
+// Get job postings for candidate movement (MUST be before /:id routes)
+router.get('/job-postings-for-move', getJobPostingsForCandidateMove);
+
 // Get candidate history
 router.get('/:id/history', getCandidateHistory);
 
@@ -62,6 +67,9 @@ router.post('/:id/move-to-stage', moveToStage);
 router.post('/:id/interview', scheduleInterview);
 router.post('/:id/convert', convertToEmployee);
 router.post('/:id/onboarding', moveToOnboarding);
+
+// Move candidate to different sections (comprehensive endpoint)
+router.post('/:id/move-to-section', moveCandidateToSection);
 
 // New comprehensive onboarding flow
 router.post('/:id/send-to-onboarding', sendToOnboarding);
