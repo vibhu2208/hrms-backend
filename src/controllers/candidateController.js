@@ -455,15 +455,41 @@ exports.createCandidate = async (req, res) => {
     // Send application received email
     if (candidate.email) {
       try {
+        // Populate the appliedFor field to get the job title
         await candidate.populate('appliedFor', 'title');
+        
+        // Get position from multiple sources in order of preference
+        let position = 'Position'; // Default fallback
+        
+        // Try to get from populated appliedFor.title
+        if (candidate.appliedFor?.title) {
+          position = candidate.appliedFor.title;
+        }
+        // Try to get from request body jobTitle
+        else if (req.body.jobTitle) {
+          position = req.body.jobTitle;
+        }
+        // Try to get from original candidate data
+        else if (candidate.appliedFor && typeof candidate.appliedFor === 'string') {
+          // If appliedFor is just an ID string, try to find the job
+          try {
+            const Job = getTenantModel(req.tenant.connection, 'Job');
+            const job = await Job.findById(candidate.appliedFor);
+            if (job?.title) {
+              position = job.title;
+            }
+          } catch (jobError) {
+            console.warn('Could not fetch job title:', jobError.message);
+          }
+        }
 
         await sendApplicationReceivedEmail({
           candidateName: `${candidate.firstName} ${candidate.lastName}`,
           candidateEmail: candidate.email,
-          position: candidate.appliedFor?.title || 'Position',
+          position: position,
           companyName: req.body.companyName || 'SPC MANAGMENT'
         });
-        console.log('Application received email sent successfully');
+        console.log('Application received email sent successfully with position:', position);
       } catch (emailError) {
         console.error('Failed to send application email:', emailError);
         // Don't throw - email failure shouldn't break candidate creation
@@ -512,16 +538,21 @@ exports.createCandidate = async (req, res) => {
 
 exports.updateCandidate = async (req, res) => {
   try {
+    console.log('📝 Updating candidate:', req.params.id);
+    console.log('   Update data:', req.body);
+    
     const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
 
     // Get current candidate to check for resume parsing data
     const currentCandidate = await Candidate.findById(req.params.id);
     if (!currentCandidate) {
+      console.error('❌ Candidate not found:', req.params.id);
       return res.status(404).json({ success: false, message: 'Candidate not found' });
     }
 
     // Update the candidate
-    const candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    let candidate = await Candidate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    console.log('✅ Candidate updated successfully');
 
     // Auto-populate from existing resume data if available and fields are now empty
     if (currentCandidate.resumeParsing?.extractedData) {
@@ -539,6 +570,9 @@ exports.updateCandidate = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Candidate updated successfully', data: candidate });
   } catch (error) {
+    console.error('❌ Error in updateCandidate:', error);
+    console.error('   Error message:', error.message);
+    console.error('   Error stack:', error.stack);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -683,6 +717,110 @@ exports.updateStage = async (req, res) => {
             notes: `Auto-created from recruitment. Applied for: ${candidate.appliedFor?.title || 'N/A'}`
           });
         } catch (onboardingError) { }
+      }
+    }
+
+    // Create onboarding record when moving to sent-to-onboarding
+    if (stage === 'sent-to-onboarding' && previousStage !== 'sent-to-onboarding') {
+      console.log('🔄 Creating onboarding record for sent-to-onboarding stage...');
+      
+      // Check if already has onboarding
+      let existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+      
+      if (!existingOnboarding) {
+        try {
+          // Validate job posting has department
+          if (!candidate.appliedFor?.department) {
+            console.warn('⚠️ Candidate has no job posting with department. Onboarding record not created.');
+            return res.status(400).json({
+              success: false,
+              message: 'Cannot move to onboarding: Candidate must be assigned to a job posting with a department. Please update the candidate first.'
+            });
+          }
+
+          // Create onboarding record
+          const onboarding = await Onboarding.create({
+            applicationId: candidate._id,
+            jobId: candidate.appliedFor._id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            candidatePhone: candidate.phone,
+            position: candidate.appliedFor.title || 'Position',
+            department: candidate.appliedFor.department,
+            joiningDate: candidate.offerDetails?.joiningDate,
+            status: 'preboarding',
+            createdBy: req.user?._id,
+            assignedHR: req.user?._id,
+            requiredDocuments: [
+              { type: 'aadhar', isRequired: true },
+              { type: 'pan', isRequired: true },
+              { type: 'bank_details', isRequired: true },
+              { type: 'address_proof', isRequired: true },
+              { type: 'education_certificates', isRequired: true },
+              { type: 'photo', isRequired: true }
+            ],
+            auditTrail: [{
+              action: 'moved_to_onboarding',
+              description: reason || 'Candidate moved to onboarding via stage change',
+              performedBy: req.user?._id,
+              previousStatus: previousStage,
+              newStatus: 'preboarding',
+              timestamp: new Date()
+            }]
+          });
+
+          candidate.onboardingRecord = onboarding._id;
+          candidate.sentToOnboardingAt = new Date();
+          candidate.sentToOnboardingBy = req.user?._id;
+          await candidate.save();
+
+          console.log('✅ Onboarding record created:', onboarding._id);
+
+          // Generate document upload token
+          const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
+          if (CandidateDocumentUploadToken) {
+            try {
+              const token = require('crypto').randomBytes(32).toString('hex');
+              const expiresAt = new Date();
+              expiresAt.setDate(expiresAt.getDate() + 30);
+
+              await CandidateDocumentUploadToken.create({
+                onboardingId: onboarding._id,
+                candidateName: onboarding.candidateName,
+                candidateEmail: onboarding.candidateEmail,
+                position: onboarding.position,
+                token,
+                expiresAt,
+                generatedBy: req.user?._id
+              });
+
+              const tenantId = req.tenant.companyId || req.tenant.clientId;
+              const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+
+              // Send offer letter with document link
+              const { sendOfferLetterWithDocumentLink } = require('../services/emailService');
+              await sendOfferLetterWithDocumentLink({
+                candidateName: onboarding.candidateName,
+                candidateEmail: onboarding.candidateEmail,
+                position: onboarding.position,
+                joiningDate: onboarding.joiningDate,
+                uploadUrl,
+                companyName: req.tenant?.companyName || 'Our Company'
+              });
+              console.log('✅ Offer letter with document link sent');
+            } catch (tokenError) {
+              console.error('⚠️ Error generating upload token:', tokenError.message);
+            }
+          }
+        } catch (onboardingError) {
+          console.error('❌ Error creating onboarding record:', onboardingError);
+          return res.status(500).json({
+            success: false,
+            message: `Failed to create onboarding record: ${onboardingError.message}`
+          });
+        }
+      } else {
+        console.log('ℹ️ Onboarding record already exists for this candidate');
       }
     }
 
@@ -2826,6 +2964,545 @@ exports.fixExEmployeeCandidateNames = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
+
+/**
+ * Move candidate to a different section (Interview, Onboarding, Applicant, Contract, etc.)
+ * This is a comprehensive endpoint for moving candidates between different workflow sections
+ */
+exports.moveCandidateToSection = async (req, res) => {
+  try {
+    const Candidate = getTenantModel(req.tenant.connection, 'Candidate');
+    const Onboarding = getTenantModel(req.tenant.connection, 'Onboarding');
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+    const CandidateDocumentUploadToken = getTenantModel(req.tenant.connection, 'CandidateDocumentUploadToken');
+    
+    const { id } = req.params;
+    const { 
+      targetSection, // 'interview', 'onboarding', 'applicant', 'contract', 'shortlisted', 'offer', 'rejected'
+      jobPostingId,  // Required for some sections
+      reason,
+      interviewDetails, // For interview section: { type, scheduledDate, scheduledTime, meetingLink, meetingPlatform }
+      contractDetails,  // For contract section: { contractType, startDate, endDate, terms }
+      offerDetails      // For offer section: { offeredCTC, offeredDesignation, joiningDate }
+    } = req.body;
+
+    if (!targetSection) {
+      return res.status(400).json({
+        success: false,
+        message: 'Target section is required'
+      });
+    }
+
+    const candidate = await Candidate.findById(id).populate('appliedFor');
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidate not found' });
+    }
+
+    const previousStage = candidate.stage;
+    let newStage = previousStage;
+    let responseData = { candidate };
+    let actionDescription = '';
+
+    // Handle different target sections
+    switch (targetSection.toLowerCase()) {
+      case 'applicant':
+      case 'applied':
+        // Move back to applicant pool - requires job posting
+        if (!jobPostingId && !candidate.appliedFor) {
+          return res.status(400).json({
+            success: false,
+            message: 'Job posting is required to move candidate to applicant section'
+          });
+        }
+        
+        if (jobPostingId) {
+          const jobPosting = await JobPosting.findById(jobPostingId);
+          if (!jobPosting) {
+            return res.status(404).json({ success: false, message: 'Job posting not found' });
+          }
+          candidate.appliedFor = jobPostingId;
+          candidate.appliedForTitle = jobPosting.title;
+        }
+        
+        newStage = 'applied';
+        actionDescription = `Moved to applicant pool for ${candidate.appliedForTitle || 'job position'}`;
+        break;
+
+      case 'screening':
+        newStage = 'screening';
+        actionDescription = 'Moved to screening stage';
+        break;
+
+      case 'shortlisted':
+        // Shortlisting requires job posting selection
+        if (!jobPostingId) {
+          return res.status(400).json({
+            success: false,
+            message: 'Job posting selection is required for shortlisting candidates'
+          });
+        }
+
+        // Validate and get job posting
+        const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+        const jobPosting = await JobPosting.findById(jobPostingId).populate('department');
+        
+        if (!jobPosting) {
+          return res.status(404).json({
+            success: false,
+            message: 'Selected job posting not found'
+          });
+        }
+
+        // Assign job posting to candidate
+        candidate.appliedFor = jobPosting._id;
+        candidate.appliedForTitle = jobPosting.title;
+        candidate.department = jobPosting.department?._id;
+        
+        newStage = 'shortlisted';
+        actionDescription = `Candidate shortlisted for ${jobPosting.title}`;
+        
+        console.log(`📋 Candidate ${candidate.firstName} ${candidate.lastName} shortlisted for job: ${jobPosting.title}`);
+        
+        // Send shortlisted email with job details
+        try {
+          await sendShortlistedEmail({
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            position: jobPosting.title,
+            jobDescription: jobPosting.description,
+            department: jobPosting.department?.name,
+            location: jobPosting.location,
+            employmentType: jobPosting.employmentType,
+            companyName: req.body.companyName || 'Our Company'
+          });
+          console.log(`✅ Shortlisted email sent to ${candidate.email} for ${jobPosting.title}`);
+        } catch (emailError) {
+          console.error('Failed to send shortlisted email:', emailError.message);
+        }
+        
+        responseData.jobPosting = {
+          id: jobPosting._id,
+          title: jobPosting.title,
+          department: jobPosting.department?.name,
+          location: jobPosting.location,
+          employmentType: jobPosting.employmentType
+        };
+        break;
+
+      case 'interview':
+      case 'interview-scheduled':
+        // Schedule interview - requires interview details
+        if (!interviewDetails) {
+          return res.status(400).json({
+            success: false,
+            message: 'Interview details are required (type, scheduledDate, scheduledTime)'
+          });
+        }
+
+        const interviewData = {
+          interviewType: interviewDetails.type || 'Technical',
+          round: interviewDetails.round || 'Round 1',
+          scheduledDate: interviewDetails.scheduledDate,
+          scheduledTime: interviewDetails.scheduledTime,
+          meetingLink: interviewDetails.meetingLink || '',
+          meetingPlatform: interviewDetails.meetingPlatform || 'Google Meet',
+          interviewer: interviewDetails.interviewer ? [interviewDetails.interviewer] : [],
+          status: 'scheduled'
+        };
+
+        candidate.interviews.push(interviewData);
+        newStage = 'interview-scheduled';
+        actionDescription = `${interviewDetails.type || 'Technical'} interview scheduled for ${new Date(interviewDetails.scheduledDate).toLocaleDateString()}`;
+
+        // Send interview notification email
+        try {
+          await sendInterviewNotification({
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            interviewType: interviewDetails.type || 'Technical',
+            interviewDate: interviewDetails.scheduledDate,
+            interviewTime: interviewDetails.scheduledTime,
+            meetingLink: interviewDetails.meetingLink,
+            meetingPlatform: interviewDetails.meetingPlatform || 'Google Meet',
+            position: candidate.appliedFor?.title || candidate.appliedForTitle || 'Position',
+            companyName: req.body.companyName || 'Our Company'
+          });
+        } catch (emailError) {
+          console.error('Failed to send interview notification:', emailError.message);
+        }
+        break;
+
+      case 'offer':
+      case 'offer-extended':
+        // Extend offer - requires offer details
+        if (offerDetails) {
+          candidate.offerDetails = {
+            ...candidate.offerDetails,
+            offeredCTC: offerDetails.offeredCTC || candidate.offerDetails?.offeredCTC,
+            offeredDesignation: offerDetails.offeredDesignation || candidate.offerDetails?.offeredDesignation,
+            joiningDate: offerDetails.joiningDate || candidate.offerDetails?.joiningDate,
+            offerExtendedDate: new Date()
+          };
+        }
+        
+        newStage = 'offer-extended';
+        actionDescription = 'Offer extended to candidate';
+
+        // Send offer email
+        try {
+          await sendOfferExtendedEmail({
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            position: candidate.appliedFor?.title || candidate.appliedForTitle || 'Position',
+            joiningDate: candidate.offerDetails?.joiningDate,
+            companyName: req.body.companyName || 'Our Company'
+          });
+        } catch (emailError) {
+          console.error('Failed to send offer email:', emailError.message);
+        }
+        break;
+
+      case 'offer-accepted':
+        newStage = 'offer-accepted';
+        if (candidate.offerDetails) {
+          candidate.offerDetails.offerAcceptedDate = new Date();
+        }
+        actionDescription = 'Candidate accepted the offer';
+        break;
+
+      case 'onboarding':
+      case 'sent-to-onboarding':
+        console.log('🔄 Moving candidate to onboarding...');
+        console.log('   Candidate appliedFor:', candidate.appliedFor);
+        console.log('   Job posting ID from request:', jobPostingId);
+        
+        // Move to onboarding - requires job posting with department
+        if (!candidate.appliedFor && !jobPostingId) {
+          console.error('❌ No job posting found for candidate');
+          return res.status(400).json({
+            success: false,
+            message: 'Job posting is required to move candidate to onboarding. Please select a job posting.'
+          });
+        }
+
+        // If jobPostingId provided, update the candidate's appliedFor
+        if (jobPostingId && jobPostingId !== candidate.appliedFor?._id?.toString()) {
+          console.log('📝 Updating candidate with new job posting:', jobPostingId);
+          const jobPosting = await JobPosting.findById(jobPostingId).populate('department');
+          if (!jobPosting) {
+            console.error('❌ Job posting not found:', jobPostingId);
+            return res.status(404).json({ success: false, message: 'Job posting not found' });
+          }
+          console.log('   Job posting found:', jobPosting.title);
+          console.log('   Department:', jobPosting.department);
+          
+          if (!jobPosting.department) {
+            console.error('❌ Job posting has no department');
+            return res.status(400).json({ 
+              success: false, 
+              message: `Job posting "${jobPosting.title}" must have a department assigned for onboarding. Please update the job posting first.` 
+            });
+          }
+          candidate.appliedFor = jobPostingId;
+          candidate.appliedForTitle = jobPosting.title;
+        }
+
+        // Ensure we have the populated appliedFor
+        await candidate.populate('appliedFor');
+        console.log('   Populated appliedFor:', candidate.appliedFor?.title);
+        console.log('   Department:', candidate.appliedFor?.department);
+        
+        if (!candidate.appliedFor?.department) {
+          console.error('❌ Job posting has no department after population');
+          return res.status(400).json({
+            success: false,
+            message: `The job posting "${candidate.appliedFor?.title || 'Unknown'}" must have a department assigned for onboarding. Please update the job posting to include a department.`
+          });
+        }
+        
+        console.log('✅ Validation passed, proceeding with onboarding creation...');
+
+        // Check for existing onboarding
+        let existingOnboarding = await Onboarding.findOne({ candidateEmail: candidate.email });
+        let onboarding;
+
+        if (existingOnboarding && existingOnboarding.status !== 'completed') {
+          // Update existing onboarding
+          existingOnboarding.applicationId = candidate._id;
+          existingOnboarding.jobId = candidate.appliedFor._id;
+          existingOnboarding.candidateName = `${candidate.firstName} ${candidate.lastName}`;
+          existingOnboarding.candidatePhone = candidate.phone;
+          existingOnboarding.position = candidate.appliedFor.title || 'Position';
+          existingOnboarding.department = candidate.appliedFor.department;
+          existingOnboarding.joiningDate = candidate.offerDetails?.joiningDate;
+          existingOnboarding.status = 'preboarding';
+          await existingOnboarding.save();
+          onboarding = existingOnboarding;
+        } else {
+          // Create new onboarding
+          onboarding = await Onboarding.create({
+            applicationId: candidate._id,
+            jobId: candidate.appliedFor._id,
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            candidatePhone: candidate.phone,
+            position: candidate.appliedFor.title || 'Position',
+            department: candidate.appliedFor.department,
+            joiningDate: candidate.offerDetails?.joiningDate,
+            status: 'preboarding',
+            createdBy: req.user?._id,
+            assignedHR: req.user?._id,
+            requiredDocuments: [
+              { type: 'aadhar', isRequired: true },
+              { type: 'pan', isRequired: true },
+              { type: 'bank_details', isRequired: true },
+              { type: 'address_proof', isRequired: true },
+              { type: 'education_certificates', isRequired: true },
+              { type: 'photo', isRequired: true }
+            ],
+            auditTrail: [{
+              action: 'moved_to_onboarding',
+              description: reason || 'Candidate moved to onboarding',
+              performedBy: req.user?._id,
+              previousStatus: previousStage,
+              newStatus: 'preboarding',
+              timestamp: new Date()
+            }]
+          });
+        }
+
+        // Generate document upload token
+        if (CandidateDocumentUploadToken) {
+          try {
+            const token = require('crypto').randomBytes(32).toString('hex');
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 30);
+
+            await CandidateDocumentUploadToken.create({
+              onboardingId: onboarding._id,
+              candidateName: onboarding.candidateName,
+              candidateEmail: onboarding.candidateEmail,
+              position: onboarding.position,
+              token,
+              expiresAt,
+              generatedBy: req.user?._id
+            });
+
+            const tenantId = req.tenant.companyId || req.tenant.clientId;
+            const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+            responseData.uploadUrl = uploadUrl;
+
+            // Send offer letter with document link
+            const { sendOfferLetterWithDocumentLink } = require('../services/emailService');
+            await sendOfferLetterWithDocumentLink({
+              candidateName: onboarding.candidateName,
+              candidateEmail: onboarding.candidateEmail,
+              position: onboarding.position,
+              joiningDate: onboarding.joiningDate,
+              uploadUrl,
+              companyName: req.tenant?.companyName || 'Our Company'
+            });
+          } catch (tokenError) {
+            console.error('Error generating upload token:', tokenError.message);
+          }
+        }
+
+        candidate.onboardingRecord = onboarding._id;
+        candidate.sentToOnboardingAt = new Date();
+        candidate.sentToOnboardingBy = req.user?._id;
+        newStage = 'sent-to-onboarding';
+        actionDescription = 'Candidate moved to onboarding';
+        responseData.onboarding = onboarding;
+        break;
+
+      case 'contract':
+        // Move to contract stage
+        if (contractDetails) {
+          candidate.contractDetails = {
+            contractType: contractDetails.contractType || candidate.employmentType,
+            startDate: contractDetails.startDate,
+            endDate: contractDetails.endDate,
+            terms: contractDetails.terms
+          };
+        }
+        
+        // For contract-based employment, update employment type
+        if (contractDetails?.contractType) {
+          candidate.employmentType = contractDetails.contractType;
+        }
+        
+        newStage = 'offer-extended';
+        actionDescription = `Contract prepared for candidate (${contractDetails?.contractType || candidate.employmentType})`;
+        break;
+
+      case 'rejected':
+        newStage = 'rejected';
+        candidate.status = 'rejected';
+        candidate.rejectionReason = reason || 'Not selected';
+        actionDescription = reason || 'Candidate rejected';
+
+        // Send rejection email
+        try {
+          await sendRejectionEmail({
+            candidateName: `${candidate.firstName} ${candidate.lastName}`,
+            candidateEmail: candidate.email,
+            position: candidate.appliedFor?.title || candidate.appliedForTitle || 'Position',
+            companyName: req.body.companyName || 'Our Company'
+          });
+        } catch (emailError) {
+          console.error('Failed to send rejection email:', emailError.message);
+        }
+        break;
+
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Invalid target section: ${targetSection}. Valid sections are: applicant, screening, shortlisted, interview, offer, offer-accepted, onboarding, contract, rejected`
+        });
+    }
+
+    // Update candidate stage
+    candidate.stage = newStage;
+
+    // Add to workflow history
+    candidate.workflowHistory = candidate.workflowHistory || [];
+    candidate.workflowHistory.push({
+      fromStage: previousStage,
+      toStage: newStage,
+      skippedStages: [],
+      movedBy: req.user?._id,
+      reason: reason || actionDescription,
+      timestamp: new Date()
+    });
+
+    // Add to timeline
+    candidate.timeline = candidate.timeline || [];
+    candidate.timeline.push({
+      action: `Moved to ${targetSection}`,
+      description: actionDescription,
+      performedBy: req.user?._id,
+      metadata: { 
+        targetSection, 
+        previousStage, 
+        newStage,
+        jobPostingId: jobPostingId || candidate.appliedFor?._id
+      },
+      timestamp: new Date()
+    });
+
+    await candidate.save();
+
+    res.status(200).json({
+      success: true,
+      message: actionDescription,
+      data: {
+        candidate: {
+          _id: candidate._id,
+          candidateCode: candidate.candidateCode,
+          name: `${candidate.firstName} ${candidate.lastName}`,
+          email: candidate.email,
+          previousStage,
+          currentStage: newStage,
+          appliedFor: candidate.appliedFor?.title || candidate.appliedForTitle
+        },
+        ...responseData
+      }
+    });
+  } catch (error) {
+    console.error('Error in moveCandidateToSection:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to move candidate to section'
+    });
+  }
+};
+
+/**
+ * Get available job postings for candidate movement
+ */
+exports.getJobPostingsForCandidateMove = async (req, res) => {
+  try {
+    console.log('🔍 Fetching job postings for candidate move...');
+    console.log('   Tenant:', req.tenant?.companyId || req.tenant?.clientId);
+    
+    const JobPosting = getTenantModel(req.tenant.connection, 'JobPosting');
+    
+    if (!JobPosting) {
+      console.error('❌ JobPosting model not found');
+      return res.status(500).json({
+        success: false,
+        message: 'JobPosting model not available'
+      });
+    }
+
+    // First, check total job postings
+    const totalJobPostings = await JobPosting.countDocuments();
+    console.log(`📊 Total job postings in database: ${totalJobPostings}`);
+
+    // Check job postings by status
+    const statusCounts = await JobPosting.aggregate([
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]);
+    console.log('📈 Job postings by status:', statusCounts);
+
+    const jobPostings = await JobPosting.find({ 
+      status: { $in: ['open', 'active', 'published'] }
+    })
+    .populate('department', 'name code')
+    .select('title department location employmentType status createdAt')
+    .sort({ createdAt: -1 })
+    .limit(100);
+
+    console.log(`🎯 Found ${jobPostings.length} active job postings`);
+
+    const formattedJobPostings = jobPostings.map(jp => ({
+      _id: jp._id,
+      title: jp.title,
+      department: jp.department?.name || 'No Department',
+      departmentId: jp.department?._id,
+      location: jp.location,
+      employmentType: jp.employmentType,
+      status: jp.status
+    }));
+
+    console.log(`✅ Found ${formattedJobPostings.length} job postings for candidate move`);
+
+    // If no active job postings found, try to find any job postings with different statuses
+    if (formattedJobPostings.length === 0) {
+      console.log('⚠️ No active job postings found, checking all job postings...');
+      const allJobPostings = await JobPosting.find({})
+        .populate('department', 'name code')
+        .select('title department location employmentType status createdAt')
+        .sort({ createdAt: -1 })
+        .limit(10);
+      
+      console.log('📋 Sample job postings with any status:');
+      allJobPostings.forEach(jp => {
+        console.log(`   - ${jp.title} (Status: ${jp.status})`);
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      count: formattedJobPostings.length,
+      jobPostings: formattedJobPostings,
+      data: formattedJobPostings,
+      debug: {
+        totalJobPostings,
+        statusCounts,
+        searchedStatuses: ['open', 'active', 'published']
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching job postings for candidate move:', error);
+    console.error('   Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      error: error.stack
     });
   }
 };
