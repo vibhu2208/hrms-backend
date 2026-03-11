@@ -296,7 +296,7 @@ exports.sendToOnboarding = async (req, res) => {
           position: onboarding.position,
           joiningDate: onboarding.joiningDate,
           uploadUrl,
-          companyName: req.tenant?.companyName || 'Our Company'
+          companyName: req.tenant?.companyName || 'SPC MANAGMENT'
         });
         console.log(`📧 Offer letter with document link sent to ${onboarding.candidateEmail}`);
       } catch (emailError) {
@@ -695,7 +695,7 @@ exports.updateOnboardingStatus = async (req, res) => {
           candidateEmail: onboarding.candidateEmail,
           position: onboarding.position,
           uploadUrl,
-          companyName: req.tenant?.companyName || 'Our Company'
+          companyName: req.tenant?.companyName || 'SPC MANAGMENT'
         });
 
         // Add audit trail for automatic email
@@ -1216,7 +1216,7 @@ exports.acceptOffer = async (req, res) => {
         candidateEmail: onboarding.candidateEmail,
         position: onboarding.position,
         uploadUrl,
-        companyName: 'Our Company' // Default company name for public route
+        companyName: 'SPC MANAGMENT' // Default company name for public route
       });
 
       // Add audit trail for automatic email
@@ -1336,7 +1336,7 @@ exports.setJoiningDateAndNotify = async (req, res) => {
           position: onboarding.position,
           department: onboarding.department?.name || 'Not specified',
           joiningDate: joinDate,
-          companyName: req.tenant?.companyName || 'Our Company'
+          companyName: req.tenant?.companyName || 'SPC MANAGMENT'
         });
         
         if (itResult.success) {
@@ -1349,7 +1349,7 @@ exports.setJoiningDateAndNotify = async (req, res) => {
           position: onboarding.position,
           department: onboarding.department?.name || 'Not specified',
           joiningDate: joinDate,
-          companyName: req.tenant?.companyName || 'Our Company'
+          companyName: req.tenant?.companyName || 'SPC MANAGMENT'
         });
         
         if (facilitiesResult.success) {
@@ -1371,7 +1371,7 @@ exports.setJoiningDateAndNotify = async (req, res) => {
         candidateEmail: onboarding.candidateEmail,
         position: onboarding.position,
         joiningDate: joinDate,
-        companyName: req.tenant?.companyName || 'Our Company'
+        companyName: req.tenant?.companyName || 'SPC MANAGMENT'
       });
       
       
@@ -1666,7 +1666,7 @@ exports.verifyDocument = async (req, res) => {
           documentName: document.name || document.type,
           rejectionReason: notes,
           uploadUrl: document.uploadUrl || `http://3.108.172.119/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
-          companyName: process.env.COMPANY_NAME || 'Our Company'
+          companyName: process.env.COMPANY_NAME || 'SPC MANAGMENT'
         });
       } catch (emailError) {
         console.error('❌ Failed to send document rejection email:', emailError);
@@ -2073,7 +2073,7 @@ exports.requestDocuments = async (req, res) => {
         candidateEmail: onboarding.candidateEmail,
         position: onboarding.position,
         uploadUrl,
-        companyName: req.tenant?.companyName || 'Our Company'
+        companyName: req.tenant?.companyName || 'SPC MANAGMENT'
       });
 
       // Add audit trail
@@ -2688,7 +2688,7 @@ exports.verifyPayslip = async (req, res) => {
         position: onboarding.position,
         isApproved: action === 'approve',
         notes: action === 'reject' ? notes : 'Your payslip has been verified and approved.',
-        companyName: req.tenant?.companyName || 'Our Company'
+        companyName: req.tenant?.companyName || 'SPC MANAGMENT'
       });
 
       console.log(`📧 Payslip verification result sent to ${onboarding.candidateEmail}`);
@@ -2834,7 +2834,7 @@ exports.generateAgreement = async (req, res) => {
       joiningDate: employee.joiningDate || onboarding.joiningDate,
       effectiveDate: effectiveDate || employee.joiningDate || new Date(),
       expiryDate: expiryDate,
-      companyName: req.tenant?.companyName || 'Our Company',
+      companyName: req.tenant?.companyName || 'SPC MANAGMENT',
       companyAddress: req.tenant?.companyAddress || 'Company Address',
       ...agreementDetails
     };
@@ -2889,7 +2889,7 @@ exports.generateAgreement = async (req, res) => {
       status: 'generated',
       effectiveDate: new Date(effectiveDate || employee.joiningDate),
       expiryDate: expiryDate ? new Date(expiryDate) : null,
-      companyName: req.tenant?.companyName || 'Our Company',
+      companyName: req.tenant?.companyName || 'SPC MANAGMENT',
       companyAddress: req.tenant?.companyAddress || 'Company Address',
       ...agreementDetails
     };
@@ -2931,7 +2931,7 @@ exports.generateAgreement = async (req, res) => {
         employeeEmail: employee.email,
         designation: employee.designation || onboarding.position,
         agreementData: agreementData,
-        companyName: req.tenant?.companyName || 'Our Company',
+        companyName: req.tenant?.companyName || 'SPC MANAGMENT',
         tenantConnection: req.tenant.connection
       });
       
