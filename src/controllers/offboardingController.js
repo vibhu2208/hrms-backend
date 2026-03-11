@@ -604,7 +604,7 @@ exports.createOffboarding = async (req, res) => {
           employeeEmail: employeeData.email,
           lastWorkingDate: lastWorkingDateObj,
           resignationType: resignationTypeValue,
-          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'SPC MANAGMENT'
         });
         console.log(`📧 Offboarding initiated email sent to ${employeeData.email}`);
       } catch (emailError) {
@@ -803,7 +803,7 @@ exports.advanceStage = async (req, res) => {
       if (employeeDetails && employeeDetails.email) {
         console.log('📧 advanceStage: Attempting to send stage email for stage:', offboarding.currentStage);
         try {
-          const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company';
+          const companyName = req.tenant?.companyName || process.env.COMPANY_NAME || 'SPC MANAGMENT';
           const employeeName = `${employeeDetails.firstName} ${employeeDetails.lastName}`;
           const employeeEmail = employeeDetails.email;
 
@@ -944,7 +944,7 @@ exports.scheduleExitInterview = async (req, res) => {
           employeeEmail: employeeDetails.email,
           scheduledDate,
           interviewerName,
-          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'SPC MANAGMENT'
         });
         console.log(`📧 Exit interview scheduled email sent to ${employeeDetails.email}`);
       } catch (emailError) {
@@ -1034,11 +1034,11 @@ exports.updateClearance = async (req, res) => {
           department: department.charAt(0).toUpperCase() + department.slice(1),
           cleared,
           notes,
-          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'SPC MANAGMENT'
         });
         console.log(`📧 ${department} clearance email sent to ${employeeDetails.email}`);
       } catch (emailError) {
-        console.error('⚠️ Failed to send clearance process email:', emailError.message);
+        console.error('⚠️ Failed to send clearance email:', emailError.message);
         // Don't fail the request if email fails
       }
     }
@@ -1074,7 +1074,7 @@ exports.processFinalSettlement = async (req, res) => {
           employeeEmail: employeeDetails.email,
           amount,
           paymentStatus: paymentStatus || 'processed',
-          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'Our Company'
+          companyName: req.tenant?.companyName || process.env.COMPANY_NAME || 'SPC MANAGMENT'
         });
         console.log(`📧 Final settlement email sent to ${employeeDetails.email}`);
       } catch (emailError) {

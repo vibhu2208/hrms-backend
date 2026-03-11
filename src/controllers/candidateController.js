@@ -487,11 +487,11 @@ exports.createCandidate = async (req, res) => {
           candidateName: `${candidate.firstName} ${candidate.lastName}`,
           candidateEmail: candidate.email,
           position: position,
-          companyName: req.body.companyName || 'Our Company'
+          companyName: req.body.companyName || 'SPC MANAGMENT'
         });
         console.log('Application received email sent successfully with position:', position);
       } catch (emailError) {
-        console.error('Failed to send application email:', emailError.message);
+        console.error('Failed to send application email:', emailError);
         // Don't throw - email failure shouldn't break candidate creation
       }
     }
@@ -649,7 +649,7 @@ exports.updateStage = async (req, res) => {
     // Send emails based on stage change
     const candidateName = `${candidate.firstName} ${candidate.lastName}`;
     const position = candidate.appliedFor?.title || 'Position';
-    const companyName = req.body.companyName || 'Our Company';
+    const companyName = req.body.companyName || 'SPC MANAGMENT';
 
     // Send shortlisted email
     if (stage === 'shortlisted' && previousStage !== 'shortlisted') {
@@ -937,7 +937,7 @@ exports.moveToStage = async (req, res) => {
     candidate.timeline.push({
       action: 'Stage Changed',
       description: description,
-      performedBy: req.user?._id || req.user?.id,
+      performedBy: req.user?._id,
       timestamp: new Date(),
       ...(skippedStage && { skippedStage: skippedStage })
     });
@@ -1004,7 +1004,7 @@ exports.scheduleInterview = async (req, res) => {
 
     // Send interview notification email automatically
     const newInterview = candidate.interviews[candidate.interviews.length - 1];
-    const companyName = req.body.companyName || 'TechThrive System';
+    const companyName = req.body.companyName || 'SPC MANAGMENT';
     
     try {
       console.log('📧 Sending interview notification email to:', candidate.email);
@@ -1249,7 +1249,7 @@ exports.moveToOnboarding = async (req, res) => {
           position: onboarding.position,
           joiningDate: onboarding.joiningDate,
           uploadUrl,
-          companyName: req.tenant?.companyName || 'Our Company'
+          companyName: req.tenant?.companyName || 'SPC MANAGMENT'
         });
         console.log(`📧 Offer letter with document link sent to ${onboarding.candidateEmail}`);
       } catch (tokenError) {
@@ -1319,12 +1319,12 @@ exports.updateInterviewFeedback = async (req, res) => {
         
         // Send interview completed email
         await candidate.populate('appliedFor', 'title');
-        sendInterviewCompletedEmail({
+        await sendInterviewCompletedEmail({
           candidateName: `${candidate.firstName} ${candidate.lastName}`,
           candidateEmail: candidate.email,
           interviewType: interview.interviewType || 'Interview',
           position: candidate.appliedFor?.title || 'Position',
-          companyName: req.body.companyName || 'Our Company'
+          companyName: req.body.companyName || 'SPC MANAGMENT'
         }).catch(err => console.error('Failed to send interview completed email:', err.message));
       }
     }
@@ -1408,7 +1408,7 @@ exports.sendNotification = async (req, res) => {
 
     const candidateName = `${candidate.firstName} ${candidate.lastName}`;
     const position = candidate.appliedFor?.title || 'Position';
-    const companyName = req.body.companyName || 'TechThrive System';
+    const companyName = req.body.companyName || 'SPC MANAGMENT';
 
     // Update notification status
     if (type === 'interviewEmail') {
@@ -1539,10 +1539,43 @@ exports.updateHRCall = async (req, res) => {
     let timelineDesc = 'HR call updated';
     if (status === 'completed') {
       timelineDesc = `HR call completed - Decision: ${decision || 'Pending'}`;
+      
+      // Send HR call completed email
+      try {
+        await sendInterviewCompletedEmail({
+          candidateName,
+          candidateEmail: candidate.email,
+          interviewType: 'HR',
+          position,
+          companyName
+        });
+        console.log('✅ HR call completed email sent to:', candidate.email);
+      } catch (emailError) {
+        console.error('❌ Failed to send HR call completed email:', emailError.message);
+      }
     } else if (status === 'scheduled' && scheduledDate) {
       try {
         const scheduleDate = new Date(scheduledDate);
         timelineDesc = `HR call scheduled for ${scheduleDate.toLocaleDateString()}`;
+        
+        // Send HR call scheduled email
+        try {
+          await sendInterviewNotification({
+            candidateName,
+            candidateEmail: candidate.email,
+            interviewType: 'HR',
+            interviewDate: scheduledDate,
+            interviewTime: '',
+            meetingLink: '',
+            meetingPlatform: '',
+            interviewerName: null,
+            position,
+            companyName
+          });
+          console.log('✅ HR call scheduled email sent to:', candidate.email);
+        } catch (emailError) {
+          console.error('❌ Failed to send HR call scheduled email:', emailError.message);
+        }
       } catch (dateError) {
         console.warn('Invalid scheduledDate provided:', scheduledDate);
         timelineDesc = 'HR call scheduled';
@@ -1559,7 +1592,7 @@ exports.updateHRCall = async (req, res) => {
     // Handle decision outcomes and send emails
     const candidateName = `${candidate.firstName} ${candidate.lastName}`;
     const position = candidate.appliedFor?.title || 'Position';
-    const companyName = req.body.companyName || 'TechThrive System';
+    const companyName = req.body.companyName || 'SPC MANAGMENT';
 
     const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : status;
     const normalizedDecision = typeof decision === 'string' ? decision.trim().toLowerCase() : decision;
@@ -2147,12 +2180,12 @@ exports.sendInterviewEmail = async (req, res) => {
         meetingPlatform: interview.meetingPlatform,
         interviewerName: interviewerName,
         position: candidate.appliedFor?.title || 'Position',
-        companyName: companyName || 'Our Company'
+        companyName: companyName || 'SPC MANAGMENT'
       });
       
       console.log('✅ Interview email sent successfully. Message ID:', emailResult.messageId);
 
-      // Update notification status
+      // Update notification tracking
       if (!candidate.notifications) {
         candidate.notifications = {};
       }
