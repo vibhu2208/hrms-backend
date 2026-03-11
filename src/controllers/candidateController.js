@@ -1401,10 +1401,43 @@ exports.updateHRCall = async (req, res) => {
     let timelineDesc = 'HR call updated';
     if (status === 'completed') {
       timelineDesc = `HR call completed - Decision: ${decision || 'Pending'}`;
+      
+      // Send HR call completed email
+      try {
+        await sendInterviewCompletedEmail({
+          candidateName,
+          candidateEmail: candidate.email,
+          interviewType: 'HR',
+          position,
+          companyName
+        });
+        console.log('✅ HR call completed email sent to:', candidate.email);
+      } catch (emailError) {
+        console.error('❌ Failed to send HR call completed email:', emailError.message);
+      }
     } else if (status === 'scheduled' && scheduledDate) {
       try {
         const scheduleDate = new Date(scheduledDate);
         timelineDesc = `HR call scheduled for ${scheduleDate.toLocaleDateString()}`;
+        
+        // Send HR call scheduled email
+        try {
+          await sendInterviewNotification({
+            candidateName,
+            candidateEmail: candidate.email,
+            interviewType: 'HR',
+            interviewDate: scheduledDate,
+            interviewTime: '',
+            meetingLink: '',
+            meetingPlatform: '',
+            interviewerName: null,
+            position,
+            companyName
+          });
+          console.log('✅ HR call scheduled email sent to:', candidate.email);
+        } catch (emailError) {
+          console.error('❌ Failed to send HR call scheduled email:', emailError.message);
+        }
       } catch (dateError) {
         console.warn('Invalid scheduledDate provided:', scheduledDate);
         timelineDesc = 'HR call scheduled';
