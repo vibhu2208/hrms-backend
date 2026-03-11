@@ -796,22 +796,56 @@ class OffboardingWorkflowEngine {
         const empPhone = String(employeeData.phone || '').trim();
         const empCode = String(employeeData.employeeCode || '').trim();
 
-        const existingCandidate = await Candidate.findOne({
-          $or: [
-            { exEmployeeId: employeeData._id },
-            { exEmployeeCode: empCode },
-            { email: empEmail, isExEmployee: true }
-          ]
+        // Check for existing candidate by email first (most likely scenario)
+        let existingCandidate = await Candidate.findOne({
+          email: empEmail
         });
 
+        // If not found by email, check by ex-employee identifiers
+        if (!existingCandidate) {
+          existingCandidate = await Candidate.findOne({
+            $or: [
+              { exEmployeeId: employeeData._id },
+              { exEmployeeCode: empCode }
+            ]
+          });
+        }
+        
         if (existingCandidate) {
-          console.log(`⚠️  Candidate already exists for ex-employee ${empFirstName} ${empLastName} (${empCode}): ${existingCandidate.candidateCode}`);
-          if (existingCandidate.firstName !== empFirstName || existingCandidate.lastName !== empLastName) {
-            existingCandidate.firstName = empFirstName;
-            existingCandidate.lastName = empLastName;
-            await existingCandidate.save();
-            console.log(`✅ Updated candidate name for ${existingCandidate.candidateCode}`);
-          }
+          console.log(`🔄 Updating existing candidate to ex-employee status: ${existingCandidate.candidateCode}`);
+          
+          // Update existing candidate to ex-employee
+          existingCandidate.isExEmployee = true;
+          existingCandidate.exEmployeeId = employeeData._id;
+          existingCandidate.exEmployeeCode = empCode;
+          existingCandidate.firstName = empFirstName;
+          existingCandidate.lastName = empLastName;
+          existingCandidate.currentDesignation = employeeData.designation || 'Previous Role';
+          existingCandidate.currentCTC = this.sanitizeCTC(employeeData.salary?.total ?? employeeData.salary);
+          existingCandidate.experience = {
+            years: experience.years,
+            months: experience.months
+          };
+          
+          // Add timeline entry for offboarding
+          existingCandidate.timeline = existingCandidate.timeline || [];
+          existingCandidate.timeline.push({
+            action: 'Marked as Ex-Employee',
+            description: `Employee offboarding completed. Previous employee code: ${empCode}. Experience: ${experience.years} years ${experience.months} months.`,
+            timestamp: new Date()
+          });
+
+          // Add workflow history entry
+          existingCandidate.workflowHistory = existingCandidate.workflowHistory || [];
+          existingCandidate.workflowHistory.push({
+            fromStage: existingCandidate.stage,
+            toStage: existingCandidate.stage, // Keep same stage but mark as ex-employee
+            reason: `Employee offboarded: ${offboardingRequest.reason || 'Offboarding completed'}`,
+            timestamp: new Date()
+          });
+
+          await existingCandidate.save();
+          console.log(`✅ Updated existing candidate ${existingCandidate.candidateCode} to ex-employee status`);
         } else {
           const candidateData = {
             firstName: empFirstName,
