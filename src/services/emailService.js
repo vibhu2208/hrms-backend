@@ -1609,154 +1609,209 @@ const sendShortlistedEmail = async ({
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>You're Shortlisted – ${position} at ${companyName}</title>
+  <title>You've Been Shortlisted – ${position} at ${companyName}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Georgia', serif;
-      background-color: #ffffff;
-      color: #000000;
-      padding: 40px 20px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f5f5f5;
+      color: #333333;
+      padding: 20px;
     }
-    .wrapper {
-      max-width: 620px;
+    .container {
+      max-width: 600px;
       margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
     .header {
-      padding: 28px 40px;
-      text-align: left;
+      background-color: #1a1a2e;
+      padding: 30px;
+      text-align: center;
     }
     .header h1 {
-      font-size: 20px;
-      font-weight: bold;
-      letter-spacing: 1px;
-      text-transform: uppercase;
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: 600;
+      margin: 0;
     }
-    .header p {
-      font-size: 12px;
-      margin-top: 4px;
-      letter-spacing: 0.5px;
+    .content {
+      padding: 40px 30px;
+    }
+    .greeting {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #1a1a2e;
+    }
+    .message {
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 25px;
       color: #444444;
     }
-    .body {
-      padding: 36px 40px;
-    }
-    .salutation {
-      font-size: 15px;
-      margin-bottom: 20px;
-      text-align: left;
-    }
-    .notice-box {
-      padding: 0;
-      margin-bottom: 24px;
-      text-align: left;
-    }
-    .notice-box p {
-      font-size: 14px;
-      line-height: 1.7;
-    }
-    .notice-box strong {
-      font-weight: bold;
-    }
     .section-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: #1a1a2e;
+      margin: 25px 0 15px 0;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    .status-box {
+      background-color: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 4px;
+    }
+    .status-box p {
+      margin: 0;
+      font-size: 14px;
+      color: #2e7d32;
+    }
+    .next-steps {
+      background-color: #f5f5f5;
+      padding: 20px;
+      border-radius: 6px;
+      margin: 20px 0;
+    }
+    .next-steps ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    .next-steps li {
+      margin: 10px 0;
+      font-size: 14px;
+      color: #555555;
+    }
+    .note-box {
+      background-color: #fff3e0;
+      border-left: 4px solid #ff9800;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .note-box p {
+      margin: 0;
       font-size: 13px;
-      font-weight: bold;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      text-align: left;
+      color: #e65100;
     }
-    .steps-list {
-      list-style: none;
-      padding: 0;
-      margin-bottom: 28px;
+    .social-section {
+      text-align: center;
+      margin: 30px 0;
+      padding: 20px;
+      background-color: #fafafa;
+      border-radius: 6px;
     }
-    .steps-list li {
+    .social-section p {
       font-size: 14px;
-      line-height: 1.7;
-      padding: 6px 0;
+      color: #666666;
+      margin-bottom: 15px;
+    }
+    .social-links {
       display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      text-align: left;
+      justify-content: center;
+      gap: 15px;
     }
-    .steps-list li::before {
-      content: "—";
-      font-weight: bold;
-      flex-shrink: 0;
+    .social-btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background-color: #1a1a2e;
+      color: #ffffff;
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 13px;
+      transition: background-color 0.3s;
     }
-    .closing {
-      font-size: 14px;
-      line-height: 1.8;
-      margin-bottom: 28px;
-      text-align: left;
+    .social-btn:hover {
+      background-color: #2d2d44;
     }
     .signature {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e0e0;
+    }
+    .signature p {
       font-size: 14px;
-      line-height: 1.8;
-      text-align: left;
+      color: #555555;
+      margin: 5px 0;
     }
     .signature strong {
-      display: block;
-      font-size: 15px;
+      color: #1a1a2e;
     }
     .footer {
-      padding: 16px 40px;
-      text-align: left;
-      font-size: 11px;
-      color: #555555;
-      letter-spacing: 0.4px;
+      background-color: #1a1a2e;
+      color: #ffffff;
+      padding: 20px;
+      text-align: center;
+      font-size: 12px;
+    }
+    .footer a {
+      color: #4fc3f7;
+      text-decoration: none;
+    }
+    .footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <div class="wrapper">
-
+  <div class="container">
     <div class="header">
       <h1>${companyName}</h1>
-      <p>Human Resources Department</p>
     </div>
 
-    <div class="body">
+    <div class="content">
+      <p class="greeting">Dear <strong>${candidateName}</strong>,</p>
 
-      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
-
-      <div class="notice-box">
-        <p>
-          We are pleased to inform you that you have been <strong>shortlisted</strong>
-          for the position of <strong>${position}</strong> at
-          <strong>${companyName}</strong>. Your profile has been reviewed and
-          selected to move forward in our recruitment process.
-        </p>
-      </div>
-
-      <p class="section-title">Next Steps</p>
-      <ul class="steps-list">
-        <li>You will be contacted shortly to schedule a formal interview.</li>
-        <li>Please ensure your phone and email address remain accessible.</li>
-        <li>Kindly prepare your documents and portfolio in advance.</li>
-      </ul>
-
-      <p class="closing">
-        We look forward to meeting you and learning more about your experience.
-        Should you have any questions in the meantime, please do not hesitate
-        to reach out to our HR team.
+      <p class="message">
+        Thank you for applying for the <strong>${position}</strong> position at
+        <strong>${companyName}</strong> and for the time and effort you invested
+        in your application.
       </p>
 
-      <div class="signature">
-        <p>Yours sincerely,</p>
-        <strong>HR Team</strong>
-        <span>${companyName}</span>
+      <div class="section-title">Current Status</div>
+      <div class="status-box">
+        <p><strong>Congratulations!</strong> You have been <strong>shortlisted</strong> for the ${position} role. Your profile has been reviewed and selected to move forward in our recruitment process.</p>
       </div>
 
+      <div class="section-title">What's Next</div>
+      <div class="next-steps">
+        <ul>
+          <li>Our HR team will contact you shortly to schedule the next round of interviews</li>
+          <li>Please keep your phone and email accessible</li>
+          <li>Prepare any relevant documents or portfolio items as requested in the job description</li>
+          <li>Feel free to reach out if you have any questions about the process</li>
+        </ul>
+      </div>
+
+      <div class="note-box">
+        <p><strong>Important:</strong> Please do not reply directly to this automated email. For any queries, contact our HR team at hr@${companyName.toLowerCase().replace(/\s+/g, '')}.com</p>
+      </div>
+
+      <div class="social-section">
+        <p>Stay connected with us:</p>
+        <div class="social-links">
+          <a href="https://linkedin.com/company/${companyName.toLowerCase().replace(/\s+/g, '')}" class="social-btn">LinkedIn</a>
+          <a href="https://twitter.com/${companyName.toLowerCase().replace(/\s+/g, '')}" class="social-btn">Twitter</a>
+          <a href="https://facebook.com/${companyName.toLowerCase().replace(/\s+/g, '')}" class="social-btn">Facebook</a>
+        </div>
+      </div>
+
+      <div class="signature">
+        <p>Best regards,</p>
+        <p><strong>HR Team</strong></p>
+        <p>${companyName}</p>
+      </div>
     </div>
 
     <div class="footer">
-      &copy; ${new Date().getFullYear()} ${companyName}. All rights reserved. &nbsp;|&nbsp;
-      This is an automated notification. Please do not reply directly to this email.
+      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+      <p>This is an automated email. Please do not reply to this message.</p>
+      <p>For support, contact us at <a href="mailto:hr@${companyName.toLowerCase().replace(/\s+/g, '')}.com">hr@${companyName.toLowerCase().replace(/\s+/g, '')}.com</a></p>
     </div>
-
   </div>
 </body>
 </html>
