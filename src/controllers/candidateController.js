@@ -1535,6 +1535,11 @@ exports.updateHRCall = async (req, res) => {
     if (decision !== undefined) candidate.hrCall.decision = decision;
     candidate.hrCall.conductedBy = req.user?._id;
 
+    // Define email variables BEFORE using them
+    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
+    const position = candidate.appliedFor?.title || 'Position';
+    const companyName = req.body.companyName || 'SPC MANAGMENT';
+
     // Add to timeline
     let timelineDesc = 'HR call updated';
     if (status === 'completed') {
@@ -1590,10 +1595,6 @@ exports.updateHRCall = async (req, res) => {
     });
 
     // Handle decision outcomes and send emails
-    const candidateName = `${candidate.firstName} ${candidate.lastName}`;
-    const position = candidate.appliedFor?.title || 'Position';
-    const companyName = req.body.companyName || 'SPC MANAGMENT';
-
     const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : status;
     const normalizedDecision = typeof decision === 'string' ? decision.trim().toLowerCase() : decision;
 

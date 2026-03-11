@@ -31,6 +31,11 @@ const sendEmail = async (options) => {
       text: options.text || ''
     };
 
+    // Add attachments if provided
+    if (options.attachments && Array.isArray(options.attachments)) {
+      mailOptions.attachments = options.attachments;
+    }
+
     const result = await sendEmailWithRetry(transporter, mailOptions);
     console.log(`✅ Email sent successfully to ${options.to}`);
     return result;
@@ -2226,147 +2231,216 @@ const sendDocumentRequestEmail = async ({
 
     const htmlContent = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Document Submission Required – ${companyName}</title>
   <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      line-height: 1.6;
-      color: #333;
-      background-color: #f4f4f4;
-      margin: 0;
-      padding: 0;
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
     }
-    .container {
-      max-width: 600px;
-      margin: 20px auto;
-      background: #ffffff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
     }
     .header {
-      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-      color: white;
-      padding: 30px;
-      text-align: center;
+      padding: 28px 40px 10px 40px;
     }
     .header h1 {
-      margin: 0;
-      font-size: 28px;
-    }
-    .content {
-      padding: 30px;
-    }
-    .info-box {
-      background: #dbeafe;
-      border-left: 4px solid #3b82f6;
-      padding: 20px;
-      margin: 20px 0;
-      border-radius: 4px;
-    }
-    .cta-button {
-      display: inline-block;
-      background: #3b82f6;
-      color: white;
-      padding: 15px 40px;
-      text-decoration: none;
-      border-radius: 5px;
-      margin: 20px 0;
+      font-size: 20px;
       font-weight: bold;
-      font-size: 16px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
     }
-    .document-list {
-      background: #f8f9fa;
-      padding: 20px;
-      margin: 20px 0;
-      border-radius: 4px;
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
     }
-    .document-list ul {
-      margin: 10px 0;
-      padding-left: 20px;
+    .body {
+      padding: 28px 40px;
     }
-    .document-list li {
-      margin: 8px 0;
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 16px;
+    }
+    .para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 20px;
+    }
+    .action-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .action-desc {
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .doc-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 28px;
+    }
+    .doc-list li {
+      font-size: 14px;
+      line-height: 1.7;
+      padding: 5px 0;
+      display: flex;
+      gap: 10px;
+    }
+    .doc-list li::before {
+      content: "—";
+      flex-shrink: 0;
+    }
+    .upload-btn {
+      display: inline-block;
+      margin: 4px 0 28px 0;
+      padding: 11px 28px;
+      font-size: 14px;
+      font-family: 'Georgia', serif;
+      font-weight: bold;
+      text-decoration: none;
+      color: #000000;
+      border: 1.5px solid #000000;
+      letter-spacing: 0.5px;
+    }
+    .notes-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .notes-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 24px;
+    }
+    .notes-list li {
+      font-size: 14px;
+      line-height: 1.7;
+      padding: 5px 0;
+      display: flex;
+      gap: 10px;
+    }
+    .notes-list li::before {
+      content: "—";
+      flex-shrink: 0;
+    }
+    .closing {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+    .signature {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
     }
     .footer {
-      background: #f8f9fa;
-      padding: 20px;
-      text-align: center;
-      color: #666;
-      font-size: 14px;
-    }
-    .emoji {
-      font-size: 24px;
+      padding: 16px 40px;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="wrapper">
+
+    <!-- Header -->
     <div class="header">
-      <div class="emoji">📄</div>
-      <h1>Document Submission Required</h1>
+      <h1>${companyName}</h1>
+      <p>Human Resources Department</p>
     </div>
-    
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      
-      <p>We are pleased to inform you that your onboarding process for the <strong>${position}</strong> position at ${companyName} is progressing well.</p>
-      
-      <div class="info-box">
-        <p><strong>📋 Action Required: Submit Your Documents</strong></p>
-        <p>To proceed with your onboarding, we need you to upload the required documents through our secure document portal.</p>
-      </div>
-      
-      <div class="document-list">
-        <h3>📎 Required Documents:</h3>
-        <ul>
-          <li>Aadhaar Card (both sides)</li>
-          <li>PAN Card</li>
-          <li>Educational Certificates</li>
-          <li>Address Proof</li>
-          <li>Bank Account Details (cancelled cheque or passbook)</li>
-          <li>Passport-size Photograph</li>
-          <li>Previous Employment Documents (if applicable)</li>
-        </ul>
-      </div>
-      
-      <p style="text-align: center;">
-        <a href="${uploadUrl}" class="cta-button">
-          📤 Upload Documents Now
-        </a>
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
+
+      <p class="para">
+        We are pleased to inform you that your onboarding process for the
+        <strong>${position}</strong> position at ${companyName} is progressing well.
       </p>
-      
-      <p><strong>Important Notes:</strong></p>
-      <ul>
-        <li>All documents should be clear and legible</li>
-        <li>Accepted formats: PDF, JPG, PNG</li>
-        <li>Maximum file size: 10MB per document</li>
-        <li>This link is secure and unique to you</li>
+
+      <!-- Action Required -->
+      <p class="action-title">Action Required: Submit Your Documents</p>
+      <p class="action-desc">
+        To proceed with your onboarding, we need you to upload the required documents
+        through our secure document portal.
+      </p>
+
+      <!-- Required Documents -->
+      <p class="section-title">Required Documents</p>
+      <ul class="doc-list">
+        <li>Aadhaar Card (both sides)</li>
+        <li>PAN Card</li>
+        <li>Educational Certificates</li>
+        <li>Address Proof</li>
+        <li>Bank Account Details (cancelled cheque or passbook)</li>
+        <li>Passport-size Photograph</li>
+        <li>Previous Employment Documents (if applicable)</li>
       </ul>
-      
-      <p>If you face any issues or have questions, please don't hesitate to contact our HR team.</p>
-      
-      <p style="margin-top: 30px;">
-        Best regards,<br>
-        <strong>HR Team</strong><br>
-        ${companyName}
+
+      <!-- Upload Button -->
+      <a href="${uploadUrl}" class="upload-btn">Upload Documents Now</a>
+
+      <!-- Important Notes -->
+      <p class="notes-title">Important Notes</p>
+      <ul class="notes-list">
+        <li>All documents should be clear and legible.</li>
+        <li>Accepted formats: PDF, JPG, PNG.</li>
+        <li>Maximum file size: 10MB per document.</li>
+        <li>This link is secure and unique to you.</li>
+      </ul>
+
+      <p class="closing">
+        If you face any issues or have questions, please do not hesitate to contact our HR team.
       </p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Best regards,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span>
+      </div>
+
     </div>
-    
+
+    <!-- Footer -->
     <div class="footer">
-      <p>This is an automated email from the HRMS system. Please do not reply to this email.</p>
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+      This is an automated email from the HRMS system. Please do not reply to this email. &nbsp;|&nbsp; © ${new Date().getFullYear()} ${companyName}. All rights reserved.
     </div>
+
   </div>
 </body>
 </html>
     `;
 
     const textContent = `
-Document Submission Required
+Document Submission Required – ${companyName}
 
 Dear ${candidateName},
 
@@ -2376,30 +2450,29 @@ Action Required: Submit Your Documents
 To proceed with your onboarding, we need you to upload the required documents through our secure document portal.
 
 Required Documents:
-- Aadhaar Card (both sides)
-- PAN Card
-- Educational Certificates
-- Address Proof
-- Bank Account Details (cancelled cheque or passbook)
-- Passport-size Photograph
-- Previous Employment Documents (if applicable)
+— Aadhaar Card (both sides)
+— PAN Card
+— Educational Certificates
+— Address Proof
+— Bank Account Details (cancelled cheque or passbook)
+— Passport-size Photograph
+— Previous Employment Documents (if applicable)
 
 Upload Link: ${uploadUrl}
 
 Important Notes:
-- All documents should be clear and legible
-- Accepted formats: PDF, JPG, PNG
-- Maximum file size: 10MB per document
-- This link is secure and unique to you
+— All documents should be clear and legible.
+— Accepted formats: PDF, JPG, PNG.
+— Maximum file size: 10MB per document.
+— This link is secure and unique to you.
 
-If you face any issues or have questions, please contact our HR team.
+If you face any issues or have questions, please do not hesitate to contact our HR team.
 
 Best regards,
 HR Team
 ${companyName}
 
----
-This is an automated email from the HRMS system. Please do not reply to this email.
+© ${new Date().getFullYear()} ${companyName}. All rights reserved.
     `;
 
     const mailOptions = {
@@ -2408,7 +2481,7 @@ This is an automated email from the HRMS system. Please do not reply to this ema
         address: process.env.EMAIL_USER
       },
       to: candidateEmail,
-      subject: `📄 Document Submission Required - ${position} at ${companyName}`,
+      subject: `Document Submission Required – ${position} at ${companyName}`,
       text: textContent,
       html: htmlContent,
       priority: 'high'
@@ -2454,128 +2527,184 @@ const sendJoiningDateConfirmationEmail = async ({
 
     const htmlContent = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Joining Date Confirmed – ${companyName}</title>
   <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      line-height: 1.6;
-      color: #333;
-      background-color: #f4f4f4;
-      margin: 0;
-      padding: 0;
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
     }
-    .container {
-      max-width: 600px;
-      margin: 20px auto;
-      background: #ffffff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
     }
     .header {
-      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-      color: white;
-      padding: 30px;
-      text-align: center;
+      padding: 28px 40px 10px 40px;
     }
     .header h1 {
-      margin: 0;
-      font-size: 28px;
-    }
-    .content {
-      padding: 30px;
-    }
-    .info-box {
-      background: #d1fae5;
-      border-left: 4px solid #10b981;
-      padding: 20px;
-      margin: 20px 0;
-      border-radius: 4px;
-    }
-    .date-box {
-      background: #f8f9fa;
-      border-left: 4px solid #10b981;
-      padding: 20px;
-      margin: 20px 0;
-      border-radius: 4px;
-      text-align: center;
-    }
-    .date-display {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: bold;
-      color: #10b981;
-      margin: 10px 0;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
+    }
+    .body {
+      padding: 28px 40px;
+    }
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 16px;
+    }
+    .para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 20px;
+    }
+    .onboarding-notice {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+    .onboarding-sub {
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 24px;
+    }
+    .joining-label {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #555555;
+      margin-bottom: 6px;
+    }
+    .joining-date {
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      margin-bottom: 28px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .info-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 24px;
+    }
+    .info-list li {
+      font-size: 14px;
+      line-height: 1.7;
+      padding: 5px 0;
+      display: flex;
+      gap: 10px;
+    }
+    .info-list li::before {
+      content: "—";
+      flex-shrink: 0;
+    }
+    .closing {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+    .signature {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
     }
     .footer {
-      background: #f8f9fa;
-      padding: 20px;
-      text-align: center;
-      color: #666;
-      font-size: 14px;
-    }
-    .emoji {
-      font-size: 24px;
+      padding: 16px 40px;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="wrapper">
+
+    <!-- Header -->
     <div class="header">
-      <div class="emoji">🎉</div>
-      <h1>Joining Date Confirmed!</h1>
+      <h1>${companyName}</h1>
+      <p>Human Resources Department</p>
     </div>
-    
-    <div class="content">
-      <p>Dear <strong>${candidateName}</strong>,</p>
-      
-      <p>We are delighted to confirm your joining details for the <strong>${position}</strong> position at ${companyName}.</p>
-      
-      <div class="info-box">
-        <p><strong>✅ Your onboarding process is almost complete!</strong></p>
-        <p>We look forward to welcoming you to our team.</p>
-      </div>
-      
-      <div class="date-box">
-        <h3>📅 Your Joining Date</h3>
-        <div class="date-display">${new Date(joiningDate).toLocaleDateString('en-US', { 
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
+
+      <p class="para">
+        We are delighted to confirm your joining details for the
+        <strong>${position}</strong> position at ${companyName}.
+      </p>
+
+      <!-- Onboarding Notice -->
+      <p class="onboarding-notice">Your onboarding process is almost complete!</p>
+      <p class="onboarding-sub">We look forward to welcoming you to our team.</p>
+
+      <!-- Joining Date -->
+      <p class="joining-label">Your Joining Date</p>
+      <p class="joining-date">${new Date(joiningDate).toLocaleDateString('en-US', { 
           weekday: 'long', 
           year: 'numeric', 
           month: 'long', 
           day: 'numeric' 
-        })}</div>
-      </div>
-      
-      <p><strong>What to expect on your first day:</strong></p>
-      <ul>
-        <li>Orientation and introduction to the team</li>
-        <li>IT setup and account access</li>
-        <li>Documentation verification</li>
-        <li>Office and facilities tour</li>
+        })}</p>
+
+      <!-- What to Expect -->
+      <p class="section-title">What to Expect on Your First Day</p>
+      <ul class="info-list">
+        <li>Orientation and introduction to the team.</li>
+        <li>IT setup and account access.</li>
+        <li>Documentation verification.</li>
+        <li>Office and facilities tour.</li>
       </ul>
-      
-      <p><strong>What to bring:</strong></p>
-      <ul>
-        <li>Original documents for verification</li>
-        <li>ID proof (Aadhar/PAN/Passport)</li>
-        <li>Passport-size photographs</li>
+
+      <!-- What to Bring -->
+      <p class="section-title">What to Bring</p>
+      <ul class="info-list">
+        <li>Original documents for verification.</li>
+        <li>ID proof (Aadhaar / PAN / Passport).</li>
+        <li>Passport-size photographs.</li>
       </ul>
-      
-      <p>If you have any questions or need to reschedule, please contact our HR team immediately.</p>
-      
-      <p style="margin-top: 30px;">
-        Best regards,<br>
-        <strong>HR Team</strong><br>
-        ${companyName}
+
+      <p class="closing">
+        If you have any questions or need to reschedule, please contact our HR team immediately.
       </p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Best regards,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span>
+      </div>
+
     </div>
-    
+
+    <!-- Footer -->
     <div class="footer">
-      <p>This is an automated email from the HRMS system. Please do not reply to this email.</p>
-      <p>&copy; ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
+      This is an automated email from the HRMS system. Please do not reply to this email. &nbsp;|&nbsp; © ${new Date().getFullYear()} ${companyName}. All rights reserved.
     </div>
+
   </div>
 </body>
 </html>
@@ -2587,9 +2716,9 @@ const sendJoiningDateConfirmationEmail = async ({
         address: process.env.EMAIL_USER
       },
       to: candidateEmail,
-      subject: `🎉 Joining Date Confirmed - ${position} at ${companyName}`,
+      subject: `Joining Date Confirmed – ${position} at ${companyName}`,
       text: `
-Joining Date Confirmed - ${companyName}
+Joining Date Confirmed – ${companyName}
 
 Dear ${candidateName},
 
@@ -2597,24 +2726,32 @@ We are delighted to confirm your joining details for the ${position} position at
 
 Your onboarding process is almost complete! We look forward to welcoming you to our team.
 
-📅 Your Joining Date: ${new Date(joiningDate).toLocaleDateString()}
+Your Joining Date
+${new Date(joiningDate).toLocaleDateString('en-US', { 
+  weekday: 'long', 
+  year: 'numeric', 
+  month: 'long', 
+  day: 'numeric' 
+})}
 
-What to expect on your first day:
-- Orientation and introduction to the team
-- IT setup and account access
-- Documentation verification
-- Office and facilities tour
+What to Expect on Your First Day:
+— Orientation and introduction to the team.
+— IT setup and account access.
+— Documentation verification.
+— Office and facilities tour.
 
-What to bring:
-- Original documents for verification
-- ID proof (Aadhar/PAN/Passport)
-- Passport-size photographs
+What to Bring:
+— Original documents for verification.
+— ID proof (Aadhaar / PAN / Passport).
+— Passport-size photographs.
 
 If you have any questions or need to reschedule, please contact our HR team immediately.
 
 Best regards,
 HR Team
 ${companyName}
+
+© ${new Date().getFullYear()} ${companyName}. All rights reserved.
       `,
       html: htmlContent,
       priority: 'high'
@@ -3614,81 +3751,193 @@ const sendPayslipVerificationRequestEmail = async ({
   expiryDate
 }) => {
   try {
-    const subject = `${companyName} - Payslip Verification Required for ${position} Position`;
+    const subject = `Payslip Verification Required – ${position} Position`;
     
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Payslip Verification Request</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #A88BFF; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .button { 
-            display: inline-block; 
-            padding: 12px 24px; 
-            background: #A88BFF; 
-            color: white; 
-            text-decoration: none; 
-            border-radius: 5px; 
-            margin: 20px 0;
-          }
-          .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-          .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 10px 0; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Payslip Verification Request</h1>
-          </div>
-          <div class="content">
-            <p>Dear ${candidateName},</p>
-            <p>Congratulations on your progress for the <strong>${position}</strong> position at ${companyName}!</p>
-            <p>As part of our verification process, we need you to upload your recent payslip for verification. This is a mandatory step before we can proceed with your offer letter.</p>
-            
-            <div class="warning">
-              <strong>Important:</strong> Please upload your payslip within 7 days. The upload link will expire on ${new Date(expiryDate).toLocaleDateString()}.
-            </div>
-            
-            <p><strong>Instructions:</strong></p>
-            <ul>
-              <li>Click the button below to upload your payslip</li>
-              <li>Ensure the payslip shows your name, company, and salary details</li>
-              <li>File should be in PDF, JPG, or PNG format</li>
-              <li>Maximum file size: 5MB</li>
-              <li>This link is secure and unique to you</li>
-            </ul>
-            
-            <div style="text-align: center;">
-              <a href="${uploadUrl}" class="button">Upload Payslip</a>
-            </div>
-            
-            <p>If you have any issues uploading the document, please contact our HR team.</p>
-            
-            <p>We look forward to receiving your documents and moving forward with your onboarding process.</p>
-            
-            <p>Best regards,<br>
-            HR Team<br>
-            ${companyName}</p>
-          </div>
-          <div class="footer">
-            <p>This is an automated message. Please do not reply to this email.</p>
-            <p>© ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Payslip Verification Required – ${position} Position</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
+    }
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
+    }
+    .header {
+      padding: 28px 40px 10px 40px;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
+    }
+    .body {
+      padding: 28px 40px;
+    }
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 16px;
+    }
+    .para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 16px;
+    }
+    .important-box {
+      padding: 0;
+      margin-bottom: 24px;
+    }
+    .important-box p {
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .instructions-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 28px;
+    }
+    .instructions-list li {
+      font-size: 14px;
+      line-height: 1.7;
+      padding: 5px 0;
+      display: flex;
+      gap: 10px;
+    }
+    .instructions-list li::before {
+      content: "—";
+      flex-shrink: 0;
+    }
+    .upload-btn {
+      display: inline-block;
+      margin: 4px 0 28px 0;
+      padding: 11px 28px;
+      font-size: 14px;
+      font-family: 'Georgia', serif;
+      font-weight: bold;
+      text-decoration: none;
+      color: #000000;
+      border: 1.5px solid #000000;
+      letter-spacing: 0.5px;
+    }
+    .closing {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 8px;
+    }
+    .closing2 {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 28px;
+    }
+    .signature {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
+    }
+    .footer {
+      padding: 16px 40px;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>${companyName}</h1>
+      <p>Human Resources Department</p>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
+
+      <p class="para">
+        Congratulations on your progress for the <strong>${position}</strong> position at ${companyName}.
+      </p>
+
+      <p class="para">
+        As part of our verification process, we need you to upload your recent payslip for verification.
+        This is a mandatory step before we can proceed with your offer letter.
+      </p>
+
+      <!-- Important Notice -->
+      <div class="important-box">
+        <p>
+          <strong>Important:</strong> Please upload your payslip within 7 days.
+          The upload link will expire on ${expiryDate ? new Date(expiryDate).toLocaleDateString() : 'the given date'}.
+        </p>
+      </div>
+
+      <!-- Instructions -->
+      <p class="section-title">Instructions</p>
+      <ul class="instructions-list">
+        <li>Click the button below to upload your payslip.</li>
+        <li>Ensure the payslip shows your name, company, and salary details.</li>
+        <li>File should be in PDF, JPG, or PNG format.</li>
+        <li>Maximum file size: 5MB.</li>
+        <li>This link is secure and unique to you.</li>
+      </ul>
+
+      <!-- Upload Button -->
+      
+
+      <p class="closing">If you have any issues uploading the document, please contact our HR team.</p>
+      <p class="closing2">We look forward to receiving your documents and moving forward with your onboarding process.</p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Best regards,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      This is an automated message. Please do not reply to this email. &nbsp;|&nbsp; © ${new Date().getFullYear()} ${companyName}. All rights reserved.
+    </div>
+
+  </div>
+</body>
+</html>
     `;
 
     return await sendEmail({
       to: candidateEmail,
       subject,
-      html
+      html: htmlContent
     });
   } catch (error) {
     console.error('Error sending payslip verification request email:', error);
@@ -3716,67 +3965,266 @@ const sendPayslipVerificationResultEmail = async ({
   companyName = 'SPC MANAGMENT'
 }) => {
   try {
-    const subject = `${companyName} - Payslip Verification ${isApproved ? 'Approved' : 'Requires Attention'}`;
+    const subject = isApproved 
+      ? `Payslip Verification Approved – ${companyName}`
+      : `Payslip Verification Requires Attention – ${companyName}`;
     
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Payslip Verification Result</title>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: ${isApproved ? '#28a745' : '#dc3545'}; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background: #f9f9f9; }
-          .footer { padding: 20px; text-align: center; font-size: 12px; color: #666; }
-          .success { background: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; margin: 10px 0; }
-          .error { background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 5px; margin: 10px 0; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Payslip Verification ${isApproved ? 'Approved' : 'Requires Action'}</h1>
-          </div>
-          <div class="content">
-            <p>Dear ${candidateName},</p>
-            
-            ${isApproved ? `
-              <div class="success">
-                <strong>Good News!</strong> Your payslip has been successfully verified and approved.
-              </div>
-              <p>Your verification for the <strong>${position}</strong> position at ${companyName} is complete. We will now proceed with the next steps in your onboarding process.</p>
-              <p>You will receive further communication regarding your offer letter shortly.</p>
-            ` : `
-              <div class="error">
-                <strong>Action Required:</strong> There is an issue with your payslip submission.
-              </div>
-              <p>Our team has reviewed your payslip submission for the <strong>${position}</strong> position and found the following issue:</p>
-              <p><em>${notes}</em></p>
-              <p>Please rectify the issue and re-submit your payslip. Our HR team will contact you shortly with further instructions.</p>
-            `}
-            
-            <p>If you have any questions or need assistance, please don't hesitate to contact our HR team.</p>
-            
-            <p>Best regards,<br>
-            HR Team<br>
-            ${companyName}</p>
-          </div>
-          <div class="footer">
-            <p>This is an automated message. Please do not reply to this email.</p>
-            <p>© ${new Date().getFullYear()} ${companyName}. All rights reserved.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    let htmlContent;
+    
+    if (isApproved) {
+      // Approved template - Georgia style
+      htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Payslip Verification Approved – ${companyName}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
+    }
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
+    }
+    .header {
+      padding: 28px 40px 10px 40px;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
+    }
+    .body {
+      padding: 28px 40px;
+    }
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 20px;
+    }
+    .good-news {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+    .para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 14px;
+    }
+    .signature {
+      margin-top: 28px;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
+    }
+    .footer {
+      padding: 16px 40px;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>${companyName}</h1>
+      <p>Human Resources Department</p>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
+
+      <p class="good-news">Good News! Your payslip has been successfully verified and approved.</p>
+
+      <p class="para">
+        Your verification for the <strong>${position}</strong> position at ${companyName}
+        is complete. We will now proceed with the next steps in your onboarding process.
+      </p>
+
+      <p class="para">
+        You will receive further communication regarding your offer letter shortly.
+      </p>
+
+      <p class="para">
+        If you have any questions or need assistance, please do not hesitate to contact our HR team.
+      </p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Best regards,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      This is an automated message. Please do not reply to this email. &nbsp;|&nbsp; © ${new Date().getFullYear()} ${companyName}. All rights reserved.
+    </div>
+
+  </div>
+</body>
+</html>
+      `;
+    } else {
+      // Rejected template - Georgia style
+      htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Payslip Verification Requires Attention – ${companyName}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
+    }
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
+    }
+    .header {
+      padding: 28px 40px 10px 40px;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
+    }
+    .body {
+      padding: 28px 40px;
+    }
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 20px;
+    }
+    .attention {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 20px;
+    }
+    .para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 14px;
+    }
+    .reason-box {
+      background-color: #f5f5f5;
+      padding: 16px;
+      margin: 20px 0;
+      border-left: 3px solid #000000;
+    }
+    .reason-box p {
+      font-size: 14px;
+      line-height: 1.7;
+      font-style: italic;
+    }
+    .signature {
+      margin-top: 28px;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
+    }
+    .footer {
+      padding: 16px 40px;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>${companyName}</h1>
+      <p>Human Resources Department</p>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${candidateName}</strong>,</p>
+
+      <p class="attention">Action Required: There is an issue with your payslip submission.</p>
+
+      <p class="para">
+        Our team has reviewed your payslip submission for the <strong>${position}</strong> position at ${companyName} and found the following issue:
+      </p>
+
+      <div class="reason-box">
+        <p>${notes || 'No specific reason provided.'}</p>
+      </div>
+
+      <p class="para">
+        Please rectify the issue and re-submit your payslip. Our HR team will contact you shortly with further instructions.
+      </p>
+
+      <p class="para">
+        If you have any questions or need assistance, please do not hesitate to contact our HR team.
+      </p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Best regards,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      This is an automated message. Please do not reply to this email. &nbsp;|&nbsp; © ${new Date().getFullYear()} ${companyName}. All rights reserved.
+    </div>
+
+  </div>
+</body>
+</html>
+      `;
+    }
 
     return await sendEmail({
       to: candidateEmail,
       subject,
-      html
+      html: htmlContent
     });
   } catch (error) {
     console.error('Error sending payslip verification result email:', error);
@@ -3853,105 +4301,231 @@ const sendAgreementLetterWithTemplate = async (options) => {
     const subject = processedSubject || `Employment Agreement - ${companyName}`;
     
     const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Employment Agreement</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-          }
-          .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-            border-radius: 10px 10px 0 0;
-          }
-          .content {
-            background: #ffffff;
-            padding: 40px;
-            border-radius: 0 0 10px 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-          }
-          .highlight {
-            background: #f8f9fa;
-            padding: 20px;
-            border-left: 4px solid #007bff;
-            margin: 20px 0;
-            border-radius: 5px;
-          }
-          .footer {
-            text-align: center;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e9ecef;
-            color: #6c757d;
-          }
-          .agreement-info {
-            background: #e3f2fd;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>📋 Employment Agreement</h1>
-          <p>${companyName}</p>
-        </div>
-        
-        <div class="content">
-          <p>Dear <strong>${employeeName}</strong>,</p>
-          
-          <p>Congratulations! We are pleased to send you your employment agreement for the position of <strong>${designation}</strong> at <strong>${companyName}</strong>.</p>
-          
-          <div class="agreement-info">
-            <h3>📄 Your Agreement Details:</h3>
-            <ul>
-              <li><strong>Position:</strong> ${designation}</li>
-              <li><strong>Company:</strong> ${companyName}</li>
-              <li><strong>Effective Date:</strong> ${agreementData.effectiveDate || 'As per agreement'}</li>
-              <li><strong>Agreement Type:</strong> ${template.category || 'Employment Agreement'}</li>
-            </ul>
-          </div>
-          
-          <div class="highlight">
-            <h3>📎 Important: Your Agreement is Attached</h3>
-            <p>Please find your complete employment agreement attached as a PDF file. This document contains all the terms and conditions of your employment.</p>
-            <p><strong>Action Required:</strong> Please review the agreement carefully and keep it for your records.</p>
-          </div>
-          
-          <h3>📋 Next Steps:</h3>
-          <ol>
-            <li>Download and review the attached agreement PDF</li>
-            <li>Sign the agreement if required by your HR team</li>
-            <li>Keep a copy for your personal records</li>
-            <li>Contact HR if you have any questions</li>
-          </ol>
-          
-          <h3>❓ Need Help?</h3>
-          <p>If you have any questions about your agreement or need any clarifications, please don't hesitate to contact our HR team.</p>
-          
-          <div class="footer">
-            <p><strong>Best regards,</strong></p>
-            <p>HR Team<br>${companyName}</p>
-            <p style="font-size: 12px; color: #6c757d;">
-              This is an automated email. Please do not reply to this message.<br>
-              For HR inquiries, please contact: hr@${companyName.toLowerCase().replace(/\s+/g, '')}.com
-            </p>
-          </div>
-        </div>
-      </body>
-      </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Employment Agreement – ${designation} – ${companyName}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Georgia', serif;
+      background-color: #ffffff;
+      color: #000000;
+      padding: 40px 20px;
+    }
+    .wrapper {
+      max-width: 620px;
+      margin: 0 auto;
+    }
+    .header {
+      padding: 28px 40px 10px 40px;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .header p {
+      font-size: 12px;
+      margin-top: 4px;
+      letter-spacing: 0.5px;
+      color: #444444;
+    }
+    .body {
+      padding: 28px 40px;
+    }
+    .salutation {
+      font-size: 15px;
+      margin-bottom: 16px;
+    }
+    .para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .details-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 28px;
+      font-size: 14px;
+    }
+    .details-table tr td {
+      padding: 9px 0;
+    }
+    .details-table tr td:first-child {
+      color: #555555;
+      width: 160px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .details-table tr td:last-child {
+      font-weight: bold;
+    }
+    .details-table tr {
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .details-table tr:last-child {
+      border-bottom: none;
+    }
+    .important-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .important-para {
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 8px;
+    }
+    .action-required {
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 28px;
+    }
+    .steps-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 24px;
+      counter-reset: steps;
+    }
+    .steps-list li {
+      font-size: 14px;
+      line-height: 1.7;
+      padding: 5px 0;
+      display: flex;
+      gap: 12px;
+      counter-increment: steps;
+    }
+    .steps-list li::before {
+      content: counter(steps) ".";
+      font-weight: bold;
+      flex-shrink: 0;
+      min-width: 16px;
+    }
+    .help-title {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .help-para {
+      font-size: 14px;
+      line-height: 1.8;
+      margin-bottom: 28px;
+    }
+    .signature {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .signature strong {
+      display: block;
+      font-size: 15px;
+    }
+    .footer {
+      padding: 16px 40px;
+      font-size: 11px;
+      color: #555555;
+      letter-spacing: 0.4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>${companyName}</h1>
+      <p>Human Resources Department &nbsp;|&nbsp; Employment Agreement</p>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+
+      <p class="salutation">Dear <strong>${employeeName}</strong>,</p>
+
+      <p class="para">
+        Congratulations! We are pleased to send you your employment agreement
+        for the position of <strong>${designation}</strong> at <strong>${companyName}</strong>.
+      </p>
+
+      <!-- Agreement Details -->
+      <p class="section-title">Your Agreement Details</p>
+      <table class="details-table">
+        <tr>
+          <td>Position</td>
+          <td>${designation}</td>
+        </tr>
+        <tr>
+          <td>Company</td>
+          <td>${companyName}</td>
+        </tr>
+        <tr>
+          <td>Effective Date</td>
+          <td>${agreementData.effectiveDate || 'As per agreement'}</td>
+        </tr>
+        <tr>
+          <td>Agreement Type</td>
+          <td>${template.category || 'Employment Agreement'}</td>
+        </tr>
+      </table>
+
+      <!-- Important Notice -->
+      <p class="important-title">Important: Your Agreement is Attached</p>
+      <p class="important-para">
+        Please find your complete employment agreement attached as a PDF file.
+        This document contains all the terms and conditions of your employment.
+      </p>
+      <p class="action-required">
+        <strong>Action Required:</strong> Please review the agreement carefully and keep it for your records.
+      </p>
+
+      <!-- Next Steps -->
+      <p class="section-title">Next Steps</p>
+      <ol class="steps-list">
+        <li>Download and review the attached agreement PDF.</li>
+        <li>Sign the agreement if required by your HR team.</li>
+        <li>Keep a copy for your personal records.</li>
+        <li>Contact HR if you have any questions.</li>
+      </ol>
+
+      <!-- Need Help -->
+      <p class="help-title">Need Help?</p>
+      <p class="help-para">
+        If you have any questions about your agreement or need any clarifications,
+        please do not hesitate to contact our HR team.
+      </p>
+
+      <!-- Signature -->
+      <div class="signature">
+        <p>Best regards,</p>
+        <strong>HR Team</strong>
+        <span>${companyName}</span>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      This is an automated email. Please do not reply to this message. &nbsp;|&nbsp; © ${new Date().getFullYear()} ${companyName}. All rights reserved.
+    </div>
+
+  </div>
+</body>
+</html>
     `;
 
     // Create email attachments array with the PDF

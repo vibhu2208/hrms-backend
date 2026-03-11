@@ -2578,7 +2578,7 @@ exports.requestPayslipUpload = async (req, res) => {
     // Send payslip verification email
     try {
       const tenantId = req.tenant.companyId || req.tenant.clientId;
-      const uploadUrl = `http://3.108.172.119/public/upload-payslip/${token}?tenantId=${tenantId}`;
+      const uploadUrl = `http://3.108.172.119/api/public/document-upload/upload/${token}?tenantId=${tenantId}`;
       
       const { sendPayslipVerificationRequestEmail } = require('../services/emailService');
       await sendPayslipVerificationRequestEmail({
@@ -2604,7 +2604,7 @@ exports.requestPayslipUpload = async (req, res) => {
         candidateName: onboarding.candidateName,
         candidateEmail: onboarding.candidateEmail,
         uploadToken: token,
-        uploadUrl: `http://3.108.172.119/public/upload-payslip/${token}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
+        uploadUrl: `http://3.108.172.119/api/public/document-upload/upload/${token}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
         expiresAt,
         status: 'payslip_verification'
       }
