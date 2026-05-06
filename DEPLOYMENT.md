@@ -3,7 +3,7 @@
 ## 🚀 Deploy to Render
 
 ### Step 1: Prepare Your Repository
-1. Push your code to GitHub/GitLab
+1. Push your code to GitHub/GitLabd
 2. Make sure all files are committed
 
 ### Step 2: Create Render Account
