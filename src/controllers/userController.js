@@ -289,7 +289,7 @@ exports.createUser = async (req, res) => {
       emailError = new Error('Email service not configured. Please configure EMAIL_USER and EMAIL_APP_PASSWORD or SMTP settings.');
     } else {
       try {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080/login/spc-management';
+      const frontendUrl = 'http://3.108.172.119:8080';
       const emailData = {
         to: email,
         subject: `Welcome to ${req.tenant.companyName} - Your Account Credentials`,

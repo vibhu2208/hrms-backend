@@ -52,20 +52,28 @@ const onboardingSchema = new mongoose.Schema({
     type: String,
     enum: [
       'preboarding',           // Initial state after send to onboarding
-      'pending_approval',      // Waiting for admin approval before offer
+      'pending_approval',      // Waiting for admin approval before payslip request
       'approval_rejected',     // Admin rejected, candidate on hold
+      'payslip_upload_requested', // Payslip verification email sent to candidate
+      'payslip_verification',  // Payslip uploaded, waiting for HR verification
+      'payslip_approved',      // Payslip verified and approved, ready for offer
+      'payslip_rejected',      // Payslip rejected by HR
       'offer_sent',            // Offer letter sent to candidate
       'offer_accepted',        // Candidate accepted offer
+      'background_verification', // Background verification in progress
+      'background_verified',   // Background verification completed
+      'background_rejected',   // Background verification failed
       'docs_pending',          // Waiting for document submission
       'docs_verified',         // All documents verified
       'ready_for_joining',     // Join date set, teams notified
+      'agreement_generated',   // Agreement generated, waiting for onboarding completion
       'completed',             // Onboarding completed, moved to employees
       'rejected'               // Onboarding rejected/cancelled
     ],
     default: 'preboarding'
   },
   
-  // Approval Status for onboarding (requires admin approval before offer)
+  // Approval Status for onboarding (requires admin approval before payslip request)
   approvalStatus: {
     status: {
       type: String,
@@ -98,7 +106,88 @@ const onboardingSchema = new mongoose.Schema({
       default: true
     }
   },
+
+  // Payslip Verification Tracking
+  payslipVerification: {
+    uploadToken: String,
+    uploadTokenExpiry: Date,
+    uploadRequestedAt: Date,
+    uploadRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    payslipUploadedAt: Date,
+    payslipDocumentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: 'documents'
+    },
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    verificationStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending'
+    },
+    rejectionReason: String,
+    canReUpload: {
+      type: Boolean,
+      default: true
+    }
+  },
+
+  // Background Verification Tracking
+  backgroundVerification: {
+    initiatedAt: Date,
+    initiatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    verificationAgency: String,
+    referenceNumber: String,
+    status: {
+      type: String,
+      enum: ['pending', 'in_progress', 'completed', 'failed'],
+      default: 'pending'
+    },
+    completedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee'
+    },
+    verificationReport: String,
+    rejectionReason: String,
+    canRetry: {
+      type: Boolean,
+      default: true
+    }
+  },
   
+  // Agreement Management
+  agreements: [{
+    templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'AgreementTemplate' },
+    templateName: { type: String, required: true },
+    content: { type: String, required: true },
+    subject: { type: String, required: true },
+    generatedAt: { type: Date, default: Date.now },
+    generatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
+    status: {
+      type: String,
+      enum: ['generated', 'sent', 'viewed', 'signed', 'expired', 'cancelled'],
+      default: 'generated'
+    },
+    effectiveDate: { type: Date },
+    expiryDate: { type: Date },
+    emailSent: { type: Boolean, default: false },
+    emailSentAt: { type: Date },
+    signedAt: { type: Date },
+    signedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+    signatureData: { type: String }, // Base64 encoded signature or digital signature hash
+    notes: { type: String }
+  }],
+
   // Offer Management
   offer: {
     templateVersion: String,
@@ -142,7 +231,7 @@ const onboardingSchema = new mongoose.Schema({
       enum: [
         'resume', 'offer_letter_signed', 'aadhar', 'pan', 'bank_details', 
         'passport', 'education_certificates', 'experience_letters', 
-        'address_proof', 'photo', 'other'
+        'address_proof', 'photo', 'payslip', 'other'
       ],
       required: true
     },
@@ -188,7 +277,7 @@ const onboardingSchema = new mongoose.Schema({
       type: String,
       enum: [
         'aadhar', 'pan', 'bank_details', 'passport', 'education_certificates', 
-        'experience_letters', 'address_proof', 'photo'
+        'experience_letters', 'address_proof', 'photo', 'payslip'
       ]
     },
     isRequired: {

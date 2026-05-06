@@ -9,6 +9,9 @@ const puppeteer = require('puppeteer');
 const generatePDFFromHTML = async (html, options = {}) => {
   let browser;
   try {
+    console.log('🔍 PDF Generation - HTML length:', html.length);
+    console.log('🔍 PDF Generation - HTML preview:', html.substring(0, 200) + '...');
+    
     browser = await puppeteer.launch({
       headless: 'new',
       args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -30,6 +33,9 @@ const generatePDFFromHTML = async (html, options = {}) => {
     };
     
     const pdf = await page.pdf(pdfOptions);
+    console.log('🔍 PDF Generation - PDF buffer size:', pdf.length, 'bytes');
+    console.log('🔍 PDF Generation - PDF buffer type:', typeof pdf);
+    
     return pdf;
   } catch (error) {
     console.error('Error generating PDF:', error);

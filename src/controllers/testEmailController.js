@@ -79,7 +79,7 @@ exports.sendTestOnboardingEmail = async (req, res) => {
       position: onboarding.position,
       joiningDate: onboarding.joiningDate,
       uploadUrl,
-      companyName: req.tenant?.companyName || 'Our Company'
+      companyName: req.tenant?.companyName || 'SPC MANAGMENT'
     });
 
     console.log(`📧 Test onboarding email sent to ${testEmail} for ${onboarding.candidateName}`);
