@@ -4,6 +4,15 @@ const { getTenantConnection } = require('../config/database.config');
 const { getSuperAdmin } = require('../models/global');
 const tokenBlacklistService = require('../services/tokenBlacklistService');
 
+function isPasswordChangeAllowed(req) {
+  const method = req.method.toUpperCase();
+  const fullPath = (req.originalUrl || req.url || '').split('?')[0];
+  if (method === 'PUT' && /\/api\/auth\/updatepassword\/?$/.test(fullPath)) return true;
+  if (method === 'POST' && /\/api\/auth\/logout\/?$/.test(fullPath)) return true;
+  if (method === 'GET' && /\/api\/auth\/me\/?$/.test(fullPath)) return true;
+  return false;
+}
+
 const protect = async (req, res, next) => {
   let tenantConnection = null;
   
@@ -12,6 +21,9 @@ const protect = async (req, res, next) => {
 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
+    } else if (req.query && (req.query.access_token || req.query.token)) {
+      // Browser downloads / iframes cannot set Authorization headers
+      token = req.query.access_token || req.query.token;
     }
 
     if (!token) {
@@ -61,42 +73,34 @@ const protect = async (req, res, next) => {
         user = await TenantUser.findById(userId).select('-password');
         
         if (user) {
-          console.log(`✅ User found in tenant DB: ${user.email}`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ User found in tenant DB: ${user.email}`);
+          }
         } else {
           console.error(`❌ User not found in tenant DB. userId: ${userId}, companyId: ${decoded.companyId}`);
           // Try to find user by email if available in token
           if (decoded.email) {
-            console.log(`🔍 Trying to find user by email: ${decoded.email}`);
             user = await TenantUser.findOne({ email: decoded.email }).select('-password');
-            if (user) {
-              console.log(`✅ User found by email: ${user.email}`);
-            }
           }
         }
         
         // Don't close the connection - it's cached and reused by getTenantConnection
       } catch (tenantError) {
-        console.error('❌ Error accessing tenant database:', tenantError);
-        console.error('Error details:', {
+        console.error('❌ Error accessing tenant database:', {
           message: tenantError.message,
-          stack: tenantError.stack,
           companyId: decoded.companyId,
           userId: userId
         });
         return res.status(500).json({
           success: false,
-          message: 'Error accessing company database',
-          error: tenantError.message
+          message: 'Error accessing company database'
         });
       }
     } else {
       // User is from main database (super admin, etc.)
-      console.log('🔍 Auth middleware: Fetching super admin from global DB, userId:', userId);
       const SuperAdmin = await getSuperAdmin();
       user = await SuperAdmin.findById(userId).select('-password');
-      if (user) {
-        console.log(`✅ Super admin found: ${user.email}`);
-      } else {
+      if (!user) {
         console.error(`❌ Super admin not found. userId: ${userId}`);
       }
     }
@@ -111,10 +115,7 @@ const protect = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'User not found. Please login again.',
-        code: 'USER_NOT_FOUND',
-        details: decoded.companyId 
-          ? `User ${userId} not found in company ${decoded.companyId}` 
-          : `User ${userId} not found in system`
+        code: 'USER_NOT_FOUND'
       });
     }
 
@@ -136,7 +137,6 @@ const protect = async (req, res, next) => {
     }
 
     // Attach user and company info to request
-    console.log('🔍 Auth middleware - User fetched from DB:', JSON.stringify(user, null, 2));
     req.user = user;
     if (decoded.companyId) {
       req.user.companyId = decoded.companyId;
@@ -150,8 +150,16 @@ const protect = async (req, res, next) => {
         companyId: decoded.companyId
       };
     }
-    
-    console.log('🔍 Auth middleware - Final req.user:', JSON.stringify(req.user, null, 2));
+
+    // Server-side forced password change (UI alone is not enough)
+    const mustChange = !!(user.mustChangePassword || user.isFirstLogin);
+    if (mustChange && !isPasswordChangeAllowed(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Password change required before accessing this resource',
+        code: 'PASSWORD_CHANGE_REQUIRED'
+      });
+    }
     
     next();
   } catch (error) {
@@ -168,25 +176,17 @@ const authorize = (...roles) => {
   return (req, res, next) => {
     const userRole = req.user.role;
     
-    console.log('🔐 Authorization check:');
-    console.log('   User role:', userRole);
-    console.log('   Allowed roles:', roles);
-    
     // Map company_admin to admin for authorization checks
     const normalizedRole = userRole === 'company_admin' ? 'admin' : userRole;
     
-    console.log('   Normalized role:', normalizedRole);
-    
     // Check if user's role (or normalized role) is in allowed roles
     if (!roles.includes(userRole) && !roles.includes(normalizedRole)) {
-      console.log('❌ Authorization failed');
       return res.status(403).json({
         success: false,
         message: `User role '${userRole}' is not authorized to access this route`
       });
     }
     
-    console.log('✅ Authorization passed');
     next();
   };
 };

@@ -70,7 +70,7 @@ exports.sendTestOnboardingEmail = async (req, res) => {
     }
 
     // Hard-coded public upload URL as requested
-    const uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}`;
+    const uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${uploadToken.token}`;
 
     // Send test email
     await sendOfferLetterWithDocumentLink({

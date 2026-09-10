@@ -1,12 +1,21 @@
 const mongoose = require('mongoose');
+const dns = require('dns');
+
+// Windows/Node often fails mongodb+srv SRV lookups without this
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (_) {
+  /* Node < 17 */
+}
 
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000, // 10 second timeout
+      serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
+      family: 4, // Force IPv4 — avoids querySrv ECONNREFUSED on some Windows DNS setups
     });
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);

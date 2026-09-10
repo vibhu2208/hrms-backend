@@ -229,7 +229,7 @@ const getClient = async (req, res) => {
 const createClient = async (req, res) => {
   let client = null;
   let adminUser = null;
-  const defaultPassword = 'password123';
+  const defaultPassword = generateAdminPassword();
   
   try {
     // Connect to global database

@@ -79,7 +79,6 @@ exports.getShiftTemplates = async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .sort({ createdAt: -1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -88,7 +87,6 @@ exports.getShiftTemplates = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching shift templates:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -121,14 +119,12 @@ exports.getShiftTemplate = async (req, res) => {
       .populate('createdBy', 'firstName lastName email');
 
     if (!template) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Shift template not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -136,7 +132,6 @@ exports.getShiftTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching shift template:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -187,7 +182,6 @@ exports.createShiftTemplate = async (req, res) => {
     // Check if code already exists
     const existing = await ShiftTemplate.findOne({ code: code.toUpperCase() });
     if (existing) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(400).json({
         success: false,
         message: 'Shift code already exists'
@@ -211,7 +205,6 @@ exports.createShiftTemplate = async (req, res) => {
 
     await template.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -220,7 +213,6 @@ exports.createShiftTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating shift template:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -256,7 +248,6 @@ exports.updateShiftTemplate = async (req, res) => {
         _id: { $ne: id }
       });
       if (existing) {
-        if (tenantConnection) await tenantConnection.close();
         return res.status(400).json({
           success: false,
           message: 'Shift code already exists'
@@ -272,14 +263,12 @@ exports.updateShiftTemplate = async (req, res) => {
     ).populate('department', 'name');
 
     if (!template) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Shift template not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -288,7 +277,6 @@ exports.updateShiftTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating shift template:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -319,7 +307,6 @@ exports.deleteShiftTemplate = async (req, res) => {
     // Check if template is being used
     const inUse = await RosterAssignment.findOne({ shiftTemplateId: id, status: 'active' });
     if (inUse) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(400).json({
         success: false,
         message: 'Cannot delete shift template that is in use'
@@ -328,14 +315,12 @@ exports.deleteShiftTemplate = async (req, res) => {
 
     const template = await ShiftTemplate.findByIdAndDelete(id);
     if (!template) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Shift template not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -343,7 +328,6 @@ exports.deleteShiftTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error('Error deleting shift template:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -387,7 +371,6 @@ exports.getWorkSchedules = async (req, res) => {
       .populate('department', 'name')
       .sort({ date: 1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -396,7 +379,6 @@ exports.getWorkSchedules = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching work schedules:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -450,7 +432,6 @@ exports.createWorkSchedule = async (req, res) => {
 
     await schedule.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -459,7 +440,6 @@ exports.createWorkSchedule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating work schedule:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -521,7 +501,6 @@ exports.getRosterAssignments = async (req, res) => {
       .populate('department', 'name')
       .sort({ effectiveDate: -1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -530,7 +509,6 @@ exports.getRosterAssignments = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching roster assignments:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -579,7 +557,6 @@ exports.createRosterAssignment = async (req, res) => {
     // Get employee details
     const employee = await TenantUser.findById(employeeId);
     if (!employee) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
@@ -598,7 +575,6 @@ exports.createRosterAssignment = async (req, res) => {
     });
 
     if (overlapping) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(400).json({
         success: false,
         message: 'Overlapping roster assignment exists'
@@ -621,7 +597,6 @@ exports.createRosterAssignment = async (req, res) => {
 
     await assignment.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -630,7 +605,6 @@ exports.createRosterAssignment = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating roster assignment:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -752,7 +726,6 @@ exports.bulkUploadRoster = async (req, res) => {
       }
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -761,7 +734,6 @@ exports.bulkUploadRoster = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in bulk upload:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -814,7 +786,6 @@ exports.getRosterChangeRequests = async (req, res) => {
       .populate('requestedShiftTemplateId')
       .sort({ appliedOn: -1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -823,7 +794,6 @@ exports.getRosterChangeRequests = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching roster change requests:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -866,7 +836,6 @@ exports.createRosterChangeRequest = async (req, res) => {
     // Get employee details
     const employee = await TenantUser.findById(user._id);
     if (!employee) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Employee not found'
@@ -898,7 +867,6 @@ exports.createRosterChangeRequest = async (req, res) => {
 
     await request.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -907,7 +875,6 @@ exports.createRosterChangeRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating roster change request:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -940,7 +907,6 @@ exports.approveRosterChangeRequest = async (req, res) => {
 
     const request = await RosterChangeRequest.findById(id);
     if (!request) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Roster change request not found'
@@ -949,7 +915,6 @@ exports.approveRosterChangeRequest = async (req, res) => {
 
     // Verify authorization
     if (request.reportingManager !== managerEmail.toLowerCase()) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'You are not authorized to approve this request'
@@ -957,7 +922,6 @@ exports.approveRosterChangeRequest = async (req, res) => {
     }
 
     if (request.status !== 'pending') {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(400).json({
         success: false,
         message: 'Request is not pending'
@@ -1010,7 +974,6 @@ exports.approveRosterChangeRequest = async (req, res) => {
     await assignment.save();
     await request.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -1019,7 +982,6 @@ exports.approveRosterChangeRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error approving roster change request:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -1052,7 +1014,6 @@ exports.rejectRosterChangeRequest = async (req, res) => {
 
     const request = await RosterChangeRequest.findById(id);
     if (!request) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Roster change request not found'
@@ -1060,7 +1021,6 @@ exports.rejectRosterChangeRequest = async (req, res) => {
     }
 
     if (request.reportingManager !== managerEmail.toLowerCase()) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'You are not authorized to reject this request'
@@ -1075,7 +1035,6 @@ exports.rejectRosterChangeRequest = async (req, res) => {
 
     await request.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -1084,7 +1043,6 @@ exports.rejectRosterChangeRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error rejecting roster change request:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -1142,7 +1100,6 @@ exports.getRosterCalendar = async (req, res) => {
       .populate('department', 'name')
       .sort({ effectiveDate: 1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -1151,7 +1108,6 @@ exports.getRosterCalendar = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching roster calendar:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message

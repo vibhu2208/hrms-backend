@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const candidateDocumentController = require('../controllers/candidateDocumentController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -55,7 +56,7 @@ router.post('/public/submit',
 );
 
 // Protected routes (HR/Admin only)
-router.get('/:candidateCode', protect, authorize('hr', 'admin'), candidateDocumentController.getCandidateDocuments);
-router.put('/:candidateCode/verify', protect, authorize('hr', 'admin'), candidateDocumentController.verifyDocument);
+router.get('/:candidateCode', protect, tenantMiddleware, authorize('hr', 'admin', 'company_admin'), candidateDocumentController.getCandidateDocuments);
+router.put('/:candidateCode/verify', protect, tenantMiddleware, authorize('hr', 'admin', 'company_admin'), candidateDocumentController.verifyDocument);
 
 module.exports = router;

@@ -44,24 +44,27 @@ router.post('/jobs/:jobId/analyze',
  * @access  Private
  */
 router.get('/jobs/:jobId/ranked', 
+  authorize('admin', 'hr', 'company_admin'),
   getRankedCandidates
 );
 
 /**
  * @route   GET /api/ai-analysis/candidates/:candidateId/insights
  * @desc    Get AI insights for a specific candidate
- * @access  Private
+ * @access  Private (HR, Admin)
  */
 router.get('/candidates/:candidateId/insights', 
+  authorize('admin', 'hr', 'company_admin'),
   getCandidateInsights
 );
 
 /**
  * @route   GET /api/ai-analysis/jobs/:jobId/stats
  * @desc    Get analysis statistics for a job posting
- * @access  Private
+ * @access  Private (HR, Admin)
  */
 router.get('/jobs/:jobId/stats', 
+  authorize('admin', 'hr', 'company_admin'),
   getAnalysisStats
 );
 

@@ -1,6 +1,7 @@
 const { connectGlobalDB } = require('../config/database.config');
 const mongoose = require('mongoose');
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({ requireAllowFlag: true, allowFlag: 'ALLOW_SEED', label: 'deleteOtherCompanies' });
 
 /**
  * Delete all companies except TCS from the database

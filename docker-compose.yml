@@ -19,22 +19,28 @@ services:
     container_name: hrms-backend
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "5001:5001"
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
-      - PORT=3001
-      - MONGODB_URI=mongodb://mongodb:27017/hrms
+      - PORT=5001
+      # Override only if not set in .env — compose still requires secrets via env_file
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/hrms}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN is required}
+      - FRONTEND_URL=${FRONTEND_URL:-}
     depends_on:
       - mongodb
     networks:
       - hrms-network
+    # Do NOT bind-mount source in production — image content only
     volumes:
-      - .:/app
-      - /app/node_modules
-
+      - uploads_data:/app/uploads
 
 volumes:
   mongodb_data:
+  uploads_data:
 
 networks:
   hrms-network:

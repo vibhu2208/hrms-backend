@@ -42,6 +42,8 @@ COPY --chown=nodejs:nodejs . .
 
 # Remove unnecessary files to reduce image size (before switching user)
 RUN rm -rf \
+    /app/.env \
+    /app/.env.* \
     /app/.git \
     /app/.gitignore \
     /app/*.md \
@@ -59,8 +61,9 @@ USER nodejs
 
 EXPOSE 5001
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5001/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+# Respect PORT env (default 5001)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "const p=process.env.PORT||5001; require('http').get('http://127.0.0.1:'+p+'/health', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))"
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]

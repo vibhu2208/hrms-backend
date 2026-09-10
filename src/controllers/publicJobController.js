@@ -2,6 +2,13 @@ const { getTenantModel } = require('../utils/tenantModels');
 const { getTenantConnection } = require('../config/database.config');
 const { getS3FileUrl } = require('../middlewares/s3Upload');
 
+const requirePublicCompanyId = (companyId) => {
+  if (!companyId || String(companyId).trim() === '') {
+    return null;
+  }
+  return String(companyId).trim();
+};
+
 // @desc    Get all active public job postings
 // @route   GET /api/public/jobs?companyId=xxx
 // @access  Public
@@ -9,8 +16,13 @@ exports.getPublicJobs = async (req, res) => {
   try {
     const { department, location, employmentType, companyId } = req.query;
     
-    // Default to the tenant from seed script if no companyId provided
-    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    const tenantId = requirePublicCompanyId(companyId);
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId query parameter is required'
+      });
+    }
     
     console.log('📋 Fetching public jobs for company:', tenantId);
     
@@ -72,7 +84,13 @@ exports.getPublicJobs = async (req, res) => {
 exports.getPublicJob = async (req, res) => {
   try {
     const { companyId } = req.query;
-    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    const tenantId = requirePublicCompanyId(companyId);
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId query parameter is required'
+      });
+    }
     
     // Get tenant connection
     const tenantConnection = await getTenantConnection(tenantId);
@@ -112,7 +130,13 @@ exports.submitApplication = async (req, res) => {
   try {
     const jobId = req.params.id;
     const { companyId } = req.query;
-    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    const tenantId = requirePublicCompanyId(companyId);
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId query parameter is required'
+      });
+    }
     
     // Get tenant connection
     const tenantConnection = await getTenantConnection(tenantId);
@@ -488,8 +512,13 @@ exports.getJobStats = async (req, res) => {
   try {
     const { companyId } = req.query;
     
-    // Default to the tenant from seed script if no companyId provided
-    const tenantId = companyId || '696b515db6c9fd5fd51aed1c';
+    const tenantId = requirePublicCompanyId(companyId);
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId query parameter is required'
+      });
+    }
     
     // Get tenant connection
     const tenantConnection = await getTenantConnection(tenantId);

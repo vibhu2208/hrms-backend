@@ -35,7 +35,6 @@ exports.getFamilyDetails = async (req, res) => {
       isActive: true
     }).sort({ relationship: 1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -44,7 +43,6 @@ exports.getFamilyDetails = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching family details:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -78,7 +76,6 @@ exports.createFamilyDetail = async (req, res) => {
 
     await familyDetail.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -87,7 +84,6 @@ exports.createFamilyDetail = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating family detail:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -116,7 +112,6 @@ exports.updateFamilyDetail = async (req, res) => {
 
     const familyDetail = await FamilyDetail.findById(id);
     if (!familyDetail) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Family detail not found'
@@ -125,7 +120,6 @@ exports.updateFamilyDetail = async (req, res) => {
 
     // Check authorization
     if (user.role === 'employee' && familyDetail.employeeId.toString() !== user._id.toString()) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Unauthorized'
@@ -135,7 +129,6 @@ exports.updateFamilyDetail = async (req, res) => {
     Object.assign(familyDetail, updateData);
     await familyDetail.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -144,7 +137,6 @@ exports.updateFamilyDetail = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating family detail:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -172,7 +164,6 @@ exports.deleteFamilyDetail = async (req, res) => {
 
     const familyDetail = await FamilyDetail.findById(id);
     if (!familyDetail) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Family detail not found'
@@ -181,7 +172,6 @@ exports.deleteFamilyDetail = async (req, res) => {
 
     // Check authorization
     if (user.role === 'employee' && familyDetail.employeeId.toString() !== user._id.toString()) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Unauthorized'
@@ -191,7 +181,6 @@ exports.deleteFamilyDetail = async (req, res) => {
     familyDetail.isActive = false;
     await familyDetail.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -199,7 +188,6 @@ exports.deleteFamilyDetail = async (req, res) => {
     });
   } catch (error) {
     console.error('Error deleting family detail:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -231,7 +219,6 @@ exports.getCertifications = async (req, res) => {
       isActive: true
     }).sort({ issueDate: -1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -240,7 +227,6 @@ exports.getCertifications = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching certifications:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -274,7 +260,6 @@ exports.createCertification = async (req, res) => {
 
     await certification.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -283,7 +268,6 @@ exports.createCertification = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating certification:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -312,7 +296,6 @@ exports.updateCertification = async (req, res) => {
 
     const certification = await Certification.findById(id);
     if (!certification) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Certification not found'
@@ -321,7 +304,6 @@ exports.updateCertification = async (req, res) => {
 
     // Check authorization
     if (user.role === 'employee' && certification.employeeId.toString() !== user._id.toString()) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Unauthorized'
@@ -331,7 +313,6 @@ exports.updateCertification = async (req, res) => {
     Object.assign(certification, updateData);
     await certification.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -340,7 +321,6 @@ exports.updateCertification = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating certification:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -368,7 +348,6 @@ exports.deleteCertification = async (req, res) => {
 
     const certification = await Certification.findById(id);
     if (!certification) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Certification not found'
@@ -377,7 +356,6 @@ exports.deleteCertification = async (req, res) => {
 
     // Check authorization
     if (user.role === 'employee' && certification.employeeId.toString() !== user._id.toString()) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Unauthorized'
@@ -387,7 +365,6 @@ exports.deleteCertification = async (req, res) => {
     certification.isActive = false;
     await certification.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -395,7 +372,6 @@ exports.deleteCertification = async (req, res) => {
     });
   } catch (error) {
     console.error('Error deleting certification:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -427,14 +403,12 @@ exports.getOfficialData = async (req, res) => {
     });
 
     if (!officialData) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Official data not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -442,7 +416,6 @@ exports.getOfficialData = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching official data:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -504,7 +477,6 @@ exports.createProfileUpdateRequest = async (req, res) => {
 
     await updateRequest.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -513,7 +485,6 @@ exports.createProfileUpdateRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating profile update request:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -553,7 +524,6 @@ exports.getProfileUpdateRequests = async (req, res) => {
       .populate('currentApprover', 'firstName lastName email')
       .sort({ appliedOn: -1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -562,7 +532,6 @@ exports.getProfileUpdateRequests = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching profile update requests:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -592,7 +561,6 @@ exports.approveProfileUpdateRequest = async (req, res) => {
 
     const request = await ProfileUpdateRequest.findById(id);
     if (!request) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Profile update request not found'
@@ -605,7 +573,6 @@ exports.approveProfileUpdateRequest = async (req, res) => {
     );
 
     if (!currentApproval) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Unauthorized or already processed'
@@ -649,7 +616,6 @@ exports.approveProfileUpdateRequest = async (req, res) => {
 
     await request.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -658,7 +624,6 @@ exports.approveProfileUpdateRequest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error processing profile update request:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message

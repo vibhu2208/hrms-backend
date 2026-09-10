@@ -38,7 +38,6 @@ exports.getEncashmentRules = async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .sort({ leaveType: 1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -47,7 +46,6 @@ exports.getEncashmentRules = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching encashment rules:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -86,7 +84,6 @@ exports.createEncashmentRule = async (req, res) => {
     // Check if rule already exists
     const existing = await LeaveEncashmentRule.findOne({ leaveType: ruleData.leaveType });
     if (existing) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(400).json({
         success: false,
         message: 'Rule already exists for this leave type'
@@ -100,7 +97,6 @@ exports.createEncashmentRule = async (req, res) => {
 
     await rule.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -109,7 +105,6 @@ exports.createEncashmentRule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating encashment rule:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -148,14 +143,12 @@ exports.updateEncashmentRule = async (req, res) => {
     ).populate('eligibilityCriteria.allowedDepartments', 'name');
 
     if (!rule) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Encashment rule not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -164,7 +157,6 @@ exports.updateEncashmentRule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating encashment rule:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -317,7 +309,6 @@ exports.getEncashmentRequests = async (req, res) => {
       .populate('approvalLevels.approverId', 'firstName lastName email')
       .sort({ appliedOn: -1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -326,7 +317,6 @@ exports.getEncashmentRequests = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching encashment requests:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message

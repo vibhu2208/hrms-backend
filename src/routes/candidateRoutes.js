@@ -91,17 +91,12 @@ router.post('/compare-for-jd/:jdId', compareCandidatesForJD);
 // Send interview notification email
 router.post('/:id/send-interview-email', sendInterviewEmail);
 
-router.route('/:id')
-  .get(getCandidate)
-  .put(updateCandidate)
-  .delete(deleteCandidate);
-
-// Bulk upload routes
+// Bulk upload routes (before /:id)
 router.post('/bulk/validate', uploadBulk.single('file'), validateBulkUpload);
 router.post('/bulk/import', importBulkCandidates);
 router.get('/bulk/template', downloadTemplate);
 
-// Resume upload and parsing route (S3 enabled)
+// Resume upload MUST be before /:id so "upload-resume" is not treated as an id
 router.post('/upload-resume', uploadResumeToS3, handleS3UploadError, uploadResumeController);
 
 // Fix ex-employee candidate names
@@ -109,5 +104,10 @@ router.post('/fix-ex-employee-names', fixExEmployeeCandidateNames);
 
 // Cleanup duplicate ex-employee candidates
 router.post('/cleanup-duplicates', cleanupDuplicateExEmployeeCandidates);
+
+router.route('/:id')
+  .get(getCandidate)
+  .put(updateCandidate)
+  .delete(deleteCandidate);
 
 module.exports = router;

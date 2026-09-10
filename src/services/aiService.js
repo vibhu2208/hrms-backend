@@ -7,8 +7,8 @@ const axios = require('axios');
  */
 class AIService {
   constructor() {
-    // Gemini Configuration
-    this.geminiApiKey = process.env.GEMINI_API_KEY || 'AIzaSyBU2gMW-fzkMSrFFL7dXQ4I5UABrKrtaIo';
+    // Gemini Configuration (API key must come from env — never hardcode)
+    this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.geminiModel = 'gemini-2.0-flash-exp';
     this.geminiBaseURL = 'https://generativelanguage.googleapis.com/v1beta';
     this.useGemini = !!this.geminiApiKey;

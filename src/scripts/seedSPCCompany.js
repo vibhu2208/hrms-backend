@@ -6,6 +6,7 @@
  */
 
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({ requireAllowFlag: true, allowFlag: 'ALLOW_SEED', label: 'seedSPCCompany' });
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 

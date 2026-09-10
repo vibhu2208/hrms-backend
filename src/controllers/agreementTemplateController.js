@@ -119,11 +119,43 @@ exports.getAgreementTemplate = async (req, res) => {
 exports.createAgreementTemplate = async (req, res) => {
   try {
     const AgreementTemplateModel = getTenantModel(req.tenant.connection, 'AgreementTemplate');
-    
+
+    const {
+      name,
+      description,
+      subject,
+      content,
+      category,
+      status,
+      isDefault,
+      variables,
+      departments,
+      designations,
+      tags,
+      settings,
+      agreementSettings,
+      approvalRequired,
+      legalReviewed
+    } = req.body;
+
     const templateData = {
-      ...req.body,
-      createdBy: req.user.id,
-      updatedBy: req.user.id
+      name,
+      description,
+      subject,
+      content,
+      category: category || 'general',
+      status: status || 'draft',
+      isDefault: !!isDefault,
+      variables: Array.isArray(variables) ? variables : [],
+      departments: departments || [],
+      designations: designations || [],
+      tags: tags || [],
+      settings,
+      agreementSettings,
+      approvalRequired,
+      legalReviewed,
+      createdBy: req.user.id || req.user._id,
+      updatedBy: req.user.id || req.user._id
     };
 
     const template = new AgreementTemplateModel(templateData);
@@ -139,9 +171,13 @@ exports.createAgreementTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating agreement template:', error);
-    res.status(500).json({
+    const message =
+      error.name === 'ValidationError'
+        ? Object.values(error.errors).map((e) => e.message).join('; ')
+        : error.message || 'Failed to create agreement template';
+    res.status(error.name === 'ValidationError' ? 400 : 500).json({
       success: false,
-      message: 'Failed to create agreement template'
+      message
     });
   }
 };
@@ -164,12 +200,18 @@ exports.updateAgreementTemplate = async (req, res) => {
       });
     }
 
-    const updateData = {
-      ...req.body,
-      updatedBy: req.user.id
-    };
+    const allowed = [
+      'name', 'description', 'subject', 'content', 'category', 'status',
+      'isDefault', 'variables', 'departments', 'designations', 'tags',
+      'settings', 'agreementSettings', 'approvalRequired', 'legalReviewed'
+    ];
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        template[key] = req.body[key];
+      }
+    }
+    template.updatedBy = req.user.id || req.user._id;
 
-    Object.assign(template, updateData);
     await template.save();
 
     await template.populate('departments', 'name');
@@ -182,9 +224,13 @@ exports.updateAgreementTemplate = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating agreement template:', error);
-    res.status(500).json({
+    const message =
+      error.name === 'ValidationError'
+        ? Object.values(error.errors).map((e) => e.message).join('; ')
+        : error.message || 'Failed to update agreement template';
+    res.status(error.name === 'ValidationError' ? 400 : 500).json({
       success: false,
-      message: 'Failed to update agreement template'
+      message
     });
   }
 };
@@ -207,11 +253,16 @@ exports.deleteAgreementTemplate = async (req, res) => {
       });
     }
 
-    // Check if template is being used
-    if (template.usageCount > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete template that has been used. Consider deactivating it instead.'
+    // Soft-block only when heavily used; otherwise allow delete
+    if (template.usageCount > 0 && req.query.force !== 'true') {
+      // Prefer deactivate path for used templates unless force=true
+      template.status = 'inactive';
+      template.updatedBy = req.user.id || req.user._id;
+      await template.save();
+      return res.status(200).json({
+        success: true,
+        deactivated: true,
+        message: 'Template has been used, so it was deactivated instead of deleted. Pass force=true to permanently delete.'
       });
     }
 

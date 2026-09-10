@@ -4,6 +4,114 @@ const Department = require('../models/Department');
 const { getTenantModel } = require('../middlewares/tenantMiddleware');
 const ContractWorkflowService = require('../services/contractWorkflowService');
 
+// @desc    Get current user's profile (must be registered before /:id)
+// @route   GET /api/employees/profile
+// @access  Private
+exports.getMyProfile = async (req, res) => {
+  try {
+    const tenantConnection = req.tenant?.connection;
+    const user = req.user;
+
+    let employee = null;
+    if (tenantConnection) {
+      const TenantEmployee = getTenantModel(tenantConnection, 'Employee', TenantEmployeeSchema);
+      const TenantUser = getTenantModel(tenantConnection, 'User', TenantUserSchema);
+
+      if (user.employeeId) {
+        employee = await TenantEmployee.findById(user.employeeId).lean();
+      }
+      if (!employee && user.email) {
+        employee = await TenantEmployee.findOne({ email: user.email.toLowerCase() }).lean();
+      }
+
+      // Prefer live tenant user fields when Employee record is missing (fresh SPC seed)
+      const tenantUser = await TenantUser.findById(user._id || user.id).select('-password').lean();
+      if (!employee && tenantUser) {
+        employee = {
+          _id: tenantUser._id,
+          id: tenantUser._id,
+          firstName: tenantUser.firstName,
+          lastName: tenantUser.lastName,
+          email: tenantUser.email,
+          phone: tenantUser.phone || '',
+          employeeCode: tenantUser.employeeCode || 'SPC001',
+          designation: tenantUser.designation || 'Employee',
+          department: tenantUser.department
+            ? { name: tenantUser.department }
+            : { name: 'General' },
+          joiningDate: tenantUser.joiningDate || tenantUser.createdAt || new Date(),
+          status: tenantUser.isActive === false ? 'inactive' : 'active',
+          employmentType: tenantUser.employmentType || 'full-time',
+          salary: tenantUser.salary || { basic: 0, hra: 0, allowances: 0, total: 0 },
+          address: tenantUser.address || {},
+          emergencyContact: tenantUser.emergencyContact || {},
+          reportingManager: tenantUser.reportingManager || null,
+        };
+      }
+    }
+
+    if (!employee) {
+      employee = {
+        _id: user._id || user.id,
+        id: user._id || user.id,
+        firstName: user.firstName || 'User',
+        lastName: user.lastName || '',
+        email: user.email,
+        phone: user.phone || '',
+        employeeCode: user.employeeCode || 'EMP001',
+        designation: user.designation || 'Employee',
+        department: typeof user.department === 'string'
+          ? { name: user.department }
+          : (user.department || { name: 'General' }),
+        joiningDate: user.joiningDate || new Date(),
+        status: 'active',
+        employmentType: 'full-time',
+        salary: { basic: 0, hra: 0, allowances: 0, total: 0 },
+        address: {},
+        emergencyContact: {},
+      };
+    }
+
+    // Normalize shape expected by EmployeeProfile.jsx
+    if (typeof employee.department === 'string') {
+      employee.department = { name: employee.department };
+    }
+
+    return res.status(200).json({ success: true, data: employee });
+  } catch (error) {
+    console.error('Error fetching my profile:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch profile',
+    });
+  }
+};
+
+// @desc    Get current user's profile stats
+// @route   GET /api/employees/profile/stats
+// @access  Private
+exports.getMyProfileStats = async (req, res) => {
+  try {
+    const user = req.user;
+    const joining = user.joiningDate ? new Date(user.joiningDate) : new Date();
+    const totalDays = Math.max(0, Math.floor((Date.now() - joining.getTime()) / (1000 * 60 * 60 * 24)));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalDays,
+        leaveTaken: 0,
+        leaveBalance: 0,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch profile stats',
+    });
+  }
+};
+
 // @desc    Get all employees
 // @route   GET /api/employees
 // @access  Private
@@ -155,10 +263,6 @@ exports.getEmployees = async (req, res) => {
       return emp.isActive !== false && (emp.isExEmployee !== true);
     });
 
-    
-    // Also verify specific employees that should be excluded
-    const shouldBeExcluded = await TenantEmployee.find({ employeeCode: { $in: ['EMP0004', 'EMP0005', 'EMP0003', 'EMP0002'] } }).lean();
-
     // Populate department information manually since department is stored as string
     const populatedEmployees = await Promise.all(
       filteredEmployees.map(async (employee) => {
@@ -213,8 +317,6 @@ exports.getEmployee = async (req, res) => {
       });
     }
 
-    console.log('Employee data from DB:', employee);
-    console.log('Salary data from DB:', employee.salary);
 
     // Clean and validate salary data before sending to frontend
     if (employee.salary && typeof employee.salary === 'object') {
@@ -226,7 +328,6 @@ exports.getEmployee = async (req, res) => {
         deductions: parseFloat(employee.salary.deductions) || 0,
         total: parseFloat(employee.salary.total) || 0
       };
-      console.log('Cleaned salary data:', employee.salary);
     }
 
     // Populate department information manually since department is stored as string
@@ -326,11 +427,9 @@ exports.createEmployee = async (req, res) => {
       createdBy: req.user._id
     };
 
-    console.log('Creating employee with salary data:', employeeData.salary);
     const employee = await TenantEmployee.create(employeeData);
 
     console.log(`✅ Created employee: ${employee.firstName} ${employee.lastName} (${employeeCode})`);
-    console.log('Saved employee salary data:', employee.salary);
 
     // Handle contract workflow for contract-requiring employment types
     let contractWorkflowResult = null;
@@ -383,8 +482,29 @@ exports.updateEmployee = async (req, res) => {
     // Get the current employee data before update for logging
     const previousEmployee = await TenantEmployee.findById(req.params.id).lean();
 
-    // Clean up data before update to handle ObjectId fields properly
-    const updateData = { ...req.body };
+    // Clean up data before update — allowlist only (block mass assignment of privileged fields)
+    const ALLOWED_EMPLOYEE_UPDATE_FIELDS = [
+      'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 'address',
+      'department', 'departmentId', 'designation', 'employmentType', 'joiningDate',
+      'reportingManager', 'salary', 'bankDetails', 'emergencyContact', 'skills',
+      'workLocation', 'shift', 'status', 'profilePicture', 'documents',
+      'academicQualifications', 'certifications', 'experience', 'bloodGroup',
+      'maritalStatus', 'nationality', 'panNumber', 'aadharNumber', 'uanNumber'
+    ];
+    const FORBIDDEN_FIELDS = [
+      'password', 'role', 'isActive', 'mustChangePassword', 'isFirstLogin',
+      'companyId', 'clientId', 'permissions', 'isExEmployee', 'employeeCode'
+    ];
+
+    const updateData = {};
+    for (const key of ALLOWED_EMPLOYEE_UPDATE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        updateData[key] = req.body[key];
+      }
+    }
+    for (const key of FORBIDDEN_FIELDS) {
+      delete updateData[key];
+    }
     
     // Handle department field
     if (req.body.department !== undefined) {
@@ -417,8 +537,6 @@ exports.updateEmployee = async (req, res) => {
 
     // Clean and validate salary data before updating
     if (updateData.salary && typeof updateData.salary === 'object') {
-      console.log('Original salary data received:', updateData.salary);
-      console.log('Original currency received:', updateData.salary.currency);
       
       updateData.salary = {
         currency: updateData.salary.currency || 'USD',
@@ -428,8 +546,6 @@ exports.updateEmployee = async (req, res) => {
         deductions: parseFloat(updateData.salary.deductions) || 0,
         total: parseFloat(updateData.salary.total) || 0
       };
-      console.log('Cleaned salary data for update:', updateData.salary);
-      console.log('Final currency being saved:', updateData.salary.currency);
     }
 
     const employee = await TenantEmployee.findByIdAndUpdate(
@@ -439,8 +555,6 @@ exports.updateEmployee = async (req, res) => {
     ).lean();
 
     console.log('Employee after update:', employee);
-    console.log('Salary after update:', employee.salary);
-    console.log('Currency after update:', employee.salary?.currency);
 
     if (!employee) {
       return res.status(404).json({

@@ -2,6 +2,16 @@ const { getTenantModel } = require('../utils/tenantModels');
 
 exports.getNotifications = async (req, res) => {
   try {
+    // Super admins (and any user without tenant context) get an empty inbox
+    if (!req.tenant?.connection || req.user?.role === 'superadmin') {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        unreadCount: 0,
+        data: [],
+      });
+    }
+
     const Notification = getTenantModel(req.tenant.connection, 'Notification');
     const { isRead, type, priority } = req.query;
     let query = { recipient: req.user._id };

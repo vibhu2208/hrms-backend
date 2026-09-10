@@ -1,9 +1,26 @@
-const CandidateDocument = require('../models/CandidateDocument');
-const Candidate = require('../models/Candidate');
-const Onboarding = require('../models/Onboarding');
+const CandidateDocumentModel = require('../models/CandidateDocument');
+const CandidateModel = require('../models/Candidate');
+const OnboardingModel = require('../models/Onboarding');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
+const { getTenantConnection } = require('../config/database.config');
+
+async function getTenantDocModels(companyId) {
+  if (!companyId || String(companyId).trim() === '') {
+    const err = new Error('companyId is required');
+    err.statusCode = 400;
+    throw err;
+  }
+  const connection = await getTenantConnection(String(companyId).trim());
+  const Candidate = connection.models.Candidate || connection.model('Candidate', CandidateModel.schema);
+  // Keep public aadhaar/PAN docs in tenant DB under candidatedocuments collection
+  const CandidateDocument =
+    connection.models.CandidateDocumentPublic ||
+    connection.model('CandidateDocumentPublic', CandidateDocumentModel.schema, 'candidatedocuments');
+  const Onboarding = connection.models.Onboarding || connection.model('Onboarding', OnboardingModel.schema);
+  return { Candidate, CandidateDocument, Onboarding };
+}
 
 // Configure email transporter using existing email config
 const createTransporter = () => {
@@ -35,22 +52,31 @@ const createTransporter = () => {
 
 /**
  * Validate candidate by candidate code (public access)
- * @route POST /api/public/candidate-documents/validate
+ * @route POST /api/candidate-documents/public/validate
  */
 exports.validateCandidate = async (req, res) => {
   try {
-    const { candidateCode } = req.body;
+    const { candidateCode, companyId } = req.body;
 
-    if (!candidateCode) {
+    if (!candidateCode || typeof candidateCode !== 'string') {
       return res.status(400).json({
         success: false,
         message: 'Candidate ID is required'
       });
     }
 
+    if (!companyId || typeof companyId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    const { Candidate, CandidateDocument } = await getTenantDocModels(companyId);
+
     // Find candidate by code
-    const candidate = await Candidate.findOne({ candidateCode })
-      .select('candidateCode firstName lastName email phone stage status');
+    const candidate = await Candidate.findOne({ candidateCode: candidateCode.trim() })
+      .select('candidateCode firstName lastName stage status');
 
     if (!candidate) {
       return res.status(404).json({
@@ -68,24 +94,22 @@ exports.validateCandidate = async (req, res) => {
     }
 
     // Check if documents already exist
-    const existingDocs = await CandidateDocument.findOne({ candidateId: candidateCode });
+    const existingDocs = await CandidateDocument.findOne({ candidateId: candidateCode.trim() });
 
     res.status(200).json({
       success: true,
       data: {
         candidateCode: candidate.candidateCode,
         name: `${candidate.firstName} ${candidate.lastName}`,
-        email: candidate.email,
         documentsSubmitted: existingDocs?.allDocumentsSubmitted || false
       }
     });
 
   } catch (error) {
-    console.error('Error validating candidate:', error);
-    res.status(500).json({
+    console.error('Error validating candidate:', error.message);
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Failed to validate candidate',
-      error: error.message
+      message: error.statusCode === 400 ? error.message : 'Failed to validate candidate'
     });
   }
 };
@@ -96,18 +120,27 @@ exports.validateCandidate = async (req, res) => {
  */
 exports.submitDocuments = async (req, res) => {
   try {
-    const { candidateCode, bankDetails } = req.body;
+    const { candidateCode, bankDetails, companyId } = req.body;
     const files = req.files;
 
-    if (!candidateCode) {
+    if (!candidateCode || typeof candidateCode !== 'string') {
       return res.status(400).json({
         success: false,
         message: 'Candidate ID is required'
       });
     }
 
+    if (!companyId || typeof companyId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Company context is required'
+      });
+    }
+
+    const { Candidate, CandidateDocument } = await getTenantDocModels(companyId);
+
     // Validate candidate
-    const candidate = await Candidate.findOne({ candidateCode });
+    const candidate = await Candidate.findOne({ candidateCode: candidateCode.trim() });
     if (!candidate) {
       return res.status(404).json({
         success: false,
@@ -131,8 +164,14 @@ exports.submitDocuments = async (req, res) => {
       });
     }
 
-    // Check if documents already exist
-    let candidateDoc = await CandidateDocument.findOne({ candidateId: candidateCode });
+    // Check if documents already exist — block overwrite of submitted/verified KYC
+    let candidateDoc = await CandidateDocument.findOne({ candidateId: candidateCode.trim() });
+    if (candidateDoc?.allDocumentsSubmitted) {
+      return res.status(409).json({
+        success: false,
+        message: 'Documents already submitted. Contact HR if you need to resubmit.'
+      });
+    }
 
     const now = new Date();
 
@@ -223,11 +262,11 @@ exports.submitDocuments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error submitting documents:', error);
-    res.status(500).json({
+    console.error('Error submitting documents:', error.message);
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Failed to submit documents',
-      error: error.message
+      message: error.statusCode === 400 ? error.message : 'Failed to submit documents',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -239,6 +278,8 @@ exports.submitDocuments = async (req, res) => {
 exports.getCandidateDocuments = async (req, res) => {
   try {
     const { candidateCode } = req.params;
+    const companyId = req.companyId || req.user?.companyId || req.tenant?.companyId;
+    const { CandidateDocument } = await getTenantDocModels(companyId);
 
     const candidateDoc = await CandidateDocument.findOne({ candidateId: candidateCode })
       .populate('aadhar.verifiedBy', 'name employeeId')
@@ -276,6 +317,8 @@ exports.verifyDocument = async (req, res) => {
     const { candidateCode } = req.params;
     const { documentType, verified, rejectionReason } = req.body;
     const hrUserId = req.user._id;
+    const companyId = req.companyId || req.user?.companyId || req.tenant?.companyId;
+    const { Candidate, CandidateDocument } = await getTenantDocModels(companyId);
 
     if (!['aadhar', 'pan', 'bankDetails'].includes(documentType)) {
       return res.status(400).json({

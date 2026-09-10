@@ -3,6 +3,7 @@
  */
 
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({ requireAllowFlag: true, allowFlag: 'ALLOW_SEED', label: 'clearAndReseedApplicants' });
 const mongoose = require('mongoose');
 const connectDB = require('../config/database');
 const Candidate = require('../models/Candidate');

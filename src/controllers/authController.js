@@ -7,10 +7,18 @@ const { getTenantConnection } = require('../config/database.config');
 
 // @desc    Register user
 // @route   POST /api/auth/register
-// @access  Public
+// @access  Public (disabled in production unless ENABLE_PUBLIC_REGISTER=true; role forced to employee)
 exports.register = async (req, res) => {
   try {
-    const { email, password, role, employeeId, firstName, lastName, isActive } = req.body;
+    const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    if (isProduction && process.env.ENABLE_PUBLIC_REGISTER !== 'true') {
+      return res.status(403).json({
+        success: false,
+        message: 'Public registration is disabled'
+      });
+    }
+
+    const { email, password, employeeId, firstName, lastName } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -32,15 +40,15 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Create user
+    // Create user — never accept elevated roles or isActive from the public body
     const user = await User.create({
       email,
       password,
-      role: role || 'employee',
+      role: 'employee',
       employeeId,
       firstName,
       lastName,
-      isActive: isActive !== undefined ? isActive : true
+      isActive: true
     });
 
     // Generate token
@@ -77,7 +85,7 @@ exports.login = async (req, res) => {
   let tenantConnection = null;
   
   try {
-    console.log('🔍 Login attempt:', req.body);
+    console.log('🔍 Login attempt:', { email: req.body?.email, companyId: req.body?.companyId });
     const { email, password, companyId } = req.body;
 
     // Validate email & password
@@ -137,7 +145,6 @@ exports.login = async (req, res) => {
           } else {
             // User not found in the selected company
             console.log(`❌ User ${email} not found in company ${company.companyName}`);
-            if (tenantConnection) await tenantConnection.close();
             return res.status(401).json({
               success: false,
               message: `User not found in ${company.companyName}. Please select the correct company.`
@@ -145,7 +152,6 @@ exports.login = async (req, res) => {
           }
         } catch (tenantError) {
           console.error(`⚠️  Error checking ${company.companyName}:`, tenantError.message);
-          if (tenantConnection) await tenantConnection.close();
           return res.status(500).json({
             success: false,
             message: 'Error accessing company database'
@@ -196,7 +202,6 @@ exports.login = async (req, res) => {
 
     if (!user) {
       console.log('❌ User not found for email:', email);
-      if (tenantConnection) await tenantConnection.close();
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -204,15 +209,9 @@ exports.login = async (req, res) => {
     }
 
     // Check if password matches
-    console.log('🔍 Comparing password for user:', user.email);
-    console.log('🔍 Password provided:', password);
-    console.log('🔍 User has password field:', !!user.password);
     const isMatch = await user.comparePassword(password);
-    console.log('🔍 Password match result:', isMatch);
 
     if (!isMatch) {
-      console.log('❌ Password mismatch for user:', user.email);
-      if (tenantConnection) await tenantConnection.close();
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -221,28 +220,18 @@ exports.login = async (req, res) => {
 
     // Check if user is active
     if (!user.isActive) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(403).json({
         success: false,
         message: 'Your account has been deactivated'
       });
     }
 
-    // Update last login and first login flag
+    // Update last login — do NOT clear isFirstLogin / mustChangePassword until password is changed
     user.lastLogin = Date.now();
-    
-    // Check if this is first login
-    const isFirstLogin = user.isFirstLogin;
-    if (isFirstLogin) {
-      user.isFirstLogin = false;
-    }
-    
+    const isFirstLogin = !!user.isFirstLogin;
     await user.save();
 
-    // Close tenant connection if used
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
+    // Do not close cached tenant connections — they are reused by getTenantConnection
 
     // Generate token with additional company info for tenant users
     const tokenPayload = {
@@ -285,9 +274,6 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Login error:', error);
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
     res.status(500).json({
       success: false,
       message: error.message
@@ -300,7 +286,11 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('employeeId');
+    // protect middleware already loaded the user (tenant or super admin)
+    const user = req.user;
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
     res.status(200).json({
       success: true,
@@ -314,14 +304,46 @@ exports.getMe = async (req, res) => {
   }
 };
 
+// @desc    Logout — blacklist current JWT when Redis is available
+// @route   POST /api/auth/logout
+// @access  Private
+exports.logout = async (req, res) => {
+  try {
+    const tokenBlacklistService = require('../services/tokenBlacklistService');
+    const token = req.headers.authorization?.startsWith('Bearer')
+      ? req.headers.authorization.split(' ')[1]
+      : null;
+
+    if (token) {
+      const decoded = require('../utils/jwt').verifyToken(token);
+      const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await tokenBlacklistService.addToBlacklist(token, expiresAt);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    // Still return success so client can clear local session
+    console.error('Logout blacklist error:', error.message);
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  }
+};
+
 // @desc    Update password
 // @route   PUT /api/auth/updatepassword
 // @access  Private
 exports.updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const { getTenantConnection } = require('../config/database.config');
+    const { getSuperAdmin } = require('../models/global');
 
-    // Validate new password
     if (!newPassword || newPassword.length < 8) {
       return res.status(400).json({
         success: false,
@@ -329,30 +351,88 @@ exports.updatePassword = async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.user.id).select('+password');
+    const userId = req.user._id || req.user.id;
+    const companyId = req.companyId || req.user.companyId;
+    let user = null;
 
-    // Check current password
-    const isMatch = await user.comparePassword(currentPassword);
+    if (companyId) {
+      const connection = await getTenantConnection(companyId);
+      const TenantUser = connection.model('User', TenantUserSchema);
+      user = await TenantUser.findById(userId).select('+password');
+    } else if (req.user.role === 'superadmin') {
+      const SuperAdmin = await getSuperAdmin();
+      user = await SuperAdmin.findById(userId).select('+password');
+    } else {
+      user = await User.findById(userId).select('+password');
+    }
 
-    if (!isMatch) {
-      return res.status(401).json({
+    if (!user) {
+      return res.status(404).json({
         success: false,
-        message: 'Current password is incorrect'
+        message: 'User not found'
       });
     }
 
-    // Update password and clear mustChangePassword flag
+    const forceChange = !!user.mustChangePassword || !!user.isFirstLogin;
+    if (!forceChange) {
+      if (!currentPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Current password is required'
+        });
+      }
+      const isMatch = await user.comparePassword(currentPassword);
+      if (!isMatch) {
+        return res.status(401).json({
+          success: false,
+          message: 'Current password is incorrect'
+        });
+      }
+    } else if (currentPassword) {
+      const isMatch = await user.comparePassword(currentPassword);
+      if (!isMatch) {
+        return res.status(401).json({
+          success: false,
+          message: 'Current password is incorrect'
+        });
+      }
+    }
+
     user.password = newPassword;
     user.mustChangePassword = false;
+    user.isFirstLogin = false;
     user.passwordChangedAt = Date.now();
     await user.save();
 
-    const token = generateToken(user._id);
+    const tokenPayload = {
+      userId: user._id,
+      email: user.email,
+      role: user.role
+    };
+    if (companyId) {
+      tokenPayload.companyId = companyId;
+      tokenPayload.companyCode = req.companyCode || req.user.companyCode;
+      tokenPayload.tenantDatabaseName = req.databaseName || req.user.tenantDatabaseName;
+    }
+
+    const token = generateToken(user._id, tokenPayload);
 
     res.status(200).json({
       success: true,
       message: 'Password updated successfully',
-      data: { token }
+      data: {
+        token,
+        user: {
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+          mustChangePassword: false,
+          isFirstLogin: false,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          ...(companyId ? { companyId } : {})
+        }
+      }
     });
   } catch (error) {
     res.status(500).json({
@@ -442,7 +522,9 @@ exports.adminResetPassword = async (req, res) => {
 // @access  Public
 exports.googleLogin = async (req, res) => {
   try {
-    const { credential } = req.body;
+    const { credential, companyId } = req.body;
+    const TenantUserSchema = require('../models/tenant/TenantUser');
+    const { getCompanyRegistry } = require('../models/global');
 
     if (!credential) {
       return res.status(400).json({
@@ -451,7 +533,6 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
-    // Verify Google token
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
     
     let ticket;
@@ -468,27 +549,50 @@ exports.googleLogin = async (req, res) => {
     }
 
     const payload = ticket.getPayload();
-    const { sub: googleId, email, name, picture } = payload;
+    const { sub: googleId, email, picture } = payload;
 
-    // Check if user exists with this email
-    let user = await User.findOne({ email }).populate('employeeId');
+    let user = null;
+    let userCompany = null;
+    let isTenantUser = false;
+
+    if (companyId) {
+      const CompanyRegistry = await getCompanyRegistry();
+      const company = await CompanyRegistry.findOne({
+        companyId: companyId,
+        status: 'active',
+        databaseStatus: 'active'
+      });
+      if (!company) {
+        return res.status(404).json({
+          success: false,
+          message: 'Company not found or inactive'
+        });
+      }
+      const tenantConnection = await getTenantConnection(company.tenantDatabaseName || companyId);
+      const TenantUser = tenantConnection.model('User', TenantUserSchema);
+      user = await TenantUser.findOne({ email: email.toLowerCase() });
+      if (user) {
+        isTenantUser = true;
+        userCompany = company;
+      }
+    } else {
+      // Prefer tenant lookup across companies only when companyId omitted (legacy)
+      user = await User.findOne({ email: email.toLowerCase() }).populate('employeeId');
+    }
 
     if (!user) {
-      // User doesn't exist - reject login
       return res.status(404).json({
         success: false,
         message: 'No account found with this email. Please contact your administrator to create an account.'
       });
     }
 
-    // User exists - update Google info if needed
     if (!user.googleId) {
       user.googleId = googleId;
       user.authProvider = 'google';
-      user.profilePicture = picture;
+      if (picture) user.profilePicture = picture;
     }
     
-    // Check if user is active
     if (!user.isActive) {
       return res.status(403).json({
         success: false,
@@ -496,30 +600,43 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
-    // Update last login
     user.lastLogin = Date.now();
-    const isFirstLogin = user.isFirstLogin;
-    if (isFirstLogin) {
-      user.isFirstLogin = false;
-    }
+    const isFirstLogin = !!user.isFirstLogin;
     await user.save();
 
-    // Generate token
-    const token = generateToken(user._id);
+    const tokenPayload = {
+      userId: user._id,
+      email: user.email,
+      role: user.role
+    };
+    if (isTenantUser && userCompany) {
+      tokenPayload.companyId = userCompany.companyId;
+      tokenPayload.companyCode = userCompany.companyCode;
+      tokenPayload.tenantDatabaseName = userCompany.tenantDatabaseName;
+    }
+
+    const token = generateToken(user._id, tokenPayload);
 
     return res.status(200).json({
       success: true,
       message: 'Login successful',
       data: {
         user: {
-          id: user._id,
+          userId: user._id,
           email: user.email,
           role: user.role,
           employee: user.employeeId,
-          isFirstLogin: isFirstLogin,
+          isFirstLogin,
           mustChangePassword: user.mustChangePassword,
           themePreference: user.themePreference || 'dark',
-          profilePicture: user.profilePicture
+          profilePicture: user.profilePicture,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          ...(isTenantUser && userCompany ? {
+            companyId: userCompany.companyId,
+            companyName: userCompany.companyName,
+            companyCode: userCompany.companyCode
+          } : {})
         },
         token
       }
@@ -546,17 +663,21 @@ exports.getActiveCompanies = async (req, res) => {
     const companyRegistrySchema = require('../models/global/CompanyRegistry');
     const CompanyRegistry = globalConnection.model('CompanyRegistry', companyRegistrySchema);
     
-    // Fetch companies from CompanyRegistry
+    // Minimal fields for login company picker (no DB names / subscription internals)
     const registryCompanies = await CompanyRegistry.find({
       status: 'active'
     })
-    .select('companyId companyName companyCode tenantDatabaseName status subscription')
+    .select('companyId companyName companyCode')
     .sort({ companyName: 1 })
     .lean();
 
     res.status(200).json({
       success: true,
-      data: registryCompanies
+      data: registryCompanies.map((c) => ({
+        companyId: c.companyId,
+        companyName: c.companyName,
+        companyCode: c.companyCode
+      }))
     });
   } catch (error) {
     console.error('Error fetching companies:', error);

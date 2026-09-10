@@ -266,7 +266,7 @@ exports.sendToOnboarding = async (req, res) => {
 
       const tenantId = req.tenant.companyId || req.tenant.clientId;
       // Hard-coded public upload documents base URL as requested
-      uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+      uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
     } catch (tokenError) {
       console.error('Error generating upload token:', tokenError);
     }
@@ -666,7 +666,7 @@ exports.updateOnboardingStatus = async (req, res) => {
 
         if (uploadToken) {
           // Reuse existing token
-          uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+          uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
           console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
         } else {
           // Generate new token
@@ -685,7 +685,7 @@ exports.updateOnboardingStatus = async (req, res) => {
             generatedBy: hrUserId
           });
 
-          uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+          uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
           console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
         }
 
@@ -1181,7 +1181,7 @@ exports.acceptOffer = async (req, res) => {
         
         if (uploadToken) {
           // Reuse existing token
-          uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+          uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
           console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
         } else {
           // Generate new token
@@ -1200,13 +1200,13 @@ exports.acceptOffer = async (req, res) => {
             generatedBy: null // System generated since candidate accepted
           });
 
-          uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+          uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
           console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
         }
       } else {
         // Fallback: generate a simple URL without tenant-specific token
         const token = require('crypto').randomBytes(32).toString('hex');
-        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=default`;
+        uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=default`;
         console.log(`⚠️ Using fallback upload URL for ${onboarding.candidateName}`);
       }
 
@@ -1665,7 +1665,7 @@ exports.verifyDocument = async (req, res) => {
           candidateEmail: onboarding.candidateEmail,
           documentName: document.name || document.type,
           rejectionReason: notes,
-          uploadUrl: document.uploadUrl || `http://3.108.172.119/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
+          uploadUrl: document.uploadUrl || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${onboarding.uploadToken}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
           companyName: process.env.COMPANY_NAME || 'SPC MANAGMENT'
         });
       } catch (emailError) {
@@ -2043,7 +2043,7 @@ exports.requestDocuments = async (req, res) => {
 
       if (uploadToken) {
         // Reuse existing token
-        uploadUrl = `http://3.108.172.119/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
+        uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${uploadToken.token}?tenantId=${tenantId}`;
         console.log(`✅ Reusing existing upload token for ${onboarding.candidateName}`);
       } else {
         // Generate new token
@@ -2062,7 +2062,7 @@ exports.requestDocuments = async (req, res) => {
           generatedBy: req.user._id
         });
 
-        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+        uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
         console.log(`✅ Generated new upload token for ${onboarding.candidateName}`);
       }
 
@@ -2578,7 +2578,7 @@ exports.requestPayslipUpload = async (req, res) => {
     // Send payslip verification email
     try {
       const tenantId = req.tenant.companyId || req.tenant.clientId;
-      const uploadUrl = `http://3.108.172.119/api/public/document-upload/upload/${token}?tenantId=${tenantId}`;
+      const uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/public/document-upload/upload/${token}?tenantId=${tenantId}`;
       
       const { sendPayslipVerificationRequestEmail } = require('../services/emailService');
       await sendPayslipVerificationRequestEmail({
@@ -2604,7 +2604,7 @@ exports.requestPayslipUpload = async (req, res) => {
         candidateName: onboarding.candidateName,
         candidateEmail: onboarding.candidateEmail,
         uploadToken: token,
-        uploadUrl: `http://3.108.172.119/api/public/document-upload/upload/${token}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
+        uploadUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/api/public/document-upload/upload/${token}?tenantId=${req.tenant.companyId || req.tenant.clientId}`,
         expiresAt,
         status: 'payslip_verification'
       }

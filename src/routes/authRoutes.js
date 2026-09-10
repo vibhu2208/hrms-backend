@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { register, login, getMe, updatePassword, googleLogin, adminResetPassword, getActiveCompanies } = require('../controllers/authController');
+const { register, login, logout, getMe, updatePassword, googleLogin, adminResetPassword, getActiveCompanies } = require('../controllers/authController');
 const { protect, authorize } = require('../middlewares/auth');
 const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.post('/register', register);
 router.post('/login', login);
+router.post('/logout', protect, logout);
 router.post('/google', googleLogin);
 router.get('/me', protect, getMe);
 router.put('/updatepassword', protect, updatePassword);

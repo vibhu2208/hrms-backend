@@ -289,7 +289,7 @@ exports.createUser = async (req, res) => {
       emailError = new Error('Email service not configured. Please configure EMAIL_USER and EMAIL_APP_PASSWORD or SMTP settings.');
     } else {
       try {
-      const frontendUrl = 'http://3.108.172.119:8080';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
       const emailData = {
         to: email,
         subject: `Welcome to ${req.tenant.companyName} - Your Account Credentials`,
@@ -364,7 +364,8 @@ exports.createUser = async (req, res) => {
       data: userResponse,
       emailSent: emailSent,
       emailError: emailError ? emailError.message : null,
-      tempPassword: tempPassword // Only for testing - remove in production
+      // Only return temp password when email failed so admin can share it out-of-band
+      ...(emailSent ? {} : { tempPassword })
     });
 
   } catch (error) {

@@ -6,35 +6,41 @@
  */
 
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({ requireAllowFlag: true, allowFlag: 'ALLOW_SEED', label: 'seedTCSSystem' });
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const { connectGlobalDB, getTenantConnection, initializeTenantDatabase } = require('../config/database.config');
 const { getSuperAdmin, getCompanyRegistry, getCompanyTheme } = require('../models/global');
 const TenantUserSchema = require('../models/tenant/TenantUser');
 
+function demoPassword(envKey) {
+  return process.env[`SEED_PASSWORD_${envKey}`] || (`Tmp!${crypto.randomBytes(6).toString('base64url')}`);
+}
+
 const credentials = {
   superAdmin: {
     email: 'superadmin@hrms.com',
-    password: 'SuperAdmin@2025',
+    password: demoPassword('SUPERADMIN'),
     role: 'Super Admin'
   },
   companyAdmin: {
     email: 'admin@tcs.com',
-    password: 'TCSAdmin@2025',
+    password: demoPassword('ADMIN'),
     role: 'Company Admin'
   },
   hr: {
     email: 'hr@tcs.com',
-    password: 'TCSHR@2025',
+    password: demoPassword('HR'),
     role: 'HR User'
   },
   manager: {
     email: 'manager@tcs.com',
-    password: 'TCSManager@2025',
+    password: demoPassword('MANAGER'),
     role: 'Manager'
   },
   employee: {
     email: 'employee@tcs.com',
-    password: 'TCSEmployee@2025',
+    password: demoPassword('EMPLOYEE'),
     employeeId: 'TCS001',
     role: 'Employee'
   }
@@ -379,15 +385,15 @@ const seedTCSSystem = async () => {
     console.log('📝 QUICK REFERENCE TABLE');
     console.log('═══════════════════════════════════════════════════════\n');
 
-    console.log('┌──────────────────┬─────────────────────────┬───────────────────┐');
-    console.log('│ Role             │ Email                   │ Password          │');
-    console.log('├──────────────────┼─────────────────────────┼───────────────────┤');
-    console.log('│ Super Admin      │ superadmin@hrms.com     │ SuperAdmin@2025   │');
-    console.log('│ Company Admin    │ admin@tcs.com           │ TCSAdmin@2025     │');
-    console.log('│ HR User          │ hr@tcs.com              │ TCSHR@2025        │');
-    console.log('│ Manager          │ manager@tcs.com         │ TCSManager@2025   │');
-    console.log('│ Employee         │ employee@tcs.com        │ TCSEmployee@2025  │');
-    console.log('└──────────────────┴─────────────────────────┴───────────────────┘\n');
+    console.log('┌──────────────────┬─────────────────────────┬──────────────────────────────┐');
+    console.log('│ Role             │ Email                   │ Password (one-time)          │');
+    console.log('├──────────────────┼─────────────────────────┼──────────────────────────────┤');
+    console.log(`│ Super Admin      │ ${credentials.superAdmin.email.padEnd(23)} │ ${credentials.superAdmin.password}`);
+    console.log(`│ Company Admin    │ ${credentials.companyAdmin.email.padEnd(23)} │ ${credentials.companyAdmin.password}`);
+    console.log(`│ HR User          │ ${credentials.hr.email.padEnd(23)} │ ${credentials.hr.password}`);
+    console.log(`│ Manager          │ ${credentials.manager.email.padEnd(23)} │ ${credentials.manager.password}`);
+    console.log(`│ Employee         │ ${credentials.employee.email.padEnd(23)} │ ${credentials.employee.password}`);
+    console.log('└──────────────────┴─────────────────────────┴──────────────────────────────┘\n');
 
     console.log('═══════════════════════════════════════════════════════');
     console.log('🚀 NEXT STEPS');
@@ -404,13 +410,13 @@ const seedTCSSystem = async () => {
     console.log('3. Test Super Admin Login:');
     console.log('   → Go to: http://localhost:5173/login');
     console.log('   → Click: "Super Admin Login"');
-    console.log('   → Use: superadmin@hrms.com / SuperAdmin@2025\n');
+    console.log(`   → Use: ${credentials.superAdmin.email} / (password printed above)\n`);
 
     console.log('4. Test Company Login (TCS):');
     console.log('   → Go to: http://localhost:5173/login');
     console.log('   → Click: "Company Login"');
     console.log('   → Search: "TCS"');
-    console.log('   → Use any of the TCS user credentials above\n');
+    console.log('   → Use any of the TCS user credentials printed above\n');
 
     console.log('═══════════════════════════════════════════════════════');
     console.log('⚠️  IMPORTANT NOTES');

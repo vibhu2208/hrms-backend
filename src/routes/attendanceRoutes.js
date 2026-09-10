@@ -9,8 +9,10 @@ const {
   getAttendanceStats
 } = require('../controllers/attendanceController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 router.get('/stats', authorize('admin', 'hr'), getAttendanceStats);
 router.route('/')

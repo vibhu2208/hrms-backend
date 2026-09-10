@@ -1,9 +1,19 @@
 const { connectGlobalDB, getTenantConnection } = require('../config/database.config');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({
+  requireAllowFlag: true,
+  allowFlag: 'ALLOW_SEED',
+  label: 'createTenantAdmin'
+});
+const { generateAdminPassword } = require('../utils/generatePassword');
 
-async function createTenantAdmin(companyName, adminEmail, password = 'password123') {
+async function createTenantAdmin(companyName, adminEmail, password) {
   try {
+    if (!password) {
+      password = generateAdminPassword();
+      console.log('🔑 Generated admin password (save this):', password);
+    }
     // Connect to global database
     const globalConnection = await connectGlobalDB();
     console.log('✅ Connected to Global Database\n');
@@ -81,7 +91,7 @@ async function createTenantAdmin(companyName, adminEmail, password = 'password12
 
 const companyName = process.argv[2] || 'TTS';
 const adminEmail = process.argv[3] || 'admin@tts.com';
-const password = process.argv[4] || 'password123';
+const password = process.argv[4]; // optional — generated if omitted
 
 console.log(`\n🚀 Creating admin user for ${companyName}\n`);
 createTenantAdmin(companyName, adminEmail, password);

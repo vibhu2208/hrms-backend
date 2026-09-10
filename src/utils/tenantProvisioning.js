@@ -124,7 +124,7 @@ const provisionTenantDatabase = async (companyData, adminData, onboardedBy) => {
     console.log(`   Company ID: ${company.companyId}`);
     console.log(`   Database: ${company.tenantDatabaseName}`);
     console.log(`   Admin Email: ${adminData.email}`);
-    console.log(`   Temp Password: ${tempPassword}\n`);
+    console.log(`   Temp Password: (sent via email / returned to caller only)\n`);
     
     return {
       company: {

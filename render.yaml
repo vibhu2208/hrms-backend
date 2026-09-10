@@ -18,6 +18,10 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         value: https://hrms-frontend-blush.vercel.app
+      - key: FRONTEND_URL
+        value: https://hrms-frontend-blush.vercel.app
+      # Set in Render dashboard (do not commit secrets):
+      # REDIS_URL, EMAIL_*, AWS_*, DEEPSEEK_API_KEY / GEMINI_API_KEY
 
 databases:
   - name: hrms-mongodb

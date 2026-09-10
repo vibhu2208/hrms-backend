@@ -6,6 +6,7 @@
  */
 
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({ requireAllowFlag: true, allowFlag: 'ALLOW_SEED', label: 'seedCompleteSystem' });
 const mongoose = require('mongoose');
 const { connectGlobalDB, getTenantConnection, initializeTenantDatabase } = require('../config/database.config');
 const { getSuperAdmin, getCompanyRegistry, getCompanyTheme } = require('../models/global');

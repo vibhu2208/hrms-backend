@@ -8,13 +8,16 @@ const {
   getComplianceReport
 } = require('../controllers/reportController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 const advancedReportsRoutes = require('./advancedReportsRoutes');
 
-router.use(protect);
-router.use(authorize('admin', 'hr', 'company_admin'));
-
-// Advanced reports routes
+// Advanced reports (have their own protect/tenant/authorize)
 router.use('/', advancedReportsRoutes);
+
+// Classic export/compliance reports
+router.use(protect);
+router.use(tenantMiddleware);
+router.use(authorize('admin', 'hr', 'company_admin'));
 
 router.get('/export/employees', exportEmployees);
 router.get('/export/attendance', exportAttendance);

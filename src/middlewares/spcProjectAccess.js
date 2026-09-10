@@ -13,26 +13,18 @@ class SPCProjectAccessMiddleware {
   static requirePermission(permission) {
     return async (req, res, next) => {
       try {
-        console.log('🔐 SPC Permission Check:');
-        console.log('   Required permission:', permission);
-        console.log('   User role:', req.user?.role);
-        console.log('   User email:', req.user?.email);
-        
         const userRole = req.user.role;
         
         if (!hasSPCPermission(userRole, permission)) {
-          console.log('❌ Permission denied for role:', userRole, 'permission:', permission);
           return res.status(403).json({
             success: false,
             message: 'Insufficient permissions for this action'
           });
         }
         
-        console.log('✅ Permission granted for role:', userRole);
         next();
       } catch (error) {
-        console.error('❌ Permission check error:', error);
-        console.error('❌ Stack trace:', error.stack);
+        console.error('❌ Permission check error:', error.message);
         res.status(500).json({
           success: false,
           message: 'Permission check failed'
@@ -47,17 +39,11 @@ class SPCProjectAccessMiddleware {
   static requireProjectAccess() {
     return async (req, res, next) => {
       try {
-        console.log('🔍 Full req.user object:', JSON.stringify(req.user, null, 2));
-        
         const userId = req.user._id || req.user.id;
         const userRole = req.user.role;
         const companyId = req.user.companyId;
         const projectId = req.params.projectId || req.body.projectId;
-        
-        console.log('🔍 Project Access Check Debug:');
-        console.log('   User ID:', userId);
-        console.log('   User Role:', userRole);
-        console.log('   Company ID:', companyId);
+
         console.log('   Project ID:', projectId);
         
         if (!projectId) {

@@ -1,5 +1,25 @@
 require('dotenv').config();
 
+const { validateEnv } = require('./config/validateEnv');
+validateEnv();
+
+const dns = require('dns');
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (_) {
+  /* Node < 17 */
+}
+
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const morgan = require('morgan');
+const connectDB = require('./config/database');
+const errorHandler = require('./middlewares/errorHandler');
+const { protect } = require('./middlewares/auth');
+const apiConfig = require('./config/api.config');
+
 // Global error handlers to prevent crashes
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled Promise Rejection:', err.message);
@@ -18,14 +38,6 @@ process.on('uncaughtException', (err) => {
     process.exit(1);
   }
 });
-
-const express = require('express');
-const cors = require('cors');
-const morgan = require('morgan');
-const path = require('path');
-const connectDB = require('./config/database');
-const errorHandler = require('./middlewares/errorHandler');
-const apiConfig = require('./config/api.config');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -74,15 +86,11 @@ const approvalWorkflowRoutes = require('./routes/approvalWorkflowRoutes');
 const approvalRoutes = require('./routes/approvalRoutes');
 const employeeProfileRoutes = require('./routes/employeeProfileRoutes');
 const leaveEncashmentRoutes = require('./routes/leaveEncashmentRoutes');
-const advancedReportsRoutes = require('./routes/advancedReportsRoutes');
 const publicDocumentUploadRoutes = require('./routes/publicDocumentUploadRoutes');
 const documentVerificationRoutes = require('./routes/documentVerificationRoutes');
 const hrActivityHistoryRoutes = require('./routes/hrActivityHistoryRoutes');
 const contractRoutes = require('./routes/contractRoutes');
 const spcProjectRoutes = require('./routes/spcProjectRoutesSimple');
-
-// Import tenant middleware
-const { tenantMiddleware } = require('./middlewares/tenantMiddleware');
 
 // Connect to database
 connectDB();
@@ -94,18 +102,54 @@ startCronJobs();
 const app = express();
 
 app.set('etag', false);
+app.set('trust proxy', 1);
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
 
 // Middleware - Use centralized CORS configuration
 app.use(cors(apiConfig.corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+const apiLimiter = rateLimit({
+  windowMs: apiConfig.rateLimit.windowMs,
+  max: apiConfig.rateLimit.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please try again later.' }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: apiConfig.isProduction ? 10 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { success: false, message: 'Too many login attempts, please try again later.' }
+});
+
+const publicLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: apiConfig.isProduction ? 60 : 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please try again later.' }
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/google', authLimiter);
+app.use('/api/public/', publicLimiter);
 
 // Logging middleware
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// Health check route
+// Health check route (liveness)
 app.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
@@ -114,54 +158,44 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Static file serving for uploads
-const uploadsPath = path.join(__dirname, '../uploads');
-const resumesPath = path.join(uploadsPath, 'resumes');
-console.log('📁 Uploads directory path:', uploadsPath);
-console.log('📁 Resumes directory path:', resumesPath);
+// Readiness: verifies MongoDB connectivity
+app.get('/health/ready', async (req, res) => {
+  const mongoose = require('mongoose');
+  const health = {
+    success: true,
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    checks: {}
+  };
 
-// Serve resume files with proper headers and CORS
-app.use('/uploads/resumes', (req, res, next) => {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+  try {
+    const state = mongoose.connection.readyState;
+    if (state === 1 && mongoose.connection.db) {
+      await mongoose.connection.db.admin().ping();
+      health.checks.database = 'ok';
+    } else {
+      health.checks.database = state === 2 ? 'connecting' : 'down';
+      health.status = 'degraded';
+      health.success = false;
+    }
+  } catch (error) {
+    health.checks.database = 'error';
+    health.status = 'degraded';
+    health.success = false;
   }
-  
-  next();
-}, express.static(resumesPath, {
-  setHeaders: (res, filePath) => {
-    // Set appropriate content type
-    if (filePath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'inline'); // Display in browser instead of download
-    }
-    // Cache control
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-  },
-  dotfiles: 'allow',
-  index: false
-}));
 
-// Serve other uploads
-app.use('/uploads', express.static(uploadsPath, {
-  setHeaders: (res, filePath) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    if (filePath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf');
-    }
-  },
-  dotfiles: 'allow',
-  index: false
-}));
+  res.status(health.success ? 200 : 503).json(health);
+});
+
+// Authenticated file serving (replaces public /uploads static)
+const fileRoutes = require('./routes/fileRoutes');
+app.use('/api/files', fileRoutes);
 
 // Public API Routes (no authentication required)
 app.use('/api/public/jobs', publicJobRoutes);
 app.use('/api/public/document-upload', publicDocumentUploadRoutes);
-app.use('/api/candidate-documents', candidateDocumentRoutes);
+app.use('/api/candidate-documents', publicLimiter, candidateDocumentRoutes);
 
 // Protected API Routes (tenant isolation handled within route files)
 app.use('/api/auth', authRoutes);
@@ -174,7 +208,6 @@ app.use('/api/approval', approvalWorkflowRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/employee/profile', employeeProfileRoutes);
 app.use('/api/leave-encashment', leaveEncashmentRoutes);
-app.use('/api/reports', advancedReportsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/work-schedule', workScheduleRoutes);
 app.use('/api/holidays', holidayRoutes);
@@ -207,13 +240,22 @@ app.use('/api/user', userRoutes);
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/manager', managerRoutes);
 app.use('/api/spc-manager', spcManagerRoutes);
-app.use('/api/test', testRoutes);
+if (!apiConfig.isProduction) {
+  app.use('/api/test', testRoutes);
+}
 app.use('/api/resume-pool', resumePoolRoutes);
 app.use('/api/document-verification', documentVerificationRoutes);
 app.use('/api/contracts', contractRoutes);
 app.use('/api/hr-activity-history', hrActivityHistoryRoutes);
 app.use('/api/spc', spcProjectRoutes);
-console.log('🔧 SPC Routes mounted at /api/spc');
+if (apiConfig.isDevelopment) {
+  console.log('🔧 SPC Routes mounted at /api/spc');
+}
+
+// Optional frontend calls — empty stub behind auth
+app.get('/api/tasks/my-tasks', protect, (req, res) => {
+  res.status(200).json({ success: true, data: [] });
+});
 
 // Error handler (must be last)
 app.use(errorHandler);

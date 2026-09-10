@@ -38,11 +38,10 @@ const tenantMiddleware = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('❌ Tenant Middleware Error:', error);
+    console.error('❌ Tenant Middleware Error:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to establish tenant context',
-      error: error.message
+      message: 'Failed to establish tenant context'
     });
   }
 };

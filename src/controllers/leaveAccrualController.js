@@ -39,7 +39,6 @@ exports.getAccrualPolicies = async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .sort({ leaveType: 1 });
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -48,7 +47,6 @@ exports.getAccrualPolicies = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching accrual policies:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -81,14 +79,12 @@ exports.getAccrualPolicy = async (req, res) => {
       .populate('createdBy', 'firstName lastName email');
 
     if (!policy) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Accrual policy not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -96,7 +92,6 @@ exports.getAccrualPolicy = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching accrual policy:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -135,7 +130,6 @@ exports.createAccrualPolicy = async (req, res) => {
     // Check if policy already exists for this leave type
     const existing = await LeaveAccrualPolicy.findOne({ leaveType: policyData.leaveType });
     if (existing) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(400).json({
         success: false,
         message: 'Policy already exists for this leave type'
@@ -149,7 +143,6 @@ exports.createAccrualPolicy = async (req, res) => {
 
     await policy.save();
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(201).json({
       success: true,
@@ -158,7 +151,6 @@ exports.createAccrualPolicy = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating accrual policy:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -197,14 +189,12 @@ exports.updateAccrualPolicy = async (req, res) => {
     ).populate('departments', 'name');
 
     if (!policy) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Accrual policy not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -213,7 +203,6 @@ exports.updateAccrualPolicy = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating accrual policy:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -243,14 +232,12 @@ exports.deleteAccrualPolicy = async (req, res) => {
 
     const policy = await LeaveAccrualPolicy.findByIdAndDelete(id);
     if (!policy) {
-      if (tenantConnection) await tenantConnection.close();
       return res.status(404).json({
         success: false,
         message: 'Accrual policy not found'
       });
     }
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -258,7 +245,6 @@ exports.deleteAccrualPolicy = async (req, res) => {
     });
   } catch (error) {
     console.error('Error deleting accrual policy:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message
@@ -459,7 +445,6 @@ exports.getAccrualHistory = async (req, res) => {
 
     history.sort((a, b) => new Date(b.accrualDate) - new Date(a.accrualDate));
 
-    if (tenantConnection) await tenantConnection.close();
 
     res.status(200).json({
       success: true,
@@ -468,7 +453,6 @@ exports.getAccrualHistory = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching accrual history:', error);
-    if (tenantConnection) await tenantConnection.close();
     res.status(500).json({
       success: false,
       message: error.message

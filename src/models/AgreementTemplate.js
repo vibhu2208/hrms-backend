@@ -185,10 +185,11 @@ const agreementTemplateSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate template ID
+// Generate template ID (use this.constructor so tenant models work)
 agreementTemplateSchema.pre('save', async function(next) {
   if (!this.templateId) {
-    const count = await mongoose.model('AgreementTemplate').countDocuments();
+    const Model = this.constructor;
+    const count = await Model.countDocuments();
     this.templateId = `AGT${String(count + 1).padStart(5, '0')}`;
   }
   next();
@@ -197,7 +198,8 @@ agreementTemplateSchema.pre('save', async function(next) {
 // Ensure only one default template per category
 agreementTemplateSchema.pre('save', async function(next) {
   if (this.isDefault && this.isModified('isDefault')) {
-    await mongoose.model('AgreementTemplate').updateMany(
+    const Model = this.constructor;
+    await Model.updateMany(
       { category: this.category, _id: { $ne: this._id } },
       { isDefault: false }
     );

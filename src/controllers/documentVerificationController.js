@@ -441,7 +441,7 @@ exports.unverifyDocument = async (req, res) => {
           documentName: document.documentName,
           rejectionReason: reason,
           // Hard-coded public upload URL as requested
-          uploadUrl: `http://3.108.172.119/public/upload-documents/${uploadToken.token}`,
+          uploadUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${uploadToken.token}`,
           rejectedDocuments: uploadToken.rejectedDocuments
         });
         

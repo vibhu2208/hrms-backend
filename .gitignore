@@ -96,6 +96,10 @@ credentials.json
 service-account.json
 google-credentials.json
 firebase-admin-key.json
+*CREDENTIALS*
+SEEDED_USERS*
+TCS_CREDENTIALS.md
+SEEDED_USERS_SUMMARY.md
 
 # Temporary files
 tmp/

@@ -795,7 +795,7 @@ exports.updateStage = async (req, res) => {
               });
 
               const tenantId = req.tenant.companyId || req.tenant.clientId;
-              const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+              const uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
 
               // Send offer letter with document link
               const { sendOfferLetterWithDocumentLink } = require('../services/emailService');
@@ -1239,7 +1239,7 @@ exports.moveToOnboarding = async (req, res) => {
 
         const tenantId = req.tenant.companyId || req.tenant.clientId;
         // Hard-coded public upload URL as requested
-        uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+        uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
         console.log(`✅ Upload token generated for ${onboarding.candidateName}: ${uploadUrl}`);
 
         // Send offer letter with document upload link
@@ -1757,7 +1757,7 @@ exports.updateHRCall = async (req, res) => {
               });
 
               const tenantId = req.tenant.companyId || req.tenant.clientId;
-              const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+              const uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
               console.log(`✅ Upload token generated: ${uploadUrl}`);
 
               // Send offer letter with document upload link
@@ -2256,17 +2256,47 @@ exports.sendInterviewEmail = async (req, res) => {
 };
 
 /**
- * Upload and parse resume using Reducto API
+ * Upload and parse resume using Reducto API (with local fallback)
  * @route POST /api/candidates/upload-resume
  */
 exports.uploadResume = async (req, res) => {
   let s3UploadResult = null;
+  let tempFilePath = null;
+
+  const emptyExtracted = {
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    appliedFor: '',
+    currentLocation: '',
+    preferredLocation: '',
+    source: 'resume-upload',
+    experienceYears: null,
+    experienceMonths: null,
+    currentCompany: '',
+    currentDesignation: '',
+    currentCTC: null,
+    expectedCTC: null,
+    noticePeriod: '',
+    skills: [],
+    stage: null,
+    notes: '',
+  };
+
+  const respondWithData = (payload, message, httpStatus = 200) => {
+    return res.status(httpStatus).json({
+      success: httpStatus < 400,
+      message,
+      ...payload,
+    });
+  };
 
   try {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'Resume file is required'
+        message: 'Resume file is required',
       });
     }
 
@@ -2274,182 +2304,219 @@ exports.uploadResume = async (req, res) => {
     const allowedTypes = [
       'application/pdf',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/msword'
+      'application/msword',
     ];
 
-    // Validate file type
-    if (!allowedTypes.includes(file.mimetype)) {
+    if (!allowedTypes.includes(file.mimetype) &&
+        !['.pdf', '.doc', '.docx'].includes(require('path').extname(file.originalname).toLowerCase())) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.'
+        message: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.',
       });
     }
 
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
+    if (file.size > 10 * 1024 * 1024) {
       return res.status(400).json({
         success: false,
-        message: 'File too large. Maximum size is 10MB.'
+        message: 'File too large. Maximum size is 10MB.',
       });
     }
 
     console.log(`Processing resume upload: ${file.originalname} (${file.size} bytes)`);
 
-    // Step 1: Upload file to AWS S3
-    try {
-      let filePath, fileName, mimeType;
-      
-      if (req.file.buffer) {
-        // File is in memory (from multer memory storage)
-        filePath = req.file.buffer;
-        fileName = req.file.originalname;
-        mimeType = req.file.mimetype;
-        
-        // Use uploadFile method for buffer
-        s3UploadResult = await awsS3Service.uploadFile(req.file, 'resumes');
-      } else {
-        // File is on disk (traditional storage)
-        filePath = req.file.path;
-        fileName = req.file.originalname;
-        mimeType = req.file.mimetype;
-        
-        // Use uploadResume method for file path
-        s3UploadResult = await awsS3Service.uploadResume(
-          filePath,
-          fileName,
-          mimeType
-        );
+    // Reuse S3 upload from middleware when available
+    if (file.s3Key) {
+      s3UploadResult = {
+        success: true,
+        key: file.s3Key,
+        url: file.s3Url || file.location,
+        bucket: file.s3Bucket,
+        fileName: file.originalname,
+        size: file.size,
+        uploadedAt: new Date(),
+      };
+    } else {
+      try {
+        if (file.buffer) {
+          s3UploadResult = await awsS3Service.uploadFile(file, 'resumes');
+        } else if (file.path) {
+          s3UploadResult = await awsS3Service.uploadResume(file.path, file.originalname, file.mimetype);
+        }
+      } catch (s3Error) {
+        console.warn('S3 upload skipped/failed, continuing with local parse:', s3Error.message);
+        s3UploadResult = {
+          success: false,
+          key: null,
+          url: null,
+          bucket: null,
+          fileName: file.originalname,
+          size: file.size,
+          uploadedAt: new Date(),
+          localOnly: true,
+        };
       }
-      
-      console.log('✅ Resume uploaded to S3:', s3UploadResult.key);
-    } catch (s3Error) {
-      console.error('❌ S3 upload failed:', s3Error);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to upload resume to storage',
-        error: s3Error.message
-      });
     }
 
-    // Step 2: Extract candidate data using Reducto
-    let extractionResult;
+    // Prepare a local temp file for parsers
+    const fs = require('fs').promises;
+    const os = require('os');
+    const path = require('path');
+
+    if (file.buffer) {
+      tempFilePath = path.join(
+        os.tmpdir(),
+        `resume-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`
+      );
+      await fs.writeFile(tempFilePath, file.buffer);
+    } else {
+      tempFilePath = file.path;
+    }
+
+    let extractionResult = null;
+    let parseSource = 'none';
+
+    // Try Reducto first
     try {
-      let filePathForExtraction;
-      
-      if (req.file.buffer) {
-        // For memory storage, save buffer to temporary file
-        const fs = require('fs').promises;
-        const os = require('os');
-        const path = require('path');
-        
-        const tempDir = os.tmpdir();
-        const tempFileName = `resume-${Date.now()}-${Math.random().toString(36).substring(7)}${path.extname(file.originalname)}`;
-        filePathForExtraction = path.join(tempDir, tempFileName);
-        
-        await fs.writeFile(filePathForExtraction, req.file.buffer);
-        console.log('Temporary file created for extraction:', filePathForExtraction);
+      extractionResult = await reductoService.extractCandidateData(tempFilePath);
+      if (extractionResult?.success) {
+        parseSource = 'reducto';
       } else {
-        // Use existing file path
-        filePathForExtraction = file.path;
-      }
-      
-      extractionResult = await reductoService.extractCandidateData(filePathForExtraction);
-      
-      // Clean up temporary file if created
-      if (req.file.buffer && filePathForExtraction) {
-        try {
-          const fs = require('fs').promises;
-          await fs.unlink(filePathForExtraction);
-          console.log('Temporary file cleaned up');
-        } catch (cleanupError) {
-          console.warn('Failed to clean up temporary file:', cleanupError);
-        }
+        console.warn('Reducto returned unsuccessful result:', extractionResult?.error);
       }
     } catch (extractError) {
-      console.error('Error calling Reducto service:', extractError);
+      console.warn('Reducto extraction failed:', extractError.message);
+    }
 
-      // If S3 upload succeeded but parsing failed, we still have the file stored
-      return res.status(500).json({
-        success: false,
-        message: 'Resume uploaded to storage but failed to extract data',
-        error: extractError.message || 'Unknown error during extraction',
-        s3File: {
-          key: s3UploadResult.key,
-          url: s3UploadResult.url,
-          bucket: s3UploadResult.bucket
+    // Local fallback parser
+    if (!extractionResult?.success) {
+      try {
+        const resumeParser = require('../utils/resumeParser');
+        const ext = path.extname(file.originalname).toLowerCase();
+        let rawText = '';
+        if (ext === '.pdf') {
+          rawText = await resumeParser.parsePDF(tempFilePath);
+        } else if (ext === '.docx' || ext === '.doc') {
+          rawText = await resumeParser.parseDOCX(tempFilePath);
         }
-      });
+
+        const emails = resumeParser.extractEmails(rawText);
+        const phones = resumeParser.extractPhones(rawText);
+        const skills = resumeParser.extractSkills(rawText);
+        const experienceYears = resumeParser.extractExperience(rawText);
+
+        // Best-effort name from first non-empty line
+        const firstLine = (rawText.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || '').replace(/\s+/g, ' ');
+        const nameParts = firstLine.split(' ').filter(Boolean);
+
+        extractionResult = {
+          success: true,
+          data: {
+            ...emptyExtracted,
+            firstName: nameParts[0] || '',
+            lastName: nameParts.slice(1).join(' ') || '',
+            email: emails[0] || '',
+            phone: phones[0] || '',
+            skills,
+            experienceYears,
+            notes: 'Parsed with local fallback parser. Please review fields.',
+          },
+          rawText,
+          confidence: { overall: 0.4 },
+          metadata: { source: 'local-parser' },
+        };
+        parseSource = 'local-parser';
+      } catch (localErr) {
+        console.warn('Local resume parse failed:', localErr.message);
+        extractionResult = {
+          success: true,
+          data: {
+            ...emptyExtracted,
+            notes: 'Automatic parsing failed. Enter candidate details manually.',
+          },
+          rawText: '',
+          confidence: {},
+          metadata: { source: 'manual-fallback', error: localErr.message },
+        };
+        parseSource = 'manual-fallback';
+      }
     }
 
-    if (!extractionResult.success) {
-      console.error('Reducto extraction failed:', extractionResult.error);
-      console.error('Reducto metadata:', extractionResult.metadata);
-
-      return res.status(500).json({
-        success: false,
-        message: 'Resume uploaded to storage but failed to extract data',
-        error: extractionResult.error || 'Reducto API extraction failed',
-        s3File: {
-          key: s3UploadResult.key,
-          url: s3UploadResult.url,
-          bucket: s3UploadResult.bucket
-        },
-        details: extractionResult.metadata?.responseData || extractionResult.metadata
-      });
-    }
-
-    // Clean up temporary file
-    try {
-      const fs = require('fs').promises;
-      
-      // Only clean up if file exists on disk (not memory storage)
-      if (file.path && !req.file.buffer) {
+    // Cleanup temp file created from buffer
+    if (file.buffer && tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (_) {
+        /* ignore */
+      }
+    } else if (file.path && !file.buffer) {
+      try {
         await fs.unlink(file.path);
-        console.log('Temporary file cleaned up');
+      } catch (_) {
+        /* ignore */
       }
-    } catch (cleanupError) {
-      console.warn('Failed to clean up temporary file:', cleanupError);
     }
 
-    res.status(200).json({
-      success: true,
-      message: 'Resume uploaded to storage and parsed successfully',
-      data: {
-        extractedData: extractionResult.data,
-        rawText: extractionResult.rawText,
-        confidence: extractionResult.confidence,
-        metadata: extractionResult.metadata,
-        s3File: {
-          key: s3UploadResult.key,
-          url: s3UploadResult.url,
-          bucket: s3UploadResult.bucket,
-          fileName: s3UploadResult.fileName,
-          size: s3UploadResult.size,
-          uploadedAt: s3UploadResult.uploadedAt
-        }
-      }
-    });
+    const message =
+      parseSource === 'reducto'
+        ? 'Resume uploaded and parsed successfully'
+        : parseSource === 'local-parser'
+          ? 'Resume uploaded; parsed with local fallback'
+          : 'Resume received; please complete details manually';
 
+    return respondWithData(
+      {
+        data: {
+          extractedData: extractionResult.data || emptyExtracted,
+          rawText: extractionResult.rawText || '',
+          confidence: extractionResult.confidence || {},
+          metadata: {
+            ...(extractionResult.metadata || {}),
+            source: parseSource,
+          },
+          s3File: s3UploadResult
+            ? {
+                key: s3UploadResult.key,
+                url: s3UploadResult.url,
+                bucket: s3UploadResult.bucket,
+                fileName: s3UploadResult.fileName || file.originalname,
+                size: s3UploadResult.size || file.size,
+                uploadedAt: s3UploadResult.uploadedAt,
+              }
+            : null,
+        },
+      },
+      message,
+      200
+    );
   } catch (error) {
     console.error('Error in resume upload:', error);
 
-    // Clean up temporary file on error
-    if (req.file && req.file.path && !req.file.buffer) {
+    if (tempFilePath && req.file?.buffer) {
       try {
         const fs = require('fs').promises;
-        await fs.unlink(req.file.path);
-        console.log('Temporary file cleaned up after error');
-      } catch (cleanupError) {
-        console.warn('Failed to clean up temporary file:', cleanupError);
+        await fs.unlink(tempFilePath);
+      } catch (_) {
+        /* ignore */
       }
     }
 
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during resume processing',
-      error: error.message
-    });
+    // Never hard-fail the HR UI — open manual entry form
+    return respondWithData(
+      {
+        data: {
+          extractedData: {
+            ...emptyExtracted,
+            notes: error.message || 'Resume processing failed. Enter details manually.',
+          },
+          rawText: '',
+          confidence: {},
+          metadata: { source: 'error-fallback' },
+          s3File: s3UploadResult,
+        },
+      },
+      'Resume processing failed; you can enter details manually',
+      200
+    );
   }
 };
 
@@ -3293,7 +3360,7 @@ exports.moveCandidateToSection = async (req, res) => {
             });
 
             const tenantId = req.tenant.companyId || req.tenant.clientId;
-            const uploadUrl = `http://3.108.172.119/public/upload-documents/${token}?tenantId=${tenantId}`;
+            const uploadUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/public/upload-documents/${token}?tenantId=${tenantId}`;
             responseData.uploadUrl = uploadUrl;
 
             // Send offer letter with document link

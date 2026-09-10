@@ -8,7 +8,9 @@ const {
   updateEmployee,
   resetEmployeePassword,
   deleteEmployee,
-  getEmployeeStats
+  getEmployeeStats,
+  getMyProfile,
+  getMyProfileStats
 } = require('../controllers/employeeController');
 const {
   validateBulkEmployees,
@@ -36,17 +38,21 @@ router.post('/google-sheets/fetch', authorize('admin', 'hr'), fetchGoogleSheetDa
 router.get('/google-sheets/auth-url', authorize('admin', 'hr'), getAuthUrl);
 router.get('/google-sheets/callback', handleOAuthCallback);
 
-router.get('/stats', authorize('admin', 'hr'), getEmployeeStats);
-router.get('/for-offboarding', authorize('admin', 'hr'), getEmployeesForOffboarding);
-router.route('/')
-  .get(getEmployees)
-  .post(authorize('admin', 'hr'), createEmployee);
+// IMPORTANT: static paths before /:id (otherwise "profile" is treated as an ObjectId → 500)
+router.get('/profile', getMyProfile);
+router.get('/profile/stats', getMyProfileStats);
 
-router.put('/:id/reset-password', authorize('admin', 'hr'), resetEmployeePassword);
+router.get('/stats', authorize('admin', 'hr', 'company_admin'), getEmployeeStats);
+router.get('/for-offboarding', authorize('admin', 'hr', 'company_admin'), getEmployeesForOffboarding);
+router.route('/')
+  .get(authorize('admin', 'hr', 'company_admin', 'manager'), getEmployees)
+  .post(authorize('admin', 'hr', 'company_admin'), createEmployee);
+
+router.put('/:id/reset-password', authorize('admin', 'hr', 'company_admin'), resetEmployeePassword);
 
 router.route('/:id')
-  .get(getEmployee)
-  .put(authorize('admin', 'hr'), updateEmployee)
-  .delete(authorize('admin'), deleteEmployee);
+  .get(authorize('admin', 'hr', 'company_admin', 'manager'), getEmployee)
+  .put(authorize('admin', 'hr', 'company_admin'), updateEmployee)
+  .delete(authorize('admin', 'company_admin'), deleteEmployee);
 
 module.exports = router;

@@ -470,9 +470,7 @@ exports.getTeamStats = async (req, res) => {
       message: error.message
     });
   } finally {
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
+    // Do not close cached tenant connections
   }
 };
 
@@ -720,8 +718,7 @@ exports.rejectLeave = async (req, res) => {
 exports.getManagerProjects = async (req, res) => {
   try {
     const managerId = req.user._id || req.user.id;
-    const managerEmail = req.user.email;
-    const companyId = req.companyId;
+    const companyId = req.companyId || req.user.companyId;
 
     if (!companyId) {
       return res.status(400).json({
@@ -730,168 +727,44 @@ exports.getManagerProjects = async (req, res) => {
       });
     }
 
-    console.log(`📊 Fetching projects for manager: ${managerEmail}, company: ${companyId}`);
-
-    // Use the same approach as SPC controller - fixed tenant database
-    const tenantDbName = 'tenant_696b515db6c9fd5fd51aed1c';
-    
-    // Get tenant connection directly (same as SPC controller)
-    const connection = await getTenantConnection(tenantDbName);
-    
-    // Use SPC project structure
+    const connection = await getTenantConnection(companyId);
     const Project = connection.model('Project', new mongoose.Schema({}, { strict: false }), 'projects');
-
-    // Find projects where manager is assigned as manager, HR, or creator (SPC system)
     const managerIdStr = managerId.toString();
-    
-    try {
-      // Debug: Check what we're actually connected to
-      console.log('🔍 Database connection debugging...');
-      console.log('🔍 tenantDbName:', tenantDbName);
-      
-      // Check if we can access the database
-      const dbStats = await connection.db.stats();
-      console.log('🔍 Database stats:', dbStats);
-      
-      // List all collections
-      const collections = await connection.db.listCollections().toArray();
-      console.log('🔍 Available collections:', collections.map(c => c.name));
-      
-      // Check projects collection specifically
-      const projectsCount = await Project.countDocuments();
-      console.log('🔍 Projects collection count:', projectsCount);
-      
-      if (projectsCount > 0) {
-        console.log('🔍 Examining project structure...');
-        const sampleProject = await Project.findOne({});
-        console.log('🔍 Sample project structure:', {
-          _id: sampleProject._id,
-          name: sampleProject.name,
-          assignedManagers: sampleProject.assignedManagers,
-          assignedHRs: sampleProject.assignedHRs,
-          createdBy: sampleProject.createdBy,
-          isActive: sampleProject.isActive,
-          allFields: Object.keys(sampleProject)
-        });
-        
-        // Check if manager ID matches any field
-        console.log('🔍 Checking manager ID match...');
-        const managerIdStr = managerId.toString();
-        console.log('🔍 Looking for manager ID:', managerIdStr);
-        
-        // Check each field for the manager ID
-        const fieldsToCheck = ['assignedManagers', 'assignedHRs', 'createdBy'];
-        for (const field of fieldsToCheck) {
-          if (sampleProject[field]) {
-            const fieldValues = Array.isArray(sampleProject[field]) ? sampleProject[field] : [sampleProject[field]];
-            const hasManager = fieldValues.some(val => 
-              val.toString() === managerIdStr || val === managerId
-            );
-            console.log(`🔍 ${field}:`, sampleProject[field], 'contains manager:', hasManager);
-          }
-        }
-      } else {
-        console.log('❌ NO PROJECTS FOUND in this database!');
-        console.log('🔍 This is the issue - wrong database or collection');
-      }
-      
-      // Try simpler queries one by one to debug
-      console.log('🔍 Testing individual queries...');
-      
-      // Test 1: Direct ObjectId match (without isActive filter)
-      console.log('🔍 Testing Query 1 in detail...');
-      console.log('🔍 managerId:', managerId, 'type:', typeof managerId);
-      console.log('🔍 managerId.toString():', managerId.toString());
-      
-      const query1 = { assignedManagers: managerId };
-      console.log('🔍 Query 1 object:', query1);
-      
-      // Try to find all projects first to see their structure
-      const allProjects = await Project.find({});
-      console.log('🔍 All projects found:', allProjects.length);
-      allProjects.forEach((project, index) => {
-        console.log(`🔍 Project ${index + 1}:`, {
-          name: project.name,
-          assignedManagers: project.assignedManagers,
-          assignedManagersTypes: project.assignedManagers?.map(id => typeof id),
-          assignedManagersStrings: project.assignedManagers?.map(id => id.toString())
-        });
-      });
-      
-      const result1 = await Project.find(query1);
-      console.log('🔍 Query 1 (ObjectId match):', result1.length, 'projects');
-      
-      // Test 2: String match (without isActive filter)
-      const query2 = { assignedManagers: managerIdStr };
-      const result2 = await Project.find(query2);
-      console.log('🔍 Query 2 (String match):', result2.length, 'projects');
-      
-      // Test 3: HR ObjectId match (without isActive filter)
-      const query3 = { assignedHRs: managerId };
-      const result3 = await Project.find(query3);
-      console.log('🔍 Query 3 (HR ObjectId):', result3.length, 'projects');
-      
-      // Test 4: HR String match (without isActive filter)
-      const query4 = { assignedHRs: managerIdStr };
-      const result4 = await Project.find(query4);
-      console.log('🔍 Query 4 (HR String):', result4.length, 'projects');
-      
-      // Test 5: createdBy ObjectId match (without isActive filter)
-      const query5 = { createdBy: managerId };
-      const result5 = await Project.find(query5);
-      console.log('🔍 Query 5 (createdBy ObjectId):', result5.length, 'projects');
-      
-      // Test 6: createdBy String match (without isActive filter)
-      const query6 = { createdBy: managerIdStr };
-      const result6 = await Project.find(query6);
-      console.log('🔍 Query 6 (createdBy String):', result6.length, 'projects');
-      
-      // Combine all results
-      const allResults = [...result1, ...result2, ...result3, ...result4, ...result5, ...result6];
-      const uniqueProjects = allResults.filter((project, index, self) => 
-        index === self.findIndex(p => p._id.toString() === project._id.toString())
-      );
-      
-      console.log('🔍 Combined unique projects:', uniqueProjects.length);
-      
-      const projects = uniqueProjects;
 
-      console.log('🔍 Final query completed, found projects:', projects.length);
+    const projects = await Project.find({
+      $or: [
+        { assignedManagers: managerId },
+        { assignedManagers: managerIdStr },
+        { assignedHRs: managerId },
+        { assignedHRs: managerIdStr },
+        { createdBy: managerId },
+        { createdBy: managerIdStr }
+      ]
+    }).lean();
 
-      console.log('🔍 Found projects for manager:', projects.length);
-      projects.forEach(project => {
-        console.log('🔍 Project:', project.name, 'assignedManagers:', project.assignedManagers, 'assignedHRs:', project.assignedHRs);
-      });
+    const enrichedProjects = projects.map(project => {
+      const isAssignedManager = project.assignedManagers &&
+        project.assignedManagers.some(id => id.toString() === managerIdStr || id === managerId);
+      const isAssignedHR = project.assignedHRs &&
+        project.assignedHRs.some(id => id.toString() === managerIdStr || id === managerId);
+      const isCreator = project.createdBy &&
+        (project.createdBy.toString() === managerIdStr || project.createdBy === managerId);
 
-      // Enrich project data with manager's role
-      const enrichedProjects = projects.map(project => {
-        const managerIdStr = managerId.toString();
-        const isAssignedManager = project.assignedManagers && 
-          project.assignedManagers.some(id => id.toString() === managerIdStr || id === managerId);
-        const isAssignedHR = project.assignedHRs && 
-          project.assignedHRs.some(id => id.toString() === managerIdStr || id === managerId);
-        const isCreator = project.createdBy && 
-          (project.createdBy.toString() === managerIdStr || project.createdBy === managerId);
+      return {
+        ...project,
+        userRole: isAssignedManager ? 'manager' : isAssignedHR ? 'hr' : 'creator',
+        canEdit: isAssignedManager || isCreator,
+        canViewTeam: true
+      };
+    });
 
-        return {
-          ...project,
-          userRole: isAssignedManager ? 'manager' : isAssignedHR ? 'hr' : 'creator',
-          canEdit: isAssignedManager || isCreator,
-          canViewTeam: true
-        };
-      });
-
-      res.status(200).json({
-        success: true,
-        count: enrichedProjects.length,
-        data: enrichedProjects
-      });
-    } catch (queryError) {
-      console.error('❌ Database query error:', queryError);
-      throw queryError;
-    }
+    res.status(200).json({
+      success: true,
+      count: enrichedProjects.length,
+      data: enrichedProjects
+    });
   } catch (error) {
-    console.error('Error fetching manager projects:', error);
+    console.error('Error fetching manager projects:', error.message);
     res.status(500).json({
       success: false,
       message: error.message
@@ -899,18 +772,14 @@ exports.getManagerProjects = async (req, res) => {
   }
 };
 
-// @desc    Get detailed project information for manager's project
-// @route   GET /api/manager/projects/:id
-// @access  Private (Manager only)
 exports.getManagerProjectDetails = async (req, res) => {
   let tenantConnection = null;
 
   try {
     const { id } = req.params;
     const managerId = req.user._id || req.user.id;
-    const companyId = req.companyId;
-
-    console.log('🔍 Manager Project Details called:', { id, managerId, companyId, user: req.user.email });
+    const companyId = req.companyId || req.user.companyId;
+    const managerIdStr = managerId.toString();
 
     if (!companyId) {
       return res.status(400).json({
@@ -920,16 +789,9 @@ exports.getManagerProjectDetails = async (req, res) => {
     }
 
     tenantConnection = await getTenantConnection(companyId);
-    
-    // Use SPC project structure
+
     const Project = tenantConnection.model('Project', new mongoose.Schema({}, { strict: false }), 'projects');
-    const TenantUser = tenantConnection.model('User', TenantUserSchema);
-
-    console.log('🔍 Looking for project with ID:', id);
-
     const project = await Project.findById(id).lean();
-
-    console.log('🔍 Found project:', project);
 
     if (!project) {
       return res.status(404).json({
@@ -938,27 +800,14 @@ exports.getManagerProjectDetails = async (req, res) => {
       });
     }
 
-    // Check if manager has access to this project (SPC system)
-    const isAssignedManager = project.assignedManagers && 
-      project.assignedManagers.some(managerId => 
-        managerId.toString() === managerId.toString()
-      );
+    const isAssignedManager = project.assignedManagers &&
+      project.assignedManagers.some(idVal => idVal.toString() === managerIdStr);
 
-    const isAssignedHR = project.assignedHRs && 
-      project.assignedHRs.some(hrId => 
-        hrId.toString() === managerId.toString()
-      );
+    const isAssignedHR = project.assignedHRs &&
+      project.assignedHRs.some(idVal => idVal.toString() === managerIdStr);
 
-    const isCreator = project.createdBy && 
-      project.createdBy.toString() === managerId.toString();
-
-    console.log('🔍 Manager access check:', { 
-      isAssignedManager, 
-      isAssignedHR, 
-      isCreator,
-      assignedManagers: project.assignedManagers,
-      assignedHRs: project.assignedHRs
-    });
+    const isCreator = project.createdBy &&
+      project.createdBy.toString() === managerIdStr;
 
     if (!isAssignedManager && !isAssignedHR && !isCreator) {
       return res.status(403).json({
@@ -967,22 +816,18 @@ exports.getManagerProjectDetails = async (req, res) => {
       });
     }
 
-    // Return the project data directly for SPC system
     res.status(200).json({
       success: true,
       data: project
     });
   } catch (error) {
-    console.error('Error fetching manager project details:', error);
+    console.error('Error fetching manager project details:', error.message);
     res.status(500).json({
       success: false,
       message: error.message
     });
-  } finally {
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
   }
+  // Do not close cached tenant connections
 };
 
 // @desc    Assign project to manager
@@ -1037,14 +882,10 @@ exports.assignProject = async (req, res) => {
       data: project
     });
   } catch (error) {
-    console.error('Error assigning project:', error);
+    console.error('Error assigning project:', error.message);
     res.status(500).json({
       success: false,
       message: error.message
     });
-  } finally {
-    if (tenantConnection) {
-      await tenantConnection.close();
-    }
   }
 };

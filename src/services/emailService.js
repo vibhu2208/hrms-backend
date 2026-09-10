@@ -301,7 +301,7 @@ const sendOnboardingEmail = async ({
       </div>
       
       <p style="text-align: center;">
-        <a href="${process.env.FRONTEND_URL || 'http://3.108.172.119:8080'}/login/spc-management" class="cta-button">
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login/spc-management" class="cta-button">
           👉 Login to HRMS Portal
         </a>
       </p>
@@ -1795,7 +1795,7 @@ const sendCompanyAdminCredentials = async ({
   companyName,
   adminEmail,
   adminPassword,
-  loginUrl = process.env.FRONTEND_URL || 'http://3.108.172.119:8080'
+  loginUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
 }) => {
   try {
     const transporter = createTransporter();

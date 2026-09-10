@@ -10,8 +10,10 @@ const {
   deleteDocument
 } = require('../controllers/documentController');
 const { protect, authorize } = require('../middlewares/auth');
+const { tenantMiddleware } = require('../middlewares/tenantMiddleware');
 
 router.use(protect);
+router.use(tenantMiddleware);
 
 router.get('/expiring', authorize('admin', 'hr'), getExpiringDocuments);
 

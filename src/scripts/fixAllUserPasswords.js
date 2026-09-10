@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
 require('dotenv').config();
+require('../utils/scriptSafety').assertSafeToMutate({
+  requireAllowFlag: true,
+  allowFlag: 'ALLOW_SEED',
+  label: 'fixAllUserPasswords'
+});
 
 async function fixAllUserPasswords() {
   try {
